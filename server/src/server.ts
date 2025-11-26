@@ -154,13 +154,14 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
             } else if (v.contrato) {
                 status = contratosEmAviso.has(v.contrato.ID_CONTRATO) ? 'Em Aviso Prévio' : 'Ocupada';
             } else if (v.reserva) {
+                // Safely handle potential array or object response from Prisma includes
                 const res = v.reserva as any;
-                if (Array.isArray(res) && res.length > 0) {
+                const hasReserva = Array.isArray(res) ? res.length > 0 : !!res;
+                
+                if (hasReserva) {
                     status = 'Reservada';
-                    reservadaPara = res[0].ID_ATENDIMENTO;
-                } else if (!Array.isArray(res)) {
-                    status = 'Reservada';
-                    reservadaPara = res.ID_ATENDIMENTO;
+                    const reservaObj = Array.isArray(res) ? res[0] : res;
+                    reservadaPara = reservaObj.ID_ATENDIMENTO;
                 }
             }
 
