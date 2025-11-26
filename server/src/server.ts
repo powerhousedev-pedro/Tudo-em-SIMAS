@@ -46,7 +46,8 @@ const getModel = (entity: string): any => {
         'visitas': prisma.visita, 'solicitação-de-pesquisa': prisma.solicitacaoPesquisa,
         'pesquisa': prisma.pesquisa, 'nomeação': prisma.nomeacao, 'cargo-comissionado': prisma.cargoComissionado,
         'exercício': prisma.exercicio, 'reservas': prisma.reserva, 'contrato_historico': prisma.contratoHistorico,
-        'alocacao_historico': prisma.alocacaoHistorico, 'inativos': prisma.inativo, 'auditoria': prisma.auditoria
+        'alocacao_historico': prisma.alocacaoHistorico, 'inativos': prisma.inativo, 'auditoria': prisma.auditoria,
+        'usuarios': prisma.usuario // Added map for users
     };
     return map[entity];
 };
@@ -61,7 +62,8 @@ const getPKField = (entity: string) => {
         'solicitação-de-pesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
         'nomeação': 'ID_NOMEACAO', 'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
         'exercício': 'ID_EXERCICIO', 'reservas': 'ID_RESERVA', 'contrato_historico': 'ID_HISTORICO_CONTRATO',
-        'alocacao_historico': 'ID_HISTORICO_ALOCACAO', 'inativos': 'ID_INATIVO'
+        'alocacao_historico': 'ID_HISTORICO_ALOCACAO', 'inativos': 'ID_INATIVO',
+        'usuarios': 'usuario'
     };
     return pkMap[entity] || 'id';
 };
@@ -98,6 +100,109 @@ app.post('/api/auth/login', async (req, res) => {
 
   const token = jwt.sign({ usuario: user.usuario, papel: user.papel, isGerente: user.isGerente }, JWT_SECRET, { expiresIn: '8h' });
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
+});
+
+// --- USER MANAGEMENT ROUTES ---
+
+// GET USERS (List based on role)
+app.get('/api/usuarios', authenticateToken, async (req: any, res) => {
+    try {
+        let whereClause = {};
+        
+        // If not COORDENAÇÃO, restrict to same role
+        if (req.user.papel !== 'COORDENAÇÃO') {
+            whereClause = { papel: req.user.papel };
+        }
+
+        const users = await prisma.usuario.findMany({
+            where: whereClause,
+            select: {
+                usuario: true,
+                papel: true,
+                isGerente: true
+                // Never select password
+            }
+        });
+        res.json(users);
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// CREATE USER
+app.post('/api/usuarios', authenticateToken, async (req: any, res) => {
+    // Only COORDENAÇÃO or Gerentes can add users
+    if (req.user.papel !== 'COORDENAÇÃO' && !req.user.isGerente) {
+        return res.status(403).json({ success: false, message: 'Sem permissão para criar usuários.' });
+    }
+
+    const { usuario, senha, papel, isGerente } = req.body;
+
+    if (!usuario || !senha || !papel) {
+        return res.status(400).json({ success: false, message: 'Campos obrigatórios faltando.' });
+    }
+
+    // Restriction: Non-coord managers can only create users for their own department
+    if (req.user.papel !== 'COORDENAÇÃO' && papel !== req.user.papel) {
+        return res.status(403).json({ success: false, message: 'Você só pode criar usuários para o seu setor.' });
+    }
+
+    try {
+        const existing = await prisma.usuario.findUnique({ where: { usuario } });
+        if (existing) return res.status(400).json({ success: false, message: 'Usuário já existe.' });
+
+        const hashedPassword = await bcrypt.hash(senha, 10);
+        
+        await prisma.usuario.create({
+            data: {
+                usuario,
+                senha: hashedPassword,
+                papel,
+                isGerente: Boolean(isGerente)
+            }
+        });
+
+        res.json({ success: true, message: 'Usuário criado com sucesso.' });
+    } catch (e: any) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// DELETE USER
+app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) => {
+    const targetUser = req.params.usuarioId;
+    const requester = req.user;
+
+    if (!requester.isGerente && requester.papel !== 'COORDENAÇÃO') {
+        return res.status(403).json({ success: false, message: 'Permissão negada.' });
+    }
+
+    if (targetUser === requester.usuario) {
+        return res.status(400).json({ success: false, message: 'Você não pode excluir a si mesmo.' });
+    }
+
+    try {
+        const userToDelete = await prisma.usuario.findUnique({ where: { usuario: targetUser } });
+        if (!userToDelete) {
+            return res.status(404).json({ success: false, message: 'Usuário não encontrado.' });
+        }
+
+        // Scope Check: Non-coord managers can only delete from their department
+        if (requester.papel !== 'COORDENAÇÃO' && userToDelete.papel !== requester.papel) {
+            return res.status(403).json({ success: false, message: 'Você não pode excluir usuários de outros setores.' });
+        }
+
+        // Hierarchy Check: Only COORDENAÇÃO can delete other managers
+        if (userToDelete.isGerente && requester.papel !== 'COORDENAÇÃO') {
+            return res.status(403).json({ success: false, message: 'Apenas a Coordenação pode excluir gerentes.' });
+        }
+
+        await prisma.usuario.delete({ where: { usuario: targetUser } });
+        res.json({ success: true, message: 'Usuário excluído com sucesso.' });
+
+    } catch (e: any) {
+        res.status(500).json({ success: false, message: e.message });
+    }
 });
 
 // GENERIC GET

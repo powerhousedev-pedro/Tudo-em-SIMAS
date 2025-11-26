@@ -86,6 +86,18 @@ export const validation = {
 
   // --- FORMATTING (Display) ---
 
+  formatDate: (value: any) => {
+    if (!value) return 'N/A';
+    try {
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return 'N/A';
+      // Use UTC to avoid timezone shifts when displaying simple dates
+      return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    } catch (e) {
+      return 'N/A';
+    }
+  },
+
   formatCPF: (value: string) => {
     if (!value) return "";
     const padded = value.toString().replace(/\D/g, "").padStart(11, '0');
