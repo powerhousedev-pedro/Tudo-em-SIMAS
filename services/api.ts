@@ -26,10 +26,13 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
     
-    if (response.status === 401) {
-       localStorage.removeItem(TOKEN_KEY);
-       window.location.href = '#/login';
-       throw new Error('Sessão expirada');
+    if (response.status === 401 || response.status === 403) {
+        // Handle both Unauthorized and Forbidden by checking if it's a session issue
+        if (method === 'GET' && response.status === 403) {
+             localStorage.removeItem(TOKEN_KEY);
+             window.location.href = '#/login';
+             throw new Error('Sessão expirada');
+        }
     }
 
     if (!response.ok) {
@@ -44,27 +47,8 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
   }
 }
 
-// Helper to enrich data on client-side
+// Helper to enrich data on client-side (Now significantly reduced for VAGAS)
 const enrichEntityData = async (entityName: string, data: any[]) => {
-    if (entityName === 'VAGAS') {
-        const [lotacoes, cargos, contratos] = await Promise.all([
-            api.fetchEntity('LOTAÇÕES'), 
-            api.fetchEntity('CARGOS'), 
-            api.fetchEntity('CONTRATO')
-        ]);
-        
-        const lotacaoMap = new Map(lotacoes.map((l: any) => [l.ID_LOTACAO, l.LOTACAO]));
-        const cargoMap = new Map(cargos.map((c: any) => [c.ID_CARGO, c.NOME_CARGO]));
-        const occupiedSet = new Set(contratos.map((c: any) => c.ID_VAGA));
-        
-        return data.map(v => ({
-            ...v,
-            LOTACAO_NOME: lotacaoMap.get(v.ID_LOTACAO) || 'N/A',
-            CARGO_NOME: cargoMap.get(v.ID_CARGO) || 'N/A',
-            STATUS_VAGA: v.BLOQUEADA ? 'Bloqueada' : (occupiedSet.has(v.ID_VAGA) ? 'Ocupada' : 'Disponível')
-        }));
-    }
-    
     if (entityName === 'CONTRATO') {
         const [pessoas, funcoes] = await Promise.all([
             api.fetchEntity('PESSOA'), 
@@ -80,7 +64,6 @@ const enrichEntityData = async (entityName: string, data: any[]) => {
         }));
     }
     
-    // Additional enrichment for other entities can be added here
     if (entityName === 'SERVIDOR') {
        const [pessoas, cargos] = await Promise.all([
             api.fetchEntity('PESSOA'),
@@ -158,7 +141,12 @@ export const api = {
 
   getRevisoesPendentes: async () => {
     const data = await request('/atendimento');
+    // Backend might return empty array if table empty
+    if (!Array.isArray(data)) return [];
+    
     const pending = data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
+    if (pending.length === 0) return [];
+
     const pessoas = await api.fetchEntity('PESSOA');
     const pessoaMap = new Map(pessoas.map((p: any) => [p.CPF, p.NOME]));
     return pending.map((p: any) => ({ 
@@ -200,19 +188,45 @@ export const api = {
   },
 
   executeAction: async (idAtendimento: string, data: any) => {
-      // 1. Create the target record (Server side logic is triggered via generic CREATE)
       const atd = (await api.fetchEntity('ATENDIMENTO')).find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
       
-      if (atd && atd.TIPO_DE_ACAO === 'CRIAR') {
+      if (!atd) throw new Error("Atendimento não encontrado");
+
+      // 1. Execute Specific Action
+      if (atd.TIPO_DE_ACAO === 'INATIVAR' && atd.ENTIDADE_ALVO === 'SERVIDOR') {
+          // Call specialized endpoint
+          await request('/servidores/inativar', 'POST', data);
+      } else if (atd.TIPO_DE_ACAO === 'EDITAR' && atd.ENTIDADE_ALVO === 'CONTRATO') {
+          // Specific flow for Contract Change/Renewal: Archive old -> Create new
+          // First, archive the active contract for this person
+          await request('/contratos/arquivar', 'POST', { 
+              CPF: data.CPF, 
+              MOTIVO: atd.TIPO_PEDIDO 
+          });
+          
+          // Then create the new one (using standard create endpoint which handles reserve closing logic too)
+          // Ensure ID is generated for new contract
+          if (!data.ID_CONTRATO) data.ID_CONTRATO = 'CTT' + Date.now(); // Fallback ID gen if not provided
+          await api.createRecord('CONTRATO', data);
+
+      } else if (atd.TIPO_DE_ACAO === 'CRIAR') {
+          // Uses specific logic in backend if mapped (e.g., contrato, alocacao) or generic
           await api.createRecord(atd.ENTIDADE_ALVO, data);
-      } else if (atd && atd.TIPO_DE_ACAO === 'INATIVAR') {
-          // Specific endpoint could be better, but generic update works if mapped correctly
-          // For now, we assume INATIVAR implies moving to history which needs specific backend logic
-          // Or simple status update:
-          if (atd.ENTIDADE_ALVO === 'SERVIDOR') {
-             // This specific case might need a custom endpoint or robust create logic for 'INATIVOS'
-             // For simplicity in this refactor, we assume generic create on INATIVOS table if data is correct
-             await api.createRecord('INATIVOS', data);
+      } else {
+          // Generic Update/Edit Actions
+          if (atd.TIPO_DE_ACAO === 'EDITAR' && data.ID_ALOCACAO) {
+               // Use the Create endpoint for allocation because it handles versioning
+               await api.createRecord('ALOCACAO', data); 
+          } else {
+               // Fallback generic update
+               const config = {
+                   'CONTRATO': 'ID_CONTRATO'
+                   // Add others if needed
+               }[atd.ENTIDADE_ALVO];
+               
+               if (config && data[config]) {
+                   await api.updateRecord(atd.ENTIDADE_ALVO, config, data[config], data);
+               }
           }
       }
       
@@ -223,13 +237,12 @@ export const api = {
   },
   
   getReportData: async (reportName: string): Promise<ReportData> => {
-    // In a real app, these aggregations should be server-side endpoints (e.g., /api/reports/painel-vagas)
-    // For this refactor, we maintain client-side aggregation to match current backend capabilities
+    // Client-side aggregation for reports
     if (reportName === 'painelVagas') {
         const vagas = await api.fetchEntity('VAGAS');
         
         const quantitativo = vagas.map((v: any) => ({
-            VINCULACAO: 'Geral', // Real data would come from joined Lotacao
+            VINCULACAO: v.LOTACAO_NOME.includes('CRAS') ? 'Proteção Básica' : 'Proteção Especial', // Simplified logic
             LOTACAO: v.LOTACAO_NOME,
             CARGO: v.CARGO_NOME,
             DETALHES: v.STATUS_VAGA
@@ -237,10 +250,10 @@ export const api = {
 
         return { 
             panorama: vagas,
-            quantitativo: quantitativo // Simplified aggregation
+            quantitativo: quantitativo 
         };
     }
-    // Implement other reports similarly or fetch generic data
+    // Return empty structure for others to avoid crash, assuming components handle empty states
     return {};
   }
 };

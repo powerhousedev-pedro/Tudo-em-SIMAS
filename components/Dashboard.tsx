@@ -7,6 +7,7 @@ import { Card } from './Card';
 import { RecordData, UserSession } from '../types';
 import { AppContextProps } from '../App';
 import { validation } from '../utils/validation';
+import { businessLogic } from '../utils/businessLogic';
 import { DossierModal } from './DossierModal';
 import { ActionExecutionModal } from './ActionExecutionModal';
 import { ExerciseSelectionModal } from './ExerciseSelectionModal';
@@ -188,7 +189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = { ...formData };
+    let payload = { ...formData };
 
     // Frontend Validations
     if (activeTab === 'PESSOA') {
@@ -203,6 +204,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
     if (activeTab === 'CARGOS' && payload.SALARIO) {
         payload.SALARIO = payload.SALARIO.replace(/[R$\.\s]/g, '').replace(',', '.');
+    }
+
+    // Business Logic: Calculate Metadata for Atendimento
+    if (activeTab === 'ATENDIMENTO') {
+        const metadata = businessLogic.calculateAtendimentoMetadata(payload);
+        payload = { ...payload, ...metadata };
     }
 
     setSubmitting(true);
@@ -234,8 +241,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       } else {
         showToast('error', res.message);
       }
-    } catch (err) {
-      showToast('error', 'Erro de conexão.');
+    } catch (err: any) {
+      showToast('error', err.message || 'Erro de conexão.');
     } finally {
       setSubmitting(false);
     }
