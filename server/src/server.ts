@@ -27,6 +27,7 @@ const sanitizeData = (data: any) => {
         if (value === '') value = null;
         else if (typeof value === 'string') {
             if (key === 'ANO_ENTRADA' && !isNaN(parseInt(value))) value = parseInt(value);
+            // Detectar datas ISO ou YYYY-MM-DD e converter
             else if ((key.includes('DATA') || key.includes('INICIO') || key.includes('TERMINO') || key.includes('PRAZO')) && /^\d{4}-\d{2}-\d{2}/.test(value)) {
                 value = new Date(value);
             }
@@ -117,14 +118,14 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/vagas', authenticateToken, async (req, res) => {
     try {
-        // Prisma does not support 'where' in 1-to-1 include. We fetch and process.
+        // Fetch with relations to calculate status
         const vagas = await prisma.vaga.findMany({
             include: {
                 lotacao: true,
                 cargo: true,
                 edital: true,
                 contrato: { select: { ID_CONTRATO: true, CPF: true } },
-                reserva: true, // 1-to-1 relation
+                reserva: true, // 1-to-1 relation in schema
                 exercicio: { include: { lotacao: true } }
             }
         });
@@ -138,13 +139,13 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
         const enrichedVagas = vagas.map(v => {
             let status = 'Disponível';
             let reservadaPara = null;
+            let reservadaNome = null;
 
             if (v.BLOQUEADA) {
                 status = 'Bloqueada';
             } else if (v.contrato) {
                 status = contratosEmAviso.has(v.contrato.ID_CONTRATO) ? 'Em Aviso Prévio' : 'Ocupada';
             } else if (v.reserva) {
-                // Only allow if status is active? Schema implies unique per vaga, so existence means reserved.
                 status = 'Reservada';
                 reservadaPara = v.reserva.ID_ATENDIMENTO;
             }
@@ -165,12 +166,12 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
 
 // --- BUSINESS ACTIONS ---
 
-// Specialized Atendimento Creation to handle Reserves
+// Create Atendimento (Workflow Start) with Transactional Reserve
 app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     const idVaga = data.ID_VAGA;
     
-    // Remove aux field ID_VAGA as it's not in Atendimento model
+    // Clean aux field not in Atendimento model
     delete data.ID_VAGA; 
 
     try {
@@ -178,7 +179,7 @@ app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
             const atendimento = await tx.atendimento.create({ data });
             
             if (idVaga) {
-                // Validate Vacancy
+                // Validate Vacancy Status
                 const vaga = await tx.vaga.findUnique({ 
                     where: { ID_VAGA: idVaga }, 
                     include: { contrato: true, reserva: true } 
@@ -189,7 +190,7 @@ app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
                 if (vaga.reserva) throw new Error('Vaga já possui uma reserva ativa.');
                 if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
 
-                // Create Reserve
+                // Create Reserve linked to this Atendimento
                 await tx.reserva.create({
                     data: {
                         ID_RESERVA: 'RES' + Date.now(),
@@ -215,6 +216,7 @@ app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
 app.post('/api/contrato', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
+        // Validate Vaga
         const vaga = await prisma.vaga.findUnique({ 
             where: { ID_VAGA: data.ID_VAGA }, include: { contrato: true }
         });
@@ -222,13 +224,14 @@ app.post('/api/contrato', authenticateToken, async (req: any, res) => {
         if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
         if (vaga.contrato) throw new Error('Vaga já ocupada.');
 
+        // Validate Person
         const isServer = await prisma.servidor.findFirst({ where: { CPF: data.CPF } });
         if (isServer) throw new Error('Este CPF já possui vínculo de Servidor ativo.');
 
         await prisma.$transaction(async (tx) => {
             await tx.contrato.create({ data });
             
-            // Handle Reserve: Delete it to respect the 1:1 unique constraint on ID_VAGA
+            // Release any reservation on this vacancy (Schema: Vaga 1-1 Reserva)
             const reserva = await tx.reserva.findUnique({ where: { ID_VAGA: data.ID_VAGA } });
             if (reserva) {
                 await tx.reserva.delete({ where: { ID_RESERVA: reserva.ID_RESERVA } });
@@ -253,6 +256,8 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
         await prisma.$transaction(async (tx) => {
             const activeContract = await tx.contrato.findFirst({ where: { CPF } });
             if (!activeContract) throw new Error('Nenhum contrato ativo.');
+            
+            // Archive to History
             await tx.contratoHistorico.create({
                 data: {
                     ID_HISTORICO_CONTRATO: 'HCT' + Date.now(), 
@@ -265,7 +270,10 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
                     MOTIVO_ARQUIVAMENTO: MOTIVO || 'Mudança'
                 }
             });
+            
+            // Delete active record (Frees up the Vaga unique constraint)
             await tx.contrato.delete({ where: { ID_CONTRATO: activeContract.ID_CONTRATO } });
+            
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'ARQUIVAR',
@@ -300,6 +308,7 @@ app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
         await prisma.$transaction(async (tx) => {
+            // Archive existing allocation if exists (1-1 logic for Matricula)
             const current = await tx.alocacao.findUnique({ where: { MATRICULA: data.MATRICULA } });
             if (current) {
                 await tx.alocacaoHistorico.create({
@@ -334,6 +343,7 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
         await prisma.$transaction(async (tx) => {
             const servidor = await tx.servidor.findUnique({ where: { MATRICULA } });
             if (!servidor) throw new Error('Servidor não encontrado.');
+            
             await tx.inativo.create({
                 data: {
                     ID_INATIVO: 'INA' + Date.now(), MATRICULA_ORIGINAL: servidor.MATRICULA, CPF: servidor.CPF,
@@ -342,10 +352,13 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
                     DATA_INATIVACAO: DATA_INATIVACAO ? new Date(DATA_INATIVACAO) : new Date(), MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
                 }
             });
+            
+            // Cleanup active relations
             const alocacao = await tx.alocacao.findUnique({ where: { MATRICULA } });
             if (alocacao) await tx.alocacao.delete({ where: { MATRICULA } });
             await tx.nomeacao.deleteMany({ where: { MATRICULA } });
             await tx.servidor.delete({ where: { MATRICULA } });
+            
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'INATIVAR',
@@ -390,42 +403,47 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
     } catch (e: any) { res.status(500).json({ success: false }); }
 });
 
+// Generic CRUD with Relationship Flattening
 app.get('/api/:entity', authenticateToken, async (req, res) => {
     const model = getModel(req.params.entity);
     if (!model) return res.status(404).json({ message: 'Not found' });
     
     try {
-        // Add standard enrichment via includes if applicable
         let include: any = undefined;
         const entity = req.params.entity.toLowerCase();
+        
+        // Define Relationships for fetching
         if (entity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
         if (entity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
         if (entity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
         if (entity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
         if (entity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
         if (entity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
-        
-        // GDEP enrichment
         if (entity === 'turmas') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
         if (entity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
         if (entity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
-        
+        if (entity === 'vagas') include = { lotacao: true, cargo: true, edital: true, exercicio: {include: {lotacao:true}} };
+
         const data = await model.findMany({ include });
         
-        // Post-process enrichment keys for frontend compatibility
+        // Flatten relations for Frontend compatibility
         const enriched = data.map((item: any) => {
             const ret = { ...item };
             if (item.pessoa) ret.NOME_PESSOA = item.pessoa.NOME;
             if (item.funcao) ret.NOME_FUNCAO = item.funcao.FUNCAO;
             if (item.cargo) ret.NOME_CARGO = item.cargo.NOME_CARGO;
             if (item.lotacao) ret.NOME_LOTACAO = item.lotacao.LOTACAO;
-            if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; // for Alocacao
-            if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA; // Fallback
+            if (item.lotacao && entity === 'vagas') ret.LOTACAO_NOME = item.lotacao.LOTACAO;
+            if (item.edital && entity === 'vagas') ret.EDITAL_NOME = item.edital.EDITAL;
+            if (item.cargo && entity === 'vagas') ret.CARGO_NOME = item.cargo.NOME_CARGO;
+            
+            if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; 
+            if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
+            
             if (item.cargoComissionado) ret.NOME_CARGO_COMISSIONADO = item.cargoComissionado.NOME;
             if (item.capacitacao) ret.NOME_CAPACITACAO = item.capacitacao.ATIVIDADE_DE_CAPACITACAO;
             if (item.turma) ret.NOME_TURMA = item.turma.NOME_TURMA;
             
-            // Special case for Exercicio
             if (entity === 'exercicio') {
                 ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO;
                 ret.NOME_LOTACAO_EXERCICIO = item.lotacao?.LOTACAO;
@@ -439,7 +457,6 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
 
 app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
-    // Block manual creation for entities handled by specific routes
     if (['contrato', 'servidor', 'alocacao', 'usuarios', 'atendimento'].includes(entityName)) {
         return res.status(400).json({ message: 'Use specific endpoint.' });
     }
