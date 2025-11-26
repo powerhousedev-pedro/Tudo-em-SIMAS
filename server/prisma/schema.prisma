@@ -1,0 +1,364 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// --- USERS & AUTH ---
+model Usuario {
+  usuario   String  @id
+  senha     String
+  papel     String  // COORDENAÇÃO, GGT, GPRGP, GDEP
+  isGerente Boolean @default(false)
+}
+
+// --- CORE ENTITIES (Base) ---
+model Pessoa {
+  CPF                String   @id
+  NOME               String
+  SEXO               String?
+  DATA_DE_NASCIMENTO DateTime?
+  EMAIL              String?
+  TELEFONE           String?
+  ESCOLARIDADE       String?
+  FORMACAO           String?
+  BAIRRO             String?
+
+  // Relations
+  contratos    Contrato[]
+  servidor     Servidor?
+  atendimentos Atendimento[]
+  chamadas     Chamada[]
+  visitas      Visita[]
+  solicitacoes SolicitacaoPesquisa[]
+}
+
+model Servidor {
+  MATRICULA         String  @id
+  PREFIXO_MATRICULA String?
+  CPF               String  @unique
+  ID_CARGO          String
+  DATA_MATRICULA    DateTime?
+  VINCULO           String?
+
+  // Relations
+  pessoa    Pessoa     @relation(fields: [CPF], references: [CPF])
+  cargo     Cargo      @relation(fields: [ID_CARGO], references: [ID_CARGO])
+  alocacao  Alocacao?
+  nomeacoes Nomeacao[]
+}
+
+model Contrato {
+  ID_CONTRATO      String  @id
+  ID_VAGA          String  @unique
+  CPF              String
+  DATA_DO_CONTRATO DateTime?
+  ID_FUNCAO        String
+
+  // Relations
+  pessoa Pessoa @relation(fields: [CPF], references: [CPF])
+  vaga   Vaga   @relation(fields: [ID_VAGA], references: [ID_VAGA])
+  funcao Funcao @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
+}
+
+// --- STRUCTURE ---
+model Vaga {
+  ID_VAGA    String  @id
+  ID_LOTACAO String
+  ID_EDITAL  String
+  ID_CARGO   String
+  BLOQUEADA  Boolean @default(false)
+
+  // Relations
+  contrato  Contrato?
+  lotacao   Lotacao   @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+  edital    Edital    @relation(fields: [ID_EDITAL], references: [ID_EDITAL])
+  cargo     Cargo     @relation(fields: [ID_CARGO], references: [ID_CARGO])
+  exercicio Exercicio?
+  reserva   Reserva?
+}
+
+model Lotacao {
+  ID_LOTACAO      String  @id
+  LOTACAO         String
+  VINCULACAO      String?
+  TIPO_DA_LOTACAO String?
+  BAIRRO          String?
+  COMPLEXIDADE    String?
+  UNIDADE         String?
+
+  // Relations
+  vagas      Vaga[]
+  alocacoes  Alocacao[]
+  exercicios Exercicio[]
+}
+
+model Cargo {
+  ID_CARGO           String  @id
+  NOME_CARGO         String
+  ESCOLARIDADE_CARGO String?
+  SALARIO            String?
+
+  // Relations
+  servidores Servidor[]
+  vagas      Vaga[]
+}
+
+model Funcao {
+  ID_FUNCAO String  @id
+  FUNCAO    String
+  CBO       String?
+
+  // Relations
+  contratos Contrato[]
+  alocacoes Alocacao[]
+}
+
+model Edital {
+  ID_EDITAL String  @id
+  PROCESSO  String?
+  EDITAL    String
+  NUMERO    String?
+  COGESTORA String?
+  INICIO    DateTime?
+  TERMINO   DateTime?
+
+  // Relations
+  vagas Vaga[]
+}
+
+// --- ALLOCATION & EXERCISE ---
+model Alocacao {
+  ID_ALOCACAO String  @id
+  MATRICULA   String  @unique
+  ID_LOTACAO  String
+  ID_FUNCAO   String
+  DATA_INICIO DateTime?
+
+  // Relations
+  servidor Servidor @relation(fields: [MATRICULA], references: [MATRICULA])
+  lotacao  Lotacao  @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+  funcao   Funcao   @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
+}
+
+model Exercicio {
+  ID_EXERCICIO String @id
+  ID_VAGA      String @unique
+  ID_LOTACAO   String
+
+  // Relations
+  vaga    Vaga    @relation(fields: [ID_VAGA], references: [ID_VAGA])
+  lotacao Lotacao @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+}
+
+// --- GGT SPECIFIC ---
+model Nomeacao {
+  ID_NOMEACAO           String  @id
+  MATRICULA             String
+  ID_CARGO_COMISSIONADO String
+  DATA_DA_NOMEACAO      DateTime?
+  PAGINA_DO             String?
+  STATUS                String?
+
+  // Relations
+  servidor          Servidor          @relation(fields: [MATRICULA], references: [MATRICULA])
+  cargoComissionado CargoComissionado @relation(fields: [ID_CARGO_COMISSIONADO], references: [ID_CARGO_COMISSIONADO])
+}
+
+model CargoComissionado {
+  ID_CARGO_COMISSIONADO String @id
+  NOME                  String
+  UNIDADE               String?
+  TIPO_DE_CARGO         String?
+
+  // Relations
+  nomeacoes Nomeacao[]
+}
+
+// --- GDEP (Development & Research) ---
+model Capacitacao {
+  ID_CAPACITACAO           String  @id
+  ATIVIDADE_DE_CAPACITACAO String
+  PERCURSO_FORMATIVO       String?
+  TIPO_CAPACITACAO         String?
+  FORMATO                  String?
+  MODALIDADE               String?
+  TEMATICA_CENTRAL         String?
+
+  // Relations
+  turmas Turma[]
+}
+
+model Turma {
+  ID_TURMA       String @id
+  NOME_TURMA     String
+  ID_CAPACITACAO String
+
+  // Relations
+  capacitacao Capacitacao @relation(fields: [ID_CAPACITACAO], references: [ID_CAPACITACAO])
+  encontros   Encontro[]
+  chamadas    Chamada[]
+}
+
+model Encontro {
+  ID_ENCONTRO      String  @id
+  ID_TURMA         String
+  DATA_DE_ENCONTRO DateTime?
+
+  // Relations
+  turma    Turma     @relation(fields: [ID_TURMA], references: [ID_TURMA])
+  chamadas Chamada[]
+}
+
+model Chamada {
+  ID_CHAMADA  String @id
+  CPF         String
+  ID_TURMA    String
+  ID_ENCONTRO String
+  PRESENCA    String?
+
+  // Relations
+  pessoa   Pessoa   @relation(fields: [CPF], references: [CPF])
+  turma    Turma    @relation(fields: [ID_TURMA], references: [ID_TURMA])
+  encontro Encontro @relation(fields: [ID_ENCONTRO], references: [ID_ENCONTRO])
+}
+
+model Visita {
+  ID_VISITA         String  @id
+  CPF               String
+  DATA_VISITA       DateTime?
+  LOCAL             String?
+  CATEGORIA         String?
+  ZONA              String?
+  SETOR             String?
+  MODALIDADE_VISITA String?
+  TIPO_DE_GRADUACAO String?
+
+  // Relations
+  pessoa Pessoa @relation(fields: [CPF], references: [CPF])
+}
+
+model SolicitacaoPesquisa {
+  ID_SOLICITACAO   String  @id
+  OBJETO_DE_ESTUDO String?
+  CPF              String
+  ANO_ENTRADA      Int?
+  AUTORIZO         String?
+  DATA_DEF_INDEF   DateTime?
+  DATA_INICIO      DateTime?
+
+  // Relations
+  pessoa    Pessoa     @relation(fields: [CPF], references: [CPF])
+  pesquisas Pesquisa[]
+}
+
+model Pesquisa {
+  ID_PESQUISA       String  @id
+  ID_SOLICITACAO    String
+  PREV_DATA_FIM     DateTime?
+  DATA_FIM          DateTime?
+  ABANDONO          String?
+  MATERIAL_PENDENTE String?
+
+  // Relations
+  solicitacao SolicitacaoPesquisa @relation(fields: [ID_SOLICITACAO], references: [ID_SOLICITACAO])
+}
+
+// --- WORKFLOWS ---
+model Atendimento {
+  ID_ATENDIMENTO     String  @id
+  REMETENTE          String?
+  CPF                String
+  RESPONSAVEL        String?
+  DATA_ENTRADA       DateTime?
+  DATA_ATENDIMENTO   DateTime?
+  TIPO_PEDIDO        String?
+  DESCRICAO          String? @db.Text
+  STATUS_PEDIDO      String?
+  JUSTIFICATIVA      String?
+  DATA_AGENDAMENTO   DateTime?
+  TIPO_DE_ACAO       String?
+  ENTIDADE_ALVO      String?
+  ID_ALVO_EDICAO     String?
+  ID_REGISTRO_GERADO String?
+  OBS_PROCESSAMENTO  String? @db.Text
+  STATUS_AGENDAMENTO String?
+
+  // Relations
+  pessoa   Pessoa    @relation(fields: [CPF], references: [CPF])
+  reservas Reserva[]
+}
+
+model Protocolo {
+  ID_PROTOCOLO      String  @id
+  CPF               String
+  TIPO_DE_PROTOCOLO String?
+  INICIO_PRAZO      DateTime?
+  TERMINO_PRAZO     DateTime?
+  ID_CONTRATO       String?
+  MATRICULA         String?
+}
+
+model Reserva {
+  ID_RESERVA     String  @id
+  ID_ATENDIMENTO String
+  ID_VAGA        String  @unique
+  DATA_RESERVA   DateTime?
+  STATUS         String?
+
+  // Relations
+  atendimento Atendimento @relation(fields: [ID_ATENDIMENTO], references: [ID_ATENDIMENTO])
+  vaga        Vaga        @relation(fields: [ID_VAGA], references: [ID_VAGA])
+}
+
+// --- HISTORY & AUDIT ---
+model ContratoHistorico {
+  ID_HISTORICO_CONTRATO String  @id
+  ID_CONTRATO           String
+  ID_VAGA               String
+  CPF                   String
+  DATA_DO_CONTRATO      DateTime?
+  ID_FUNCAO             String
+  DATA_ARQUIVAMENTO     DateTime?
+  MOTIVO_ARQUIVAMENTO   String?
+}
+
+model AlocacaoHistorico {
+  ID_HISTORICO_ALOCACAO String  @id
+  ID_ALOCACAO           String
+  MATRICULA             String
+  ID_LOTACAO            String
+  ID_FUNCAO             String
+  DATA_INICIO           DateTime?
+  DATA_ARQUIVAMENTO     DateTime?
+}
+
+model Inativo {
+  ID_INATIVO         String  @id
+  MATRICULA_ORIGINAL String?
+  CPF                String
+  ID_CARGO           String?
+  DATA_MATRICULA     DateTime?
+  VINCULO_ANTERIOR   String?
+  PREFIXO_ANTERIOR   String?
+  DATA_INATIVACAO    DateTime?
+  MOTIVO_INATIVACAO  String?
+}
+
+model Auditoria {
+  ID_LOG              String   @id
+  DATA_HORA           DateTime
+  USUARIO             String
+  ACAO                String
+  TABELA_AFETADA      String
+  ID_REGISTRO_AFETADO String
+  CAMPO_AFETADO       String?
+  VALOR_ANTIGO        String?  @db.Text
+  VALOR_NOVO          String?  @db.Text
+}
