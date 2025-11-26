@@ -18,37 +18,25 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 app.use(cors());
 app.use(express.json() as any);
 
-// --- DYNAMIC SCHEMA REFLECTION ---
+// --- HELPERS ---
 
-// Cache do DMMF para evitar reprocessamento
-let cachedModelMeta: any[] | null = null;
-
-const getModelMeta = () => {
-    if (cachedModelMeta) return cachedModelMeta;
-    
-    // Acessa os metadados gerados pelo Prisma Client
-    const dmmf = Prisma.dmmf.datamodel;
-    
-    cachedModelMeta = dmmf.models.map(model => {
-        const pkField = model.fields.find(f => f.isId)?.name || model.primaryKey?.fields[0] || 'id';
-        return {
-            name: model.name,
-            pk: pkField,
-            fields: model.fields.map(f => f.name)
-        };
-    });
-    
-    return cachedModelMeta;
+// Simple delegate finder - expects exact match (case-insensitive) with Prisma Model
+const getPrismaDelegate = (modelName: string) => {
+    // Normalize to lower for comparison, since table list is PascalCase but we want to be flexible
+    const normalized = modelName.toLowerCase();
+    // Find matching key in prisma client instance (usually camelCase, e.g. prisma.pessoa)
+    const keys = Object.keys(prisma);
+    const match = keys.find(k => k.toLowerCase() === normalized && !k.startsWith('$') && !k.startsWith('_'));
+    // @ts-ignore
+    return match ? prisma[match] : null;
 };
 
-// Helper para obter o Delegate do Prisma dinamicamente
-// Ex: "SolicitacaoPesquisa" -> prisma.solicitacaoPesquisa
-const getPrismaDelegate = (modelName: string) => {
-    // Prisma client properties usually start with lowercase
-    // But we can try to find the matching key in the prisma instance
-    const key = Object.keys(prisma).find(k => k.toLowerCase() === modelName.toLowerCase());
-    // @ts-ignore
-    return key ? prisma[key] : null;
+// Map DB Table Name back to Prisma Model Name (usually same, but just in case)
+const getRealModelName = (tableName: string): string | null => {
+    const normalized = tableName.toLowerCase();
+    const models = Prisma.dmmf.datamodel.models;
+    const match = models.find(m => m.name.toLowerCase() === normalized);
+    return match ? match.name : null;
 };
 
 const sanitizeData = (data: any) => {
@@ -58,7 +46,6 @@ const sanitizeData = (data: any) => {
         if (value === '') value = null;
         else if (typeof value === 'string') {
             if (key === 'ANO_ENTRADA' && !isNaN(parseInt(value))) value = parseInt(value);
-            // Converter strings ISO ou YYYY-MM-DD para Date object
             else if ((key.includes('DATA') || key.includes('INICIO') || key.includes('TERMINO') || key.includes('PRAZO')) && /^\d{4}-\d{2}-\d{2}/.test(value)) {
                 value = new Date(value);
             }
@@ -82,11 +69,19 @@ const authenticateToken = (req: any, res: any, next: any) => {
   });
 };
 
-// --- META ENDPOINT (The Brain) ---
+// --- META ENDPOINT ---
 
 app.get('/api/meta/schema', authenticateToken, (req, res) => {
     try {
-        const meta = getModelMeta();
+        const dmmf = Prisma.dmmf.datamodel;
+        const meta = dmmf.models.map(model => {
+            const pkField = model.fields.find(f => f.isId)?.name || model.primaryKey?.fields[0] || 'id';
+            return {
+                name: model.name,
+                pk: pkField,
+                fields: model.fields.map(f => f.name)
+            };
+        });
         res.json(meta);
     } catch (e: any) {
         res.status(500).json({ error: 'Failed to load schema metadata', details: e.message });
@@ -107,130 +102,298 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
 });
 
-// --- SPECIAL ENTITY ROUTES (Complex Logic) ---
+// --- SPECIALIZED ROUTES (Intercept before Generic) ---
 
-app.get('/api/Vaga', authenticateToken, async (req, res) => {
-    try {
-        const vagas = await prisma.vaga.findMany({
-            include: {
-                lotacao: true,
-                cargo: true,
-                edital: true,
-                contrato: { select: { ID_CONTRATO: true, CPF: true } },
-                reserva: true, // 1-to-1 relation
-                exercicio: { include: { lotacao: true } }
-            }
-        });
-
-        const avisos = await prisma.protocolo.findMany({
-            where: { TIPO_DE_PROTOCOLO: 'Aviso Prévio' },
-            select: { ID_CONTRATO: true }
-        });
-        const contratosEmAviso = new Set(avisos.map(a => a.ID_CONTRATO).filter(Boolean));
-
-        const enrichedVagas = vagas.map(v => {
-            let status = 'Disponível';
-            let reservadaPara = null;
-
-            if (v.BLOQUEADA) {
-                status = 'Bloqueada';
-            } else if (v.contrato) {
-                status = contratosEmAviso.has(v.contrato.ID_CONTRATO) ? 'Em Aviso Prévio' : 'Ocupada';
-            } else if (v.reserva) {
-                status = 'Reservada';
-                reservadaPara = v.reserva.ID_ATENDIMENTO;
-            }
-
-            return {
-                ...v,
-                LOTACAO_NOME: v.lotacao?.LOTACAO || 'N/A',
-                CARGO_NOME: v.cargo?.NOME_CARGO || 'N/A',
-                EDITAL_NOME: v.edital?.EDITAL || 'N/A',
-                NOME_LOTACAO_EXERCICIO: v.exercicio?.lotacao?.LOTACAO || null,
-                STATUS_VAGA: status,
-                RESERVADA_ID: reservadaPara
-            };
-        });
-        res.json(enrichedVagas);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// --- TRANSACTIONAL ACTIONS ---
-
-app.post('/api/Atendimento', authenticateToken, async (req: any, res) => {
-    const data = sanitizeData(req.body);
-    const idVaga = data.ID_VAGA; 
-    delete data.ID_VAGA; 
-
-    try {
-        await prisma.$transaction(async (tx) => {
-            const atendimento = await tx.atendimento.create({ data });
-            
-            if (idVaga) {
-                const vaga = await tx.vaga.findUnique({ 
-                    where: { ID_VAGA: idVaga }, 
-                    include: { contrato: true, reserva: true } 
-                });
-                
-                if (!vaga) throw new Error('Vaga não encontrada.');
-                if (vaga.contrato) throw new Error('Vaga já ocupada por contrato.');
-                if (vaga.reserva) throw new Error('Vaga já possui uma reserva ativa.');
-                if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
-
-                await tx.reserva.create({
-                    data: {
-                        ID_RESERVA: 'RES' + Date.now(),
-                        ID_ATENDIMENTO: atendimento.ID_ATENDIMENTO,
-                        ID_VAGA: idVaga,
-                        DATA_RESERVA: new Date(),
-                        STATUS: 'Ativa'
+const specialRouteHandler = async (req: any, res: any, next: any) => {
+    const entity = req.params.entity.toLowerCase();
+    
+    // Vaga
+    if (entity === 'vaga') {
+        if (req.method === 'GET') {
+            try {
+                const vagas = await prisma.vaga.findMany({
+                    include: {
+                        lotacao: true,
+                        cargo: true,
+                        edital: true,
+                        contrato: { select: { ID_CONTRATO: true, CPF: true } },
+                        reserva: true,
+                        exercicio: { include: { lotacao: true } }
                     }
                 });
-            }
-            
-            await tx.auditoria.create({
-                data: {
-                    ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
-                    TABELA_AFETADA: 'ATENDIMENTO', ID_REGISTRO_AFETADO: atendimento.ID_ATENDIMENTO, VALOR_NOVO: JSON.stringify(data)
-                }
-            });
-        });
-        res.json({ success: true, message: 'Atendimento criado.' });
-    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
-});
 
-app.post('/api/Contrato', authenticateToken, async (req: any, res) => {
-    const data = sanitizeData(req.body);
+                const avisos = await prisma.protocolo.findMany({
+                    where: { TIPO_DE_PROTOCOLO: 'Aviso Prévio' },
+                    select: { ID_CONTRATO: true }
+                });
+                const contratosEmAviso = new Set(avisos.map(a => a.ID_CONTRATO).filter(Boolean));
+
+                const enrichedVagas = vagas.map(v => {
+                    let status = 'Disponível';
+                    let reservadaPara = null;
+
+                    if (v.BLOQUEADA) status = 'Bloqueada';
+                    else if (v.contrato) status = contratosEmAviso.has(v.contrato.ID_CONTRATO) ? 'Em Aviso Prévio' : 'Ocupada';
+                    else if (v.reserva) {
+                        status = 'Reservada';
+                        reservadaPara = v.reserva.ID_ATENDIMENTO;
+                    }
+
+                    return {
+                        ...v,
+                        LOTACAO_NOME: v.lotacao?.LOTACAO || 'N/A',
+                        CARGO_NOME: v.cargo?.NOME_CARGO || 'N/A',
+                        EDITAL_NOME: v.edital?.EDITAL || 'N/A',
+                        NOME_LOTACAO_EXERCICIO: v.exercicio?.lotacao?.LOTACAO || null,
+                        STATUS_VAGA: status,
+                        RESERVADA_ID: reservadaPara
+                    };
+                });
+                return res.json(enrichedVagas);
+            } catch (e: any) { return res.status(500).json({ error: e.message }); }
+        }
+    }
+
+    // Atendimento
+    if (entity === 'atendimento' && req.method === 'POST') {
+        const data = sanitizeData(req.body);
+        const idVaga = data.ID_VAGA; 
+        delete data.ID_VAGA; 
+
+        try {
+            await prisma.$transaction(async (tx) => {
+                const atendimento = await tx.atendimento.create({ data });
+                
+                if (idVaga) {
+                    const vaga = await tx.vaga.findUnique({ 
+                        where: { ID_VAGA: idVaga }, 
+                        include: { contrato: true, reserva: true } 
+                    });
+                    
+                    if (!vaga) throw new Error('Vaga não encontrada.');
+                    if (vaga.contrato) throw new Error('Vaga já ocupada por contrato.');
+                    if (vaga.reserva) throw new Error('Vaga já possui uma reserva ativa.');
+                    if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
+
+                    await tx.reserva.create({
+                        data: {
+                            ID_RESERVA: 'RES' + Date.now(),
+                            ID_ATENDIMENTO: atendimento.ID_ATENDIMENTO,
+                            ID_VAGA: idVaga,
+                            DATA_RESERVA: new Date(),
+                            STATUS: 'Ativa'
+                        }
+                    });
+                }
+                
+                await tx.auditoria.create({
+                    data: {
+                        ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
+                        TABELA_AFETADA: 'Atendimento', ID_REGISTRO_AFETADO: atendimento.ID_ATENDIMENTO, VALOR_NOVO: JSON.stringify(data)
+                    }
+                });
+            });
+            return res.json({ success: true, message: 'Atendimento criado.' });
+        } catch (e: any) { return res.status(400).json({ success: false, message: e.message }); }
+    }
+
+    // Contrato
+    if (entity === 'contrato' && req.method === 'POST') {
+        const data = sanitizeData(req.body);
+        try {
+            const vaga = await prisma.vaga.findUnique({ 
+                where: { ID_VAGA: data.ID_VAGA }, include: { contrato: true }
+            });
+            if (!vaga) throw new Error('Vaga não encontrada.');
+            if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
+            if (vaga.contrato) throw new Error('Vaga já ocupada.');
+
+            const isServer = await prisma.servidor.findFirst({ where: { CPF: data.CPF } });
+            if (isServer) throw new Error('Este CPF já possui vínculo de Servidor ativo.');
+
+            await prisma.$transaction(async (tx) => {
+                await tx.contrato.create({ data });
+                
+                const reserva = await tx.reserva.findUnique({ where: { ID_VAGA: data.ID_VAGA } });
+                if (reserva) {
+                    await tx.reserva.delete({ where: { ID_RESERVA: reserva.ID_RESERVA } });
+                }
+
+                await tx.auditoria.create({
+                    data: {
+                        ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario,
+                        ACAO: 'CRIAR', TABELA_AFETADA: 'Contrato', ID_REGISTRO_AFETADO: data.ID_CONTRATO,
+                        VALOR_NOVO: JSON.stringify(data)
+                    }
+                });
+            });
+            return res.json({ success: true, message: 'Contrato criado.' });
+        } catch (e: any) { return res.status(400).json({ success: false, message: e.message }); }
+    }
+
+    // Alocacao
+    if (entity === 'alocacao' && req.method === 'POST') {
+        const data = sanitizeData(req.body);
+        try {
+            await prisma.$transaction(async (tx) => {
+                const current = await tx.alocacao.findUnique({ where: { MATRICULA: data.MATRICULA } });
+                if (current) {
+                    await tx.alocacaoHistorico.create({
+                        data: {
+                            ID_HISTORICO_ALOCACAO: 'HAL' + Date.now(),
+                            ID_ALOCACAO: current.ID_ALOCACAO,
+                            MATRICULA: current.MATRICULA, 
+                            ID_LOTACAO: current.ID_LOTACAO,
+                            ID_FUNCAO: current.ID_FUNCAO,
+                            DATA_INICIO: current.DATA_INICIO,
+                            DATA_ARQUIVAMENTO: new Date()
+                        }
+                    });
+                    await tx.alocacao.delete({ where: { ID_ALOCACAO: current.ID_ALOCACAO } });
+                }
+                await tx.alocacao.create({ data });
+                await tx.auditoria.create({
+                    data: {
+                        ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
+                        TABELA_AFETADA: 'Alocacao', ID_REGISTRO_AFETADO: data.ID_ALOCACAO, VALOR_NOVO: JSON.stringify(data)
+                    }
+                });
+            });
+            return res.json({ success: true, message: 'Alocação atualizada.' });
+        } catch (e: any) { return res.status(400).json({ success: false, message: e.message }); }
+    }
+
+    next();
+};
+
+// --- GENERIC CRUD ---
+
+app.get('/api/:entity', authenticateToken, specialRouteHandler, async (req, res) => {
+    const entityName = req.params.entity;
+    const model = getPrismaDelegate(entityName);
+    
+    if (!model) return res.status(404).json({ message: `Model ${entityName} not found.` });
+    
     try {
-        const vaga = await prisma.vaga.findUnique({ 
-            where: { ID_VAGA: data.ID_VAGA }, include: { contrato: true }
-        });
-        if (!vaga) throw new Error('Vaga não encontrada.');
-        if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
-        if (vaga.contrato) throw new Error('Vaga já ocupada.');
-
-        const isServer = await prisma.servidor.findFirst({ where: { CPF: data.CPF } });
-        if (isServer) throw new Error('Este CPF já possui vínculo de Servidor ativo.');
-
-        await prisma.$transaction(async (tx) => {
-            await tx.contrato.create({ data });
+        let include: any = undefined;
+        const lowerEntity = entityName.toLowerCase();
+        
+        // Relations (using simple table names logic)
+        if (lowerEntity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
+        else if (lowerEntity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
+        else if (lowerEntity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
+        else if (lowerEntity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
+        else if (lowerEntity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
+        else if (lowerEntity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
+        else if (lowerEntity === 'turma') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
+        else if (lowerEntity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
+        else if (lowerEntity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
+        
+        const data = await model.findMany({ include });
+        
+        // Flattening
+        const enriched = data.map((item: any) => {
+            const ret = { ...item };
+            if (item.pessoa) ret.NOME_PESSOA = item.pessoa.NOME;
+            if (item.funcao) ret.NOME_FUNCAO = item.funcao.FUNCAO;
+            if (item.cargo) ret.NOME_CARGO = item.cargo.NOME_CARGO;
+            if (item.lotacao) ret.NOME_LOTACAO = item.lotacao.LOTACAO;
             
-            const reserva = await tx.reserva.findUnique({ where: { ID_VAGA: data.ID_VAGA } });
-            if (reserva) {
-                await tx.reserva.delete({ where: { ID_RESERVA: reserva.ID_RESERVA } });
+            if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; 
+            if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
+            
+            if (item.cargoComissionado) ret.NOME_CARGO_COMISSIONADO = item.cargoComissionado.NOME;
+            if (item.capacitacao) ret.NOME_CAPACITACAO = item.capacitacao.ATIVIDADE_DE_CAPACITACAO;
+            if (item.turma) ret.NOME_TURMA = item.turma.NOME_TURMA;
+            
+            if (lowerEntity === 'exercicio') {
+                ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO;
+                ret.NOME_LOTACAO_EXERCICIO = item.lotacao?.LOTACAO;
             }
-
-            await tx.auditoria.create({
-                data: {
-                    ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario,
-                    ACAO: 'CRIAR', TABELA_AFETADA: 'CONTRATO', ID_REGISTRO_AFETADO: data.ID_CONTRATO,
-                    VALOR_NOVO: JSON.stringify(data)
-                }
-            });
+            return ret;
         });
-        res.json({ success: true, message: 'Contrato criado.' });
+
+        res.json(enriched);
+    } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+app.post('/api/:entity', authenticateToken, specialRouteHandler, async (req: any, res) => {
+    const entityName = req.params.entity;
+    const model = getPrismaDelegate(entityName);
+    if (!model) return res.status(404).json({ message: 'Not found' });
+    
+    const data = sanitizeData(req.body);
+    
+    try {
+        const created = await model.create({ data });
+        
+        const realModelName = getRealModelName(entityName) || entityName;
+        const meta = Prisma.dmmf.datamodel.models.find(m => m.name === realModelName);
+        const pkField = meta?.fields.find(f => f.isId)?.name || 'id';
+        const pkValue = created[pkField] || 'N/A';
+
+        await prisma.auditoria.create({
+            data: {
+                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
+                TABELA_AFETADA: realModelName, ID_REGISTRO_AFETADO: String(pkValue), VALOR_NOVO: JSON.stringify(data)
+            }
+        });
+        res.json({ success: true, message: 'Criado.', data: created });
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
+
+app.put('/api/:entity/:id', authenticateToken, async (req: any, res) => {
+    const entityName = req.params.entity;
+    const model = getPrismaDelegate(entityName);
+    if (!model) return res.status(404).json({ message: 'Not found' });
+    
+    const realModelName = getRealModelName(entityName) || entityName;
+    const meta = Prisma.dmmf.datamodel.models.find(m => m.name === realModelName);
+    const pkField = meta?.fields.find(f => f.isId)?.name;
+
+    if (!pkField) return res.status(400).json({message: 'Cannot determine PK for update.'});
+
+    const data = sanitizeData(req.body);
+
+    try {
+        const oldData = await model.findUnique({ where: { [pkField]: req.params.id } });
+        await model.update({ where: { [pkField]: req.params.id }, data });
+        await prisma.auditoria.create({
+            data: {
+                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'EDITAR',
+                TABELA_AFETADA: realModelName, ID_REGISTRO_AFETADO: req.params.id,
+                VALOR_ANTIGO: JSON.stringify(oldData), VALOR_NOVO: JSON.stringify(data)
+            }
+        });
+        res.json({ success: true, message: 'Atualizado.' });
+    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
+});
+
+app.delete('/api/:entity/:id', authenticateToken, async (req: any, res) => {
+    const entityName = req.params.entity;
+    const model = getPrismaDelegate(entityName);
+    if (!model) return res.status(404).json({ message: 'Not found' });
+
+    const realModelName = getRealModelName(entityName) || entityName;
+    const meta = Prisma.dmmf.datamodel.models.find(m => m.name === realModelName);
+    const pkField = meta?.fields.find(f => f.isId)?.name;
+
+    if (!pkField) return res.status(400).json({message: 'Cannot determine PK for deletion.'});
+
+    try {
+        const oldData = await model.findUnique({ where: { [pkField]: req.params.id } });
+        await model.delete({ where: { [pkField]: req.params.id } });
+        await prisma.auditoria.create({
+            data: {
+                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'EXCLUIR',
+                TABELA_AFETADA: realModelName, ID_REGISTRO_AFETADO: req.params.id, VALOR_ANTIGO: JSON.stringify(oldData)
+            }
+        });
+        res.json({ success: true });
+    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
+});
+
+// --- SPECIFIC ENDPOINTS ---
 
 app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => {
     const { CPF, MOTIVO } = req.body;
@@ -258,61 +421,12 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'ARQUIVAR',
-                    TABELA_AFETADA: 'CONTRATO', ID_REGISTRO_AFETADO: activeContract.ID_CONTRATO, VALOR_ANTIGO: JSON.stringify(activeContract),
+                    TABELA_AFETADA: 'Contrato', ID_REGISTRO_AFETADO: activeContract.ID_CONTRATO, VALOR_ANTIGO: JSON.stringify(activeContract),
                     VALOR_NOVO: 'Arquivado'
                 }
             });
         });
         res.json({ success: true, message: 'Arquivado com sucesso.' });
-    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
-});
-
-app.post('/api/Servidor', authenticateToken, async (req: any, res) => {
-    const data = sanitizeData(req.body);
-    try {
-        const hasContract = await prisma.contrato.findFirst({ where: { CPF: data.CPF } });
-        if (hasContract) throw new Error('Este CPF já possui um Contrato ativo.');
-        const existing = await prisma.servidor.findUnique({ where: { MATRICULA: data.MATRICULA } });
-        if (existing) throw new Error('Matrícula já existente.');
-        const created = await prisma.servidor.create({ data });
-        await prisma.auditoria.create({
-            data: {
-                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
-                TABELA_AFETADA: 'SERVIDOR', ID_REGISTRO_AFETADO: data.MATRICULA, VALOR_NOVO: JSON.stringify(data)
-            }
-        });
-        res.json({ success: true, message: 'Servidor criado.', data: created });
-    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
-});
-
-app.post('/api/Alocacao', authenticateToken, async (req: any, res) => {
-    const data = sanitizeData(req.body);
-    try {
-        await prisma.$transaction(async (tx) => {
-            const current = await tx.alocacao.findUnique({ where: { MATRICULA: data.MATRICULA } });
-            if (current) {
-                await tx.alocacaoHistorico.create({
-                    data: {
-                        ID_HISTORICO_ALOCACAO: 'HAL' + Date.now(),
-                        ID_ALOCACAO: current.ID_ALOCACAO,
-                        MATRICULA: current.MATRICULA, 
-                        ID_LOTACAO: current.ID_LOTACAO,
-                        ID_FUNCAO: current.ID_FUNCAO,
-                        DATA_INICIO: current.DATA_INICIO,
-                        DATA_ARQUIVAMENTO: new Date()
-                    }
-                });
-                await tx.alocacao.delete({ where: { ID_ALOCACAO: current.ID_ALOCACAO } });
-            }
-            await tx.alocacao.create({ data });
-            await tx.auditoria.create({
-                data: {
-                    ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
-                    TABELA_AFETADA: 'ALOCACAO', ID_REGISTRO_AFETADO: data.ID_ALOCACAO, VALOR_NOVO: JSON.stringify(data)
-                }
-            });
-        });
-        res.json({ success: true, message: 'Alocação atualizada.' });
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
 
@@ -341,7 +455,7 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'INATIVAR',
-                    TABELA_AFETADA: 'SERVIDOR', ID_REGISTRO_AFETADO: MATRICULA, VALOR_ANTIGO: JSON.stringify(servidor)
+                    TABELA_AFETADA: 'Servidor', ID_REGISTRO_AFETADO: MATRICULA, VALOR_ANTIGO: JSON.stringify(servidor)
                 }
             });
         });
@@ -382,139 +496,7 @@ app.delete('/api/Usuarios/:usuarioId', authenticateToken, async (req: any, res) 
     } catch (e: any) { res.status(500).json({ success: false }); }
 });
 
-// --- DYNAMIC GENERIC CRUD ---
-
-app.get('/api/:entity', authenticateToken, async (req, res) => {
-    const entityName = req.params.entity;
-    const model = getPrismaDelegate(entityName);
-    
-    if (!model) return res.status(404).json({ message: `Model ${entityName} not found via Reflection.` });
-    
-    try {
-        let include: any = undefined;
-        const lowerEntity = entityName.toLowerCase();
-        
-        // Enrich Relations based on recognized names (kept for enrichment logic only)
-        if (lowerEntity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
-        else if (lowerEntity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
-        else if (lowerEntity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
-        else if (lowerEntity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
-        else if (lowerEntity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
-        else if (lowerEntity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
-        else if (lowerEntity === 'turma') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
-        else if (lowerEntity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
-        else if (lowerEntity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
-        
-        // Note: 'Vaga' has a specific endpoint above, so it won't hit here if routed correctly.
-
-        const data = await model.findMany({ include });
-        
-        // Generic Flattening (O(n) scan)
-        const enriched = data.map((item: any) => {
-            const ret = { ...item };
-            if (item.pessoa) ret.NOME_PESSOA = item.pessoa.NOME;
-            if (item.funcao) ret.NOME_FUNCAO = item.funcao.FUNCAO;
-            if (item.cargo) ret.NOME_CARGO = item.cargo.NOME_CARGO;
-            if (item.lotacao) ret.NOME_LOTACAO = item.lotacao.LOTACAO;
-            
-            if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; 
-            if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
-            
-            if (item.cargoComissionado) ret.NOME_CARGO_COMISSIONADO = item.cargoComissionado.NOME;
-            if (item.capacitacao) ret.NOME_CAPACITACAO = item.capacitacao.ATIVIDADE_DE_CAPACITACAO;
-            if (item.turma) ret.NOME_TURMA = item.turma.NOME_TURMA;
-            
-            if (lowerEntity === 'exercicio') {
-                ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO;
-                ret.NOME_LOTACAO_EXERCICIO = item.lotacao?.LOTACAO;
-            }
-            return ret;
-        });
-
-        res.json(enriched);
-    } catch (e) { res.status(500).json({ error: String(e) }); }
-});
-
-app.post('/api/:entity', authenticateToken, async (req: any, res) => {
-    const entityName = req.params.entity;
-    // Block entities that have specialized endpoints
-    // Note: The specialized endpoints above (e.g. /api/Contrato) must match exactly what Frontend sends
-    if (['Contrato', 'Servidor', 'Alocacao', 'Usuarios', 'Atendimento'].includes(entityName)) {
-        return res.status(400).json({ message: 'Use specific endpoint logic for this entity.' });
-    }
-    
-    const model = getPrismaDelegate(entityName);
-    if (!model) return res.status(404).json({ message: 'Not found' });
-    
-    const data = sanitizeData(req.body);
-    
-    try {
-        const created = await model.create({ data });
-        
-        // Try to find PK from cache metadata
-        const meta = getModelMeta().find(m => m.name === entityName);
-        const pkValue = meta ? created[meta.pk] : 'N/A';
-
-        await prisma.auditoria.create({
-            data: {
-                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
-                TABELA_AFETADA: entityName.toUpperCase(), ID_REGISTRO_AFETADO: String(pkValue), VALOR_NOVO: JSON.stringify(data)
-            }
-        });
-        res.json({ success: true, message: 'Criado.', data: created });
-    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
-});
-
-app.put('/api/:entity/:id', authenticateToken, async (req: any, res) => {
-    const entityName = req.params.entity;
-    const model = getPrismaDelegate(entityName);
-    if (!model) return res.status(404).json({ message: 'Not found' });
-    
-    const meta = getModelMeta().find(m => m.name === entityName);
-    if (!meta) return res.status(400).json({message: 'Metadata not found'});
-
-    const data = sanitizeData(req.body);
-    const pkField = meta.pk;
-
-    try {
-        const oldData = await model.findUnique({ where: { [pkField]: req.params.id } });
-        await model.update({ where: { [pkField]: req.params.id }, data });
-        await prisma.auditoria.create({
-            data: {
-                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'EDITAR',
-                TABELA_AFETADA: entityName.toUpperCase(), ID_REGISTRO_AFETADO: req.params.id,
-                VALOR_ANTIGO: JSON.stringify(oldData), VALOR_NOVO: JSON.stringify(data)
-            }
-        });
-        res.json({ success: true, message: 'Atualizado.' });
-    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
-});
-
-app.delete('/api/:entity/:id', authenticateToken, async (req: any, res) => {
-    const entityName = req.params.entity;
-    const model = getPrismaDelegate(entityName);
-    if (!model) return res.status(404).json({ message: 'Not found' });
-
-    const meta = getModelMeta().find(m => m.name === entityName);
-    if (!meta) return res.status(400).json({message: 'Metadata not found'});
-    const pkField = meta.pk;
-
-    try {
-        const oldData = await model.findUnique({ where: { [pkField]: req.params.id } });
-        await model.delete({ where: { [pkField]: req.params.id } });
-        await prisma.auditoria.create({
-            data: {
-                ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'EXCLUIR',
-                TABELA_AFETADA: entityName.toUpperCase(), ID_REGISTRO_AFETADO: req.params.id, VALOR_ANTIGO: JSON.stringify(oldData)
-            }
-        });
-        res.json({ success: true });
-    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
-});
-
-// --- OTHER ENDPOINTS ---
-
-app.post('/api/vagas/:id/toggle-lock', authenticateToken, async (req, res) => {
+app.post('/api/Vaga/:id/toggle-lock', authenticateToken, async (req, res) => {
     try {
         const vaga = await prisma.vaga.findUnique({ where: { ID_VAGA: req.params.id } });
         if (!vaga) return res.status(404).json({ message: 'Vaga não encontrada' });
@@ -528,16 +510,12 @@ app.post('/api/audit/:id/restore', authenticateToken, async (req, res) => {
         const log = await prisma.auditoria.findUnique({ where: { ID_LOG: req.params.id } });
         if (!log) return res.status(404).json({ message: 'Log não encontrado' });
         
-        // Restore needs dynamic model access too based on TABLE_AFFECTED (assumes UPPERCASE stored in logs)
-        // We need to match TABLE_AFFECTED to a real model name
-        const meta = getModelMeta();
-        // Fuzzy match log table name to model name
-        const modelInfo = meta.find(m => m.name.toUpperCase() === log.TABELA_AFETADA.toUpperCase());
+        const model = getPrismaDelegate(log.TABELA_AFETADA);
+        if (!model) return res.status(400).json({message: `Cannot restore: Table ${log.TABELA_AFETADA} not found.`});
         
-        if (!modelInfo) return res.status(400).json({message: `Cannot restore: Table ${log.TABELA_AFETADA} not found in schema.`});
-        
-        const model = getPrismaDelegate(modelInfo.name);
-        const pkField = modelInfo.pk;
+        const realName = getRealModelName(log.TABELA_AFETADA) || log.TABELA_AFETADA;
+        const meta = Prisma.dmmf.datamodel.models.find(m => m.name === realName);
+        const pkField = meta?.fields.find(f => f.isId)?.name || 'id';
 
         if (log.ACAO === 'EDITAR' && log.VALOR_ANTIGO) await model.update({ where: { [pkField]: log.ID_REGISTRO_AFETADO }, data: JSON.parse(log.VALOR_ANTIGO) });
         else if (log.ACAO === 'EXCLUIR' && log.VALOR_ANTIGO) await model.create({ data: JSON.parse(log.VALOR_ANTIGO) });
@@ -567,32 +545,6 @@ app.get('/api/pessoas/:cpf/dossier', authenticateToken, async (req, res) => {
         }
         res.json({ pessoal: pessoa, tipoPerfil, vinculosAtivos: vinculos, historico: [], atividadesEstudantis: { capacitacoes: [] } });
     } catch (e) { res.status(500).json({ error: String(e) }); }
-});
-
-// --- CRON JOBS ---
-cron.schedule('0 0 * * *', async () => {
-    const today = new Date();
-    const protocols = await prisma.protocolo.findMany({ where: { TIPO_DE_PROTOCOLO: 'Aviso Prévio', TERMINO_PRAZO: { lt: today } } });
-    for (const p of protocols) {
-        if (p.ID_CONTRATO) {
-            const contrato = await prisma.contrato.findUnique({ where: { ID_CONTRATO: p.ID_CONTRATO } });
-            if (contrato) {
-                await prisma.contratoHistorico.create({ 
-                    data: { 
-                        ID_HISTORICO_CONTRATO: 'HCT' + Date.now(), 
-                        ID_CONTRATO: contrato.ID_CONTRATO,
-                        ID_VAGA: contrato.ID_VAGA,
-                        CPF: contrato.CPF,
-                        DATA_DO_CONTRATO: contrato.DATA_DO_CONTRATO,
-                        ID_FUNCAO: contrato.ID_FUNCAO,
-                        DATA_ARQUIVAMENTO: new Date(), 
-                        MOTIVO_ARQUIVAMENTO: 'Fim de Aviso Prévio' 
-                    } 
-                });
-                await prisma.contrato.delete({ where: { ID_CONTRATO: contrato.ID_CONTRATO } });
-            }
-        }
-    }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

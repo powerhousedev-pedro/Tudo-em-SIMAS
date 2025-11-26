@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { Button } from './Button';
 import { api } from '../services/api';
-import { schemaManager } from '../utils/schemaManager';
 import { UserSession } from '../types';
 
 interface LoginProps {
@@ -33,10 +32,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         // Persist to localStorage
         localStorage.setItem('simas_auth_token', res.token);
         localStorage.setItem('simas_user_session', JSON.stringify(sessionData));
-
-        // --- DYNAMIC SCHEMA INIT ---
-        // Fetch table names and match them before entering the app
-        await schemaManager.initialize();
 
         onLogin(sessionData);
       } else {

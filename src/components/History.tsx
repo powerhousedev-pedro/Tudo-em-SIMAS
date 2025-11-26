@@ -9,10 +9,10 @@ import { AuditLogModal } from './AuditLogModal';
 interface HistoryProps extends AppContextProps {}
 
 const VIEWS = [
-    { id: 'AUDITORIA', label: 'Auditoria do Sistema', icon: 'fas fa-shield-alt' },
-    { id: 'CONTRATO_HISTORICO', label: 'Histórico de Contratos', icon: 'fas fa-file-contract' },
-    { id: 'ALOCACAO_HISTORICO', label: 'Histórico de Alocações', icon: 'fas fa-map-marked-alt' },
-    { id: 'INATIVOS', label: 'Arquivo de Inativos', icon: 'fas fa-archive' }
+    { id: 'Auditoria', label: 'Auditoria do Sistema', icon: 'fas fa-shield-alt' },
+    { id: 'ContratoHistorico', label: 'Histórico de Contratos', icon: 'fas fa-file-contract' },
+    { id: 'AlocacaoHistorico', label: 'Histórico de Alocações', icon: 'fas fa-map-marked-alt' },
+    { id: 'Inativo', label: 'Arquivo de Inativos', icon: 'fas fa-archive' }
 ];
 
 export const History: React.FC<HistoryProps> = ({ showToast }) => {
@@ -28,7 +28,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const allowedViews = useMemo(() => {
         const isAllowedAudit = session.papel === 'COORDENAÇÃO' || session.isGerente;
         return VIEWS.filter(view => {
-            if (view.id === 'AUDITORIA' && !isAllowedAudit) return false;
+            if (view.id === 'Auditoria' && !isAllowedAudit) return false;
             return true;
         });
     }, [session.papel, session.isGerente]);
@@ -102,7 +102,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     };
 
     const columns = useMemo(() => {
-        if (currentView === 'AUDITORIA') {
+        if (currentView === 'Auditoria') {
              return ['DATA_HORA', 'USUARIO', 'ACAO', 'TABELA_AFETADA', 'ID_REGISTRO_AFETADO', 'DETALHES'];
         }
         if (DATA_MODEL[currentView]) {
@@ -208,7 +208,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     };
 
     const renderCell = (item: any, col: string) => {
-        if (currentView === 'AUDITORIA') {
+        if (currentView === 'Auditoria') {
             if (col === 'DETALHES') {
                  return (
                      <button 
@@ -311,13 +311,13 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                 label={col.replace(/_/g, ' ')} 
                                             />
                                         ))}
-                                        {currentView === 'AUDITORIA' && <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Ações</th>}
+                                        {currentView === 'Auditoria' && <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Ações</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {filteredData.length === 0 ? (
                                         <tr>
-                                            <td colSpan={columns.length + (currentView === 'AUDITORIA' ? 1 : 0)} className="px-6 py-12 text-center text-gray-400 italic">
+                                            <td colSpan={columns.length + (currentView === 'Auditoria' ? 1 : 0)} className="px-6 py-12 text-center text-gray-400 italic">
                                                 Nenhum registro encontrado.
                                             </td>
                                         </tr>
@@ -329,7 +329,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                         {renderCell(item, col)}
                                                     </td>
                                                 ))}
-                                                {currentView === 'AUDITORIA' && (
+                                                {currentView === 'Auditoria' && (
                                                     <td className="px-6 py-4 text-right">
                                                         {(item.ACAO === 'EDITAR' || item.ACAO === 'EXCLUIR' || item.ACAO === 'CRIAR') && (
                                                             <button 
