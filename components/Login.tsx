@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Button } from './Button';
 import { api } from '../services/api';
@@ -21,12 +22,18 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     try {
       const res = await api.login(user, pass);
       if (res.success) {
-        onLogin({ 
+        const sessionData: UserSession = { 
           token: res.token, 
           usuario: user, 
           papel: res.role as any, 
           isGerente: res.isGerente 
-        });
+        };
+
+        // Persist to localStorage
+        localStorage.setItem('simas_auth_token', res.token);
+        localStorage.setItem('simas_user_session', JSON.stringify(sessionData));
+
+        onLogin(sessionData);
       } else {
         setError('Usuário ou senha inválidos.');
       }

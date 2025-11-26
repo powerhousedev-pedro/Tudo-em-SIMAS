@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../services/api';
 import { Button } from './Button';
@@ -20,11 +19,11 @@ const VIEWS = [
 export const History: React.FC<HistoryProps> = ({ showToast }) => {
     // --- SESSION & PERMISSION LOGIC ---
     const getSession = (): UserSession => {
-        const token = localStorage.getItem('simas_auth_token') || 'mock-token';
-        // In a real app, this would come from a global Context.
-        // For now, we simulate the retrieval or use what's in localStorage if we had a real decoder.
-        // Using the same mock pattern as Dashboard for consistency.
-        return { token, papel: 'COORDENAÇÃO', usuario: 'User', isGerente: true };
+        const stored = localStorage.getItem('simas_user_session');
+        if (stored) {
+            try { return JSON.parse(stored); } catch (e) {}
+        }
+        return { token: '', papel: 'GGT', usuario: '', isGerente: false };
     };
     const session = getSession();
 

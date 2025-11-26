@@ -21,6 +21,17 @@ const App: React.FC = () => {
   const [showUserAdminModal, setShowUserAdminModal] = useState(false);
 
   useEffect(() => {
+      // Restore session from localStorage
+      const storedSession = localStorage.getItem('simas_user_session');
+      const storedToken = localStorage.getItem('simas_auth_token');
+      if (storedSession && storedToken) {
+          try {
+              setSession(JSON.parse(storedSession));
+          } catch (e) {
+              console.error("Failed to restore session", e);
+          }
+      }
+
       // Run simulated background jobs
       api.processDailyRoutines();
   }, []);
@@ -37,6 +48,7 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setSession(null);
     localStorage.removeItem('simas_auth_token');
+    localStorage.removeItem('simas_user_session');
   };
 
   const triggerUserAdmin = () => {

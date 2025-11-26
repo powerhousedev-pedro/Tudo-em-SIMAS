@@ -11,11 +11,11 @@
           extend: {
             colors: {
               simas: {
-                dark: '#13335a',    /* Navy - Texto Principal e Fundos Escuros */
-                cyan: '#42b9eb',    /* Cyan - Gradiente Start */
-                blue: '#2a688f',    /* Blue - Gradiente End / Acentos */
-                cloud: '#eceded',   /* Cloud - Fundo Claro / Detalhes */
-                surface: '#ffffff', /* Branco Puro */
+                dark: '#13335a',    /* Navy */
+                cyan: '#42b9eb',    /* Cyan */
+                blue: '#2a688f',    /* Blue */
+                cloud: '#eceded',   /* Cloud */
+                surface: '#ffffff', /* Branco */
                 danger: '#ef4444',
                 warning: '#f59e0b',
                 success: '#10b981',
@@ -60,62 +60,44 @@
     <style>
       body {
         font-family: 'Inter', sans-serif;
-        background-color: #eceded; /* Simas Cloud */
-        color: #13335a; /* Simas Dark */
+        background-color: #eceded;
+        color: #13335a;
       }
-      
       /* Minimal Scrollbar */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent; 
-      }
-      ::-webkit-scrollbar-thumb {
-        background-color: #cbd5e1; 
-        border-radius: 99px;
-        border: 2px solid #eceded;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background-color: #2a688f; 
-      }
-      .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-      }
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 6px;
-      }
-      
-      /* Utilities */
-      .glass-panel {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.5);
-      }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 99px; border: 2px solid #eceded; }
+      ::-webkit-scrollbar-thumb:hover { background-color: #2a688f; }
+      .scrollbar-hide::-webkit-scrollbar { display: none; }
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+      .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.5); }
     </style>
   <script type="importmap">
 {
   "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.9.6",
-    "recharts": "https://aistudiocdn.com/recharts@^3.5.0",
-    "jspdf": "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm",
-    "jspdf-autotable": "https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/+esm",
     "express": "https://aistudiocdn.com/express@^5.1.0",
-    "dotenv": "https://aistudiocdn.com/dotenv@^17.2.3",
     "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "dotenv": "https://aistudiocdn.com/dotenv@^17.2.3",
+    "node-cron": "https://aistudiocdn.com/node-cron@^4.2.1",
     "@prisma/client": "https://aistudiocdn.com/@prisma/client@^7.0.1",
-    "bcryptjs": "https://aistudiocdn.com/bcryptjs@^3.0.3",
     "jsonwebtoken": "https://aistudiocdn.com/jsonwebtoken@^9.0.2",
-    "node-cron": "https://aistudiocdn.com/node-cron@^4.2.1"
+    "bcryptjs": "https://aistudiocdn.com/bcryptjs@^3.0.3",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.9.6",
+    "vite": "https://aistudiocdn.com/vite@^7.2.4",
+    "jspdf": "https://aistudiocdn.com/jspdf@^3.0.4",
+    "jspdf-autotable": "https://aistudiocdn.com/jspdf-autotable@^5.0.2",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.0"
   }
 }
 </script>
 </head>
   <body class="h-screen overflow-hidden selection:bg-simas-cyan selection:text-white antialiased">
     <div id="root"></div>
+    <!-- Link vital para o Vite saber onde começa o React -->
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
