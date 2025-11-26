@@ -47,145 +47,14 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
   }
 }
 
-// Helper to enrich data on client-side to match Legacy behavior
-const enrichEntityData = async (entityName: string, data: any[]): Promise<any[]> => {
-    // Helper to create maps for quick lookups
-    const createMap = (items: any[], key: string, valueField: string) => 
-        new Map(items.map((i: any) => [String(i[key]), i[valueField]]));
-
-    // Parallel fetch for dependencies based on entity needs
-    if (entityName === 'CONTRATO') {
-        const [pessoas, funcoes] = await Promise.all([api.fetchEntity('PESSOA'), api.fetchEntity('FUNÇÃO')]);
-        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
-        const funcaoMap = createMap(funcoes, 'ID_FUNCAO', 'FUNCAO');
-        return data.map(c => ({ ...c, NOME_PESSOA: pessoaMap.get(c.CPF) || c.CPF, NOME_FUNCAO: funcaoMap.get(c.ID_FUNCAO) || 'N/A' }));
-    }
-    
-    if (entityName === 'SERVIDOR') {
-       const [pessoas, cargos] = await Promise.all([api.fetchEntity('PESSOA'), api.fetchEntity('CARGOS')]);
-       const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
-       const cargoMap = createMap(cargos, 'ID_CARGO', 'NOME_CARGO');
-       return data.map(s => ({ ...s, NOME_PESSOA: pessoaMap.get(s.CPF) || s.CPF, NOME_CARGO: cargoMap.get(s.ID_CARGO) || s.ID_CARGO }));
-    }
-
-    if (entityName === 'ALOCACAO') {
-        const [servidores, lotacoes, funcoes, pessoas] = await Promise.all([
-            api.fetchEntity('SERVIDOR'), api.fetchEntity('LOTAÇÕES'), api.fetchEntity('FUNÇÃO'), api.fetchEntity('PESSOA')
-        ]);
-        // Servidor -> Pessoa Name mapping
-        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
-        const servidorCpfMap = createMap(servidores, 'MATRICULA', 'CPF');
-        const lotacaoMap = createMap(lotacoes, 'ID_LOTACAO', 'LOTACAO');
-        const funcaoMap = createMap(funcoes, 'ID_FUNCAO', 'FUNCAO');
-
-        return data.map(a => ({
-            ...a,
-            NOME_PESSOA: pessoaMap.get(servidorCpfMap.get(a.MATRICULA)) || `Mat: ${a.MATRICULA}`,
-            NOME_LOTACAO: lotacaoMap.get(a.ID_LOTACAO) || a.ID_LOTACAO,
-            NOME_FUNCAO: funcaoMap.get(a.ID_FUNCAO) || 'N/A'
-        }));
-    }
-
-    if (entityName === 'PROTOCOLO') {
-        const pessoas = await api.fetchEntity('PESSOA');
-        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
-        return data.map(p => ({
-            ...p,
-            NOME_PESSOA: pessoaMap.get(p.CPF) || p.CPF,
-            DETALHE_VINCULO: p.ID_CONTRATO ? `Contrato: ${p.ID_CONTRATO}` : (p.MATRICULA ? `Matrícula: ${p.MATRICULA}` : 'N/A')
-        }));
-    }
-
-    if (entityName === 'NOMEAÇÃO') {
-        const [servidores, pessoas, cargosCom] = await Promise.all([
-            api.fetchEntity('SERVIDOR'), api.fetchEntity('PESSOA'), api.fetchEntity('CARGO COMISSIONADO')
-        ]);
-        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
-        const servidorCpfMap = createMap(servidores, 'MATRICULA', 'CPF');
-        const cargoMap = createMap(cargosCom, 'ID_CARGO_COMISSIONADO', 'NOME');
-
-        return data.map(n => ({
-            ...n,
-            NOME_SERVIDOR: pessoaMap.get(servidorCpfMap.get(n.MATRICULA)) || n.MATRICULA,
-            NOME_CARGO_COMISSIONADO: cargoMap.get(n.ID_CARGO_COMISSIONADO) || n.ID_CARGO_COMISSIONADO
-        }));
-    }
-
-    if (entityName === 'TURMAS') {
-        const capacitacoes = await api.fetchEntity('CAPACITAÇÃO');
-        const capMap = createMap(capacitacoes, 'ID_CAPACITACAO', 'ATIVIDADE_DE_CAPACITACAO');
-        return data.map(t => ({ ...t, NOME_CAPACITACAO: capMap.get(t.ID_CAPACITACAO) || t.ID_CAPACITACAO }));
-    }
-
-    if (entityName === 'CHAMADA' || entityName === 'VISITAS' || entityName === 'SOLICITAÇÃO DE PESQUISA' || entityName === 'ATENDIMENTO') {
-        const [pessoas, turmas] = await Promise.all([
-            api.fetchEntity('PESSOA'), 
-            entityName === 'CHAMADA' ? api.fetchEntity('TURMAS') : Promise.resolve([])
-        ]);
-        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
-        const turmaMap = entityName === 'CHAMADA' ? createMap(turmas, 'ID_TURMA', 'NOME_TURMA') : new Map();
-        
-        return data.map(item => ({
-            ...item,
-            NOME_PESSOA: pessoaMap.get(item.CPF) || item.CPF,
-            ...(entityName === 'CHAMADA' ? { NOME_TURMA: turmaMap.get(item.ID_TURMA) || item.ID_TURMA } : {})
-        }));
-    }
-
-    if (entityName === 'ENCONTRO') {
-        const turmas = await api.fetchEntity('TURMAS');
-        const turmaMap = createMap(turmas, 'ID_TURMA', 'NOME_TURMA');
-        return data.map(e => ({ ...e, NOME_TURMA: turmaMap.get(e.ID_TURMA) || e.ID_TURMA }));
-    }
-
-    if (entityName === 'VAGAS' || entityName === 'EXERCÍCIO') {
-        const [lotacoes, cargos, editais, exercicios] = await Promise.all([
-            api.fetchEntity('LOTAÇÕES'), api.fetchEntity('CARGOS'), api.fetchEntity('EDITAIS'), api.fetchEntity('EXERCÍCIO')
-        ]);
-        const lotacaoMap = createMap(lotacoes, 'ID_LOTACAO', 'LOTACAO');
-        const cargoMap = createMap(cargos, 'ID_CARGO', 'NOME_CARGO');
-        const editalMap = createMap(editais, 'ID_EDITAL', 'EDITAL');
-        
-        // Map Vaga -> Lotacao Exercicio Name
-        const exercicioMap = new Map();
-        exercicios.forEach((ex: any) => {
-            exercicioMap.set(String(ex.ID_VAGA), lotacaoMap.get(ex.ID_LOTACAO));
-        });
-
-        // If enriching Exercicio, we need Vaga info first
-        if (entityName === 'EXERCÍCIO') {
-            // Need to fetch Vagas internally to map Cargo
-            const vagasRaw = await request('/vagas'); 
-            const vagaCargoMap = new Map(vagasRaw.map((v:any) => [v.ID_VAGA, v.ID_CARGO]));
-            
-            return data.map(e => ({
-                ...e,
-                NOME_LOTACAO_EXERCICIO: lotacaoMap.get(e.ID_LOTACAO) || 'N/A',
-                NOME_CARGO_VAGA: cargoMap.get(String(vagaCargoMap.get(e.ID_VAGA))) || 'N/A'
-            }));
-        }
-
-        return data.map(v => ({
-            ...v,
-            LOTACAO_NOME: lotacaoMap.get(v.ID_LOTACAO) || 'N/A',
-            CARGO_NOME: cargoMap.get(v.ID_CARGO) || 'N/A',
-            EDITAL_NOME: editalMap.get(v.ID_EDITAL) || 'N/A',
-            NOME_LOTACAO_EXERCICIO: exercicioMap.get(v.ID_VAGA) || null
-        }));
-    }
-
-    return data;
-};
-
 export const api = {
   login: async (usuario: string, senha: string) => {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
   fetchEntity: async (entityName: string): Promise<any[]> => {
-    const rawData = await request(`/${entityName.toLowerCase().replace(/ /g, '-')}`);
-    // Apply client-side enrichment to match legacy behavior
-    return enrichEntityData(entityName, rawData);
+    // Now the backend handles enrichment, so we just fetch directly.
+    return request(`/${entityName.toLowerCase().replace(/ /g, '-')}`);
   },
 
   createRecord: async (entityName: string, data: RecordData) => {
@@ -240,12 +109,8 @@ export const api = {
     const pending = data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
     if (pending.length === 0) return [];
 
-    const pessoas = await api.fetchEntity('PESSOA');
-    const pessoaMap = new Map(pessoas.map((p: any) => [p.CPF, p.NOME]));
-    return pending.map((p: any) => ({ 
-        ...p, 
-        NOME_PESSOA: pessoaMap.get(p.CPF) || p.CPF 
-    }));
+    // Atendimentos now come enriched with NOME_PESSOA from backend
+    return pending; 
   },
 
   getActionContext: async (idAtendimento: string): Promise<ActionContext> => {
@@ -254,14 +119,12 @@ export const api = {
     
     if (!atd) throw new Error("Atendimento não encontrado");
 
-    const pessoas = await api.fetchEntity('PESSOA');
-    const person = pessoas.find((p: any) => p.CPF === atd.CPF);
-    
     const lookups: any = {};
     const fields: any = {};
     
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     
+    // We still need lookups for the modal dropdowns, but these fetches are simple now
     if (acao.includes('CONTRATO')) {
         lookups['VAGAS'] = await api.fetchEntity('VAGAS');
         lookups['FUNÇÃO'] = await api.fetchEntity('FUNÇÃO');
@@ -273,7 +136,7 @@ export const api = {
     }
 
     return {
-        atendimento: { ...atd, NOME_PESSOA: person?.NOME || atd.CPF },
+        atendimento: atd,
         lookups,
         fields
     };
@@ -308,7 +171,7 @@ export const api = {
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  // --- REPORTS LOGIC (Client-Side Aggregation mimicking Legacy behavior) ---
+  // --- REPORTS LOGIC (Client-Side Aggregation) ---
   getReportData: async (reportName: string): Promise<ReportData> => {
     
     // 1. PAINEL VAGAS
@@ -320,18 +183,16 @@ export const api = {
             CARGO: v.CARGO_NOME,
             DETALHES: v.STATUS_VAGA === 'Reservada' ? `Reservada (${v.RESERVADA_ID})` : v.STATUS_VAGA
         }));
-        // Filters logic is handled in UI for React version
         return { panorama: vagas, quantitativo: quantitativo, filtrosDisponiveis: {} as any };
     }
 
     // 2. DASHBOARD PESSOAL
     if (reportName === 'dashboardPessoal') {
-        const [contratos, servidores, alocacoes, vagas, lotacoes] = await Promise.all([
+        const [contratos, servidores, alocacoes, vagas] = await Promise.all([
             api.fetchEntity('CONTRATO'), api.fetchEntity('SERVIDOR'), 
-            api.fetchEntity('ALOCACAO'), api.fetchEntity('VAGAS'), api.fetchEntity('LOTAÇÕES')
+            api.fetchEntity('ALOCACAO'), api.fetchEntity('VAGAS')
         ]);
         
-        // Calculate Vinculo Chart
         const vinculoCounts: any = { 'OSC': contratos.length };
         servidores.forEach((s: any) => {
             const v = s.VINCULO || 'Não especificado';
@@ -339,12 +200,10 @@ export const api = {
         });
         const graficoVinculo = Object.entries(vinculoCounts).map(([name, value]) => ({ name, value: Number(value) }));
 
-        // Calculate Lotacao Chart
         const lotacaoCounts: any = {};
         alocacoes.forEach((a: any) => {
             lotacaoCounts[a.NOME_LOTACAO] = (lotacaoCounts[a.NOME_LOTACAO] || 0) + 1;
         });
-        // Add contracts via Vagas
         const vagaMap = new Map<string, string>(vagas.map((v:any) => [v.ID_VAGA, v.LOTACAO_NOME]));
         contratos.forEach((c: any) => {
             const lot = vagaMap.get(c.ID_VAGA) || 'Desconhecida';
@@ -359,7 +218,7 @@ export const api = {
         return {
             totais: { 'Contratados': contratos.length, 'Servidores': servidores.length, 'Total': contratos.length + servidores.length },
             graficos: { vinculo: graficoVinculo as any, lotacao: graficoLotacao as any }
-        } as any; // Casting for structure match
+        } as any;
     }
 
     // 3. ANALISE CUSTOS
@@ -369,13 +228,18 @@ export const api = {
         ]);
         
         const cargoSalarioMap = new Map(cargos.map((c:any) => [c.ID_CARGO, parseFloat(c.SALARIO || 0)]));
-        const vagaMap = new Map<string, { lotacao: string, cargo: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargo: v.ID_CARGO }]));
+        const vagaMap = new Map<string, { lotacao: string, cargo: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargo: v.CARGO_NOME }])); // CARGO_NOME is now key
         
+        // We actually need cargo ID for salary lookup, but Vagas optimized API returns names. 
+        // Ideally Vagas optimized API should return CARGO_ID too. Assuming it returns CARGO object with ID.
+        // Let's rely on Vagas optimized returning IDs too (implied in server.ts as part of `...v`)
+        const vagaMapID = new Map<string, { lotacao: string, cargoId: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargoId: v.ID_CARGO }]));
+
         const custoPorLotacao: any = {};
         contratos.forEach((c: any) => {
-            const v = vagaMap.get(c.ID_VAGA);
+            const v = vagaMapID.get(c.ID_VAGA);
             if (v) {
-                const sal = cargoSalarioMap.get(v.cargo) || 0;
+                const sal = cargoSalarioMap.get(v.cargoId) || 0;
                 custoPorLotacao[v.lotacao] = (custoPorLotacao[v.lotacao] || 0) + sal;
             }
         });
@@ -408,7 +272,6 @@ export const api = {
         const linhas = alocacoes.map((a: any) => [
             a.NOME_LOTACAO, a.NOME_PESSOA, a.MATRICULA, a.NOME_FUNCAO
         ]);
-        // Simple client-side group could be added here if needed
         return { colunas: ['Lotação', 'Servidor', 'Matrícula', 'Função'], linhas };
     }
 
@@ -438,7 +301,6 @@ export const api = {
     // 7. ADESAO FREQUENCIA
     if (reportName === 'adesaoFrequencia') {
         const chamadas = await api.fetchEntity('CHAMADA');
-        // Assuming API fetchEntity already enriched CHAMADA with Turma and Pessoa names
         const linhas = chamadas.map((c: any) => [
             c.NOME_TURMA, c.NOME_PESSOA, c.PRESENCA, new Date(c.DATA_ENCONTRO || Date.now()).toLocaleDateString()
         ]);
