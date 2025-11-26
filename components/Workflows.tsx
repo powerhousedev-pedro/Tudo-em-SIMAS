@@ -5,6 +5,7 @@ import { Button } from './Button';
 import { UserSession, RecordData } from '../types';
 import { ENTITY_CONFIGS, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, DATA_MODEL } from '../constants';
 import { AppContextProps } from '../App';
+import { businessLogic } from '../utils/businessLogic';
 import { Card } from './Card'; // Reusing Card for consistency, but we might style it differently
 
 interface WorkflowsProps extends AppContextProps {}
@@ -165,9 +166,13 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
       setSubmitting(true);
       try {
-          const payload = { ...formData };
+          let payload = { ...formData };
           payload['ID_ATENDIMENTO'] = `ATD${Math.floor(Math.random() * 1000000)}`;
           payload['DATA_ENTRADA'] = new Date().toISOString(); // Simulate server-side setting
+
+          // Calculate metadata (Action Type, Target Entity)
+          const metadata = businessLogic.calculateAtendimentoMetadata(payload);
+          payload = { ...payload, ...metadata };
 
           const res = await api.createRecord('ATENDIMENTO', payload);
           if (res.success) {
