@@ -48,7 +48,7 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
 }
 
 // Helper to enrich data on client-side to match Legacy behavior
-const enrichEntityData = async (entityName: string, data: any[]) => {
+const enrichEntityData = async (entityName: string, data: any[]): Promise<any[]> => {
     // Helper to create maps for quick lookups
     const createMap = (items: any[], key: string, valueField: string) => 
         new Map(items.map((i: any) => [String(i[key]), i[valueField]]));
@@ -118,7 +118,10 @@ const enrichEntityData = async (entityName: string, data: any[]) => {
     }
 
     if (entityName === 'CHAMADA' || entityName === 'VISITAS' || entityName === 'SOLICITAÇÃO DE PESQUISA' || entityName === 'ATENDIMENTO') {
-        const [pessoas, turmas] = await Promise.all([api.fetchEntity('PESSOA'), entityName === 'CHAMADA' ? api.fetchEntity('TURMAS') : []]);
+        const [pessoas, turmas] = await Promise.all([
+            api.fetchEntity('PESSOA'), 
+            entityName === 'CHAMADA' ? api.fetchEntity('TURMAS') : Promise.resolve([])
+        ]);
         const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
         const turmaMap = entityName === 'CHAMADA' ? createMap(turmas, 'ID_TURMA', 'NOME_TURMA') : new Map();
         
@@ -179,7 +182,7 @@ export const api = {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  fetchEntity: async (entityName: string) => {
+  fetchEntity: async (entityName: string): Promise<any[]> => {
     const rawData = await request(`/${entityName.toLowerCase().replace(/ /g, '-')}`);
     // Apply client-side enrichment to match legacy behavior
     return enrichEntityData(entityName, rawData);
