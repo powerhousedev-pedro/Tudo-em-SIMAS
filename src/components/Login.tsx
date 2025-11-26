@@ -35,10 +35,12 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         onLogin(sessionData);
       } else {
+        // This block might not be reached if api throws on 400
         setError('Usuário ou senha inválidos.');
       }
-    } catch (err) {
-      setError('Falha na conexão com o servidor.');
+    } catch (err: any) {
+      // Use the message from the error thrown by api client
+      setError(err.message || 'Falha na conexão com o servidor.');
     } finally {
       setLoading(false);
     }
@@ -97,7 +99,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </div>
 
             {error && (
-              <div className="flex items-center gap-3 text-red-300 text-xs font-semibold bg-red-500/10 p-4 rounded-xl border border-red-500/20">
+              <div className="flex items-center gap-3 text-red-300 text-xs font-semibold bg-red-500/10 p-4 rounded-xl border border-red-500/20 animate-fade-in">
                 <i className="fas fa-exclamation-circle"></i>
                 {error}
               </div>

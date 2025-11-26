@@ -5,17 +5,55 @@ import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 const API_BASE_URL = 'http://localhost:3001/api';
 const TOKEN_KEY = 'simas_auth_token';
 
-// Deduplicação de requisições
-const inflightRequests: any = {};
+// --- CACHE & NORMALIZATION ---
 
-// Normaliza endpoints
-const normalizeEndpoint = (entityName: string) => {
-    return entityName.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/ /g, '-');
+const cache: Record<string, { data: any, timestamp: number }> = {};
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+
+const inflightRequests: Record<string, Promise<any> | undefined> = {};
+
+// Explicit map to ensure specific entities translate correctly to backend routes
+const ENDPOINT_MAP: Record<string, string> = {
+    'LOTAÇÕES': 'lotacoes',
+    'LOTACOES': 'lotacoes',
+    'FUNÇÃO': 'funcao',
+    'FUNCAO': 'funcao',
+    'EXERCÍCIO': 'exercicio',
+    'EXERCICIO': 'exercicio',
+    'CAPACITAÇÃO': 'capacitacao',
+    'CAPACITACAO': 'capacitacao',
+    'SOLICITAÇÃO DE PESQUISA': 'solicitacao-de-pesquisa',
+    'SOLICITACAODEPESQUISA': 'solicitacao-de-pesquisa',
+    'NOMEAÇÃO': 'nomeacao',
+    'NOMEACAO': 'nomeacao',
+    'CARGO COMISSIONADO': 'cargo-comissionado',
+    'CARGOCOMISSIONADO': 'cargo-comissionado',
+    'CONTRATO_HISTORICO': 'contrato_historico',
+    'CONTRATOHISTORICO': 'contrato_historico',
+    'ALOCACAO_HISTORICO': 'alocacao_historico',
+    'ALOCACAOHISTORICO': 'alocacao_historico'
 };
 
-// --- CLIENTE API ---
+const normalizeEndpoint = (entityName: string) => {
+    const upper = entityName.toUpperCase();
+    if (ENDPOINT_MAP[upper]) return ENDPOINT_MAP[upper];
+
+    // Fallback: Aggressive normalization
+    return entityName.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .replace(/ /g, '-') // Space to dash
+        .replace(/ç/g, 'c')
+        .replace(/ã/g, 'a')
+        .replace(/õ/g, 'o')
+        .replace(/á/g, 'a')
+        .replace(/é/g, 'e')
+        .replace(/í/g, 'i')
+        .replace(/ó/g, 'o')
+        .replace(/ú/g, 'u')
+        .replace(/[^a-z0-9-]/g, ''); // Remove anything else
+};
+
+// --- REAL API CLIENT ---
 
 async function request(endpoint: string, method: string = 'GET', body?: any) {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -64,12 +102,23 @@ export const api = {
   fetchEntity: async (entityName: string, forceRefresh = false): Promise<any[]> => {
     const endpoint = `/${normalizeEndpoint(entityName)}`;
     
-    if (inflightRequests[endpoint] && !forceRefresh) {
-        return inflightRequests[endpoint];
+    // 1. Check Cache
+    const now = Date.now();
+    if (!forceRefresh && cache[endpoint] && (now - cache[endpoint].timestamp < CACHE_TTL)) {
+        return Promise.resolve(cache[endpoint].data);
     }
 
+    // 2. Check Inflight (Deduplication)
+    if (inflightRequests[endpoint] && !forceRefresh) {
+        return inflightRequests[endpoint] as Promise<any[]>;
+    }
+
+    // 3. Fetch
     const promise = request(endpoint)
-        .then(data => data)
+        .then(data => {
+            cache[endpoint] = { data, timestamp: Date.now() };
+            return data;
+        })
         .finally(() => {
             delete inflightRequests[endpoint];
         });
@@ -79,35 +128,51 @@ export const api = {
   },
 
   createRecord: async (entityName: string, data: RecordData) => {
-    return request(`/${normalizeEndpoint(entityName)}`, 'POST', data);
+    const endpoint = `/${normalizeEndpoint(entityName)}`;
+    const res = await request(endpoint, 'POST', data);
+    if (res.success) delete cache[endpoint]; // Invalidate cache
+    return res;
   },
 
   updateRecord: async (entityName: string, pkField: string, pkValue: string, data: RecordData) => {
-    return request(`/${normalizeEndpoint(entityName)}/${pkValue}`, 'PUT', data);
+    const endpoint = `/${normalizeEndpoint(entityName)}`;
+    const res = await request(`${endpoint}/${pkValue}`, 'PUT', data);
+    if (res.success) delete cache[endpoint]; // Invalidate cache
+    return res;
   },
 
   deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
-    return request(`/${normalizeEndpoint(entityName)}/${pkValue}`, 'DELETE');
+    const endpoint = `/${normalizeEndpoint(entityName)}`;
+    const res = await request(`${endpoint}/${pkValue}`, 'DELETE');
+    if (res.success) delete cache[endpoint]; // Invalidate cache
+    return res;
   },
 
+  // User Management
   getUsers: async () => {
       return request('/usuarios');
   },
 
   deleteUser: async (usuarioId: string) => {
-      return request(`/usuarios/${usuarioId}`, 'DELETE');
+      const res = await request(`/usuarios/${usuarioId}`, 'DELETE');
+      return res;
   },
 
   toggleVagaBloqueada: async (idVaga: string) => {
-    return request(`/vagas/${idVaga}/toggle-lock`, 'POST');
+    const res = await request(`/vagas/${idVaga}/toggle-lock`, 'POST');
+    delete cache['/vagas'];
+    return res;
   },
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
-      return request('/exercicio', 'POST', { 
+      const res = await request('/exercicio', 'POST', { 
           ID_EXERCICIO: 'EXE' + Date.now(), 
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
       });
+      delete cache['/exercicio'];
+      delete cache['/vagas'];
+      return res;
   },
 
   getDossiePessoal: async (cpf: string): Promise<DossierData> => {
@@ -139,6 +204,7 @@ export const api = {
     
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     
+    // Use fetchEntity (cached) for lookups
     const promises: Promise<any>[] = [];
     
     if (acao.includes('CONTRATO')) {
@@ -185,11 +251,14 @@ export const api = {
       }
       
       await api.updateRecord('ATENDIMENTO', 'ID_ATENDIMENTO', idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
+      delete cache['/atendimento'];
       
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
+  // --- REPORTS LOGIC ---
   getReportData: async (reportName: string): Promise<ReportData> => {
+    
     if (reportName === 'painelVagas') {
         const vagas = await api.fetchEntity('VAGAS');
         const quantitativo = vagas.map((v: any) => ({
