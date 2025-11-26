@@ -493,8 +493,7 @@ app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
                         ID_ALOCACAO: 'HAL' + Date.now(),
                         MATRICULA: current.MATRICULA, 
                         ID_LOTACAO: current.ID_LOTACAO, 
-                        DATA_INICIO: current.DATA_INICIO, 
-                        MOTIVO_MUDANCA: 'Nova Alocação' 
+                        DATA_INICIO: current.DATA_INICIO
                     }
                 });
                 await tx.alocacao.delete({ where: { ID_ALOCACAO: current.ID_ALOCACAO } });
