@@ -5,10 +5,10 @@ import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 const API_BASE_URL = 'http://localhost:3001/api';
 const TOKEN_KEY = 'simas_auth_token';
 
-// Deduplicação de requisições em voo
-const inflightRequests: Record<string, Promise<any> | undefined> = {};
+// Deduplicação de requisições
+const inflightRequests: any = {};
 
-// Normaliza endpoints removendo acentos e espaços
+// Normaliza endpoints
 const normalizeEndpoint = (entityName: string) => {
     return entityName.toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -61,12 +61,11 @@ export const api = {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  // Busca entidade com cache em memória para evitar requisições duplicadas
   fetchEntity: async (entityName: string, forceRefresh = false): Promise<any[]> => {
     const endpoint = `/${normalizeEndpoint(entityName)}`;
     
     if (inflightRequests[endpoint] && !forceRefresh) {
-        return inflightRequests[endpoint]!;
+        return inflightRequests[endpoint];
     }
 
     const promise = request(endpoint)
@@ -91,7 +90,6 @@ export const api = {
     return request(`/${normalizeEndpoint(entityName)}/${pkValue}`, 'DELETE');
   },
 
-  // Gestão de Usuários
   getUsers: async () => {
       return request('/usuarios');
   },
@@ -141,7 +139,6 @@ export const api = {
     
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     
-    // Busca paralela de dependências
     const promises: Promise<any>[] = [];
     
     if (acao.includes('CONTRATO')) {
@@ -192,9 +189,7 @@ export const api = {
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  // --- RELATÓRIOS (Agregação Client-Side) ---
   getReportData: async (reportName: string): Promise<ReportData> => {
-    // 1. PAINEL VAGAS
     if (reportName === 'painelVagas') {
         const vagas = await api.fetchEntity('VAGAS');
         const quantitativo = vagas.map((v: any) => ({
@@ -206,7 +201,6 @@ export const api = {
         return { panorama: vagas, quantitativo: quantitativo, filtrosDisponiveis: {} as any };
     }
 
-    // 2. DASHBOARD PESSOAL
     if (reportName === 'dashboardPessoal') {
         const [contratos, servidores, alocacoes, vagas] = await Promise.all([
             api.fetchEntity('CONTRATO'), api.fetchEntity('SERVIDOR'), 
@@ -241,7 +235,6 @@ export const api = {
         } as any;
     }
 
-    // 3. ANALISE CUSTOS
     if (reportName === 'analiseCustos') {
         const [contratos, vagas, cargos] = await Promise.all([
             api.fetchEntity('CONTRATO'), api.fetchEntity('VAGAS'), api.fetchEntity('CARGOS')
@@ -272,7 +265,6 @@ export const api = {
         } as any;
     }
 
-    // 4. CONTRATOS ATIVOS
     if (reportName === 'contratosAtivos') {
         const contratos = await api.fetchEntity('CONTRATO');
         const linhas = contratos.map((c: any) => [
@@ -281,7 +273,6 @@ export const api = {
         return { colunas: ['Nome', 'CPF', 'Contrato', 'Função', 'Início'], linhas };
     }
 
-    // 5. QUADRO LOTACAO (SERVIDORES)
     if (reportName === 'quadroLotacaoServidores') {
         const alocacoes = await api.fetchEntity('ALOCACAO');
         const linhas = alocacoes.map((a: any) => [
@@ -290,7 +281,6 @@ export const api = {
         return { colunas: ['Lotação', 'Servidor', 'Matrícula', 'Função'], linhas };
     }
 
-    // 6. PERFIL DEMOGRAFICO
     if (reportName === 'perfilDemografico') {
         const pessoas = await api.fetchEntity('PESSOA');
         const counts: any = {};
@@ -308,7 +298,6 @@ export const api = {
         } as any;
     }
 
-    // 7. ADESAO FREQUENCIA
     if (reportName === 'adesaoFrequencia') {
         const chamadas = await api.fetchEntity('CHAMADA');
         const linhas = chamadas.map((c: any) => [
@@ -317,7 +306,6 @@ export const api = {
         return { colunas: ['Turma', 'Participante', 'Presença', 'Data'], linhas };
     }
 
-    // 8. ATIVIDADE USUARIOS
     if (reportName === 'atividadeUsuarios') {
         const logs = await api.fetchEntity('AUDITORIA');
         const linhas = logs.map((l: any) => [
