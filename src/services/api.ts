@@ -5,13 +5,15 @@ const API_BASE_URL = 'http://localhost:3001/api';
 const TOKEN_KEY = 'simas_auth_token';
 
 // --- CACHE SYSTEM ---
-const CACHE_DURATION = 60 * 1000; // 1 minute cache for all entities to ensure snappiness
-interface CacheEntry {
-  data: any[];
-  timestamp: number;
-}
-const memoryCache: Record<string, CacheEntry> = {};
+// Simple deduplication map to prevent double-fetching in StrictMode or rapid updates
 const inflightRequests: Record<string, Promise<any>> = {};
+
+// --- HELPER: URL Normalization ---
+const normalizeEndpoint = (entityName: string) => {
+    return entityName.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .replace(/ /g, '-');
+};
 
 // --- REAL API CLIENT ---
 
@@ -59,55 +61,36 @@ export const api = {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  // Optimized fetch with Cache & Deduplication
+  // Optimized fetch with Deduplication
   fetchEntity: async (entityName: string, forceRefresh = false): Promise<any[]> => {
-    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
+    const endpoint = `/${normalizeEndpoint(entityName)}`;
     
-    // 1. Return from Cache if available and valid
-    if (!forceRefresh) {
-        const cached = memoryCache[normalizedName];
-        if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
-            return cached.data;
-        }
+    // Request Deduplication
+    if (inflightRequests[endpoint] && !forceRefresh) {
+        return inflightRequests[endpoint];
     }
 
-    // 2. Request Deduplication
-    if (inflightRequests[normalizedName]) {
-        return inflightRequests[normalizedName];
-    }
-
-    // 3. Fetch
-    const promise = request(`/${normalizedName}`)
-        .then(data => {
-            memoryCache[normalizedName] = { data, timestamp: Date.now() };
-            return data;
-        })
+    // Fetch
+    const promise = request(endpoint)
+        .then(data => data)
         .finally(() => {
-            delete inflightRequests[normalizedName];
+            delete inflightRequests[endpoint];
         });
 
-    inflightRequests[normalizedName] = promise;
+    inflightRequests[endpoint] = promise;
     return promise;
   },
 
   createRecord: async (entityName: string, data: RecordData) => {
-    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
-    delete memoryCache[normalizedName]; // Invalidate cache
-    // Also invalidate potential dependencies (naive approach: invalidate all related to operation)
-    // For now, specific cache invalidation is complex, relying on short cache duration or specific manual refreshes
-    return request(`/${normalizedName}`, 'POST', data);
+    return request(`/${normalizeEndpoint(entityName)}`, 'POST', data);
   },
 
   updateRecord: async (entityName: string, pkField: string, pkValue: string, data: RecordData) => {
-    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
-    delete memoryCache[normalizedName];
-    return request(`/${normalizedName}/${pkValue}`, 'PUT', data);
+    return request(`/${normalizeEndpoint(entityName)}/${pkValue}`, 'PUT', data);
   },
 
   deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
-    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
-    delete memoryCache[normalizedName];
-    return request(`/${normalizedName}/${pkValue}`, 'DELETE');
+    return request(`/${normalizeEndpoint(entityName)}/${pkValue}`, 'DELETE');
   },
 
   // User Management
@@ -120,14 +103,11 @@ export const api = {
   },
 
   toggleVagaBloqueada: async (idVaga: string) => {
-    delete memoryCache['vagas'];
     return request(`/vagas/${idVaga}/toggle-lock`, 'POST');
   },
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
-      delete memoryCache['exercício'];
-      delete memoryCache['vagas'];
-      return request('/exercício', 'POST', { 
+      return request('/exercicio', 'POST', { 
           ID_EXERCICIO: 'EXE' + Date.now(), 
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
@@ -139,8 +119,6 @@ export const api = {
   },
 
   restoreAuditLog: async (idLog: string) => {
-    // Clear cache globally as restore can touch anything
-    for (const key in memoryCache) delete memoryCache[key];
     return request(`/audit/${idLog}/restore`, 'POST');
   },
 
@@ -149,7 +127,6 @@ export const api = {
   },
 
   getRevisoesPendentes: async () => {
-    // This endpoint is lightweight
     const data = await request('/atendimento');
     if (!Array.isArray(data)) return [];
     return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
@@ -192,13 +169,6 @@ export const api = {
       const atd = (await api.fetchEntity('ATENDIMENTO')).find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
       
       if (!atd) throw new Error("Atendimento não encontrado");
-
-      // Optimistic Cache Invalidation
-      if (atd.ENTIDADE_ALVO) {
-          delete memoryCache[atd.ENTIDADE_ALVO.toLowerCase().replace(/ /g, '-')];
-      }
-      // Atendimento changed
-      delete memoryCache['atendimento'];
 
       if (atd.TIPO_DE_ACAO === 'INATIVAR' && atd.ENTIDADE_ALVO === 'SERVIDOR') {
           await request('/servidores/inativar', 'POST', data);
