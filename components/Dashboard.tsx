@@ -51,8 +51,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // --- SESSION DATA ---
   const getSession = (): UserSession => {
-      const token = localStorage.getItem('simas_auth_token') || 'mock-token';
-      return { token, papel: 'COORDENAÇÃO', usuario: 'User', isGerente: true };
+      const stored = localStorage.getItem('simas_user_session');
+      if (stored) {
+          try { return JSON.parse(stored); } catch (e) {}
+      }
+      return { token: '', papel: 'GGT', usuario: '', isGerente: false }; // Fallback
   };
   const session = getSession();
 

@@ -28,8 +28,11 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
   const [servers, setServers] = useState<any[]>([]);
 
   const getSession = (): UserSession => {
-      const token = localStorage.getItem('simas_auth_token') || 'mock-token';
-      return { token, papel: 'COORDENAÇÃO', usuario: 'User', isGerente: true };
+      const stored = localStorage.getItem('simas_user_session');
+      if (stored) {
+          try { return JSON.parse(stored); } catch (e) {}
+      }
+      return { token: '', papel: 'GGT', usuario: '', isGerente: false };
   };
   const session = getSession();
 

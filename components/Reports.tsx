@@ -10,10 +10,12 @@ import autoTable from 'jspdf-autotable';
 
 export const Reports: React.FC = () => {
   // Mock session retrieval - replace with Context
-  const getSession = () => {
-      const token = localStorage.getItem('simas_auth_token');
-      // Simple mock parsing for now
-      return { papel: 'COORDENAÇÃO', usuario: 'User' } as UserSession;
+  const getSession = (): UserSession => {
+      const stored = localStorage.getItem('simas_user_session');
+      if (stored) {
+          try { return JSON.parse(stored); } catch (e) {}
+      }
+      return { token: '', papel: 'GGT', usuario: '', isGerente: false };
   }; 
   const session = getSession();
 

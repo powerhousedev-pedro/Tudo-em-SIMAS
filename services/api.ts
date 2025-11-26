@@ -4,7 +4,7 @@ import { ENTITY_CONFIGS } from '../constants';
 // CONFIGURATION
 // --- CHANGE THIS TO FALSE TO CONNECT TO REAL DB ---
 const USE_MOCK_DATA = false; 
-const API_BASE_URL = 'http://localhost:3001/api'; // Adjust to your VPS IP
+const API_BASE_URL = 'https://tudoemsimas.powerhouseapp.de/api'; // Adjust to your VPS IP
 const TOKEN_KEY = 'simas_auth_token';
 
 // --- MOCK DATA INITIALIZATION (Fallback) ---
