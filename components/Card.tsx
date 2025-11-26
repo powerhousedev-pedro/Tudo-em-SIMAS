@@ -16,71 +16,69 @@ interface CardProps {
   };
 }
 
+const STATUS_STYLES: { [key: string]: string } = {
+    'Ativa': 'bg-green-50 text-green-700 border-green-200',
+    'Disponível': 'bg-green-50 text-green-700 border-green-200',
+    'Ativo': 'bg-green-50 text-green-700 border-green-200',
+    'Bloqueada': 'bg-red-50 text-red-700 border-red-200',
+    'Inativo': 'bg-red-50 text-red-700 border-red-200',
+    'Reservada': 'bg-cyan-50 text-cyan-700 border-cyan-200',
+    'Ocupada': 'bg-gray-50 text-gray-600 border-gray-200',
+    'Em Aviso Prévio': 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    'Em Dispensa': 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    'Pendente': 'bg-orange-50 text-orange-700 border-orange-200'
+};
+
+const DEFAULT_STATUS_STYLE = 'bg-gray-100 text-gray-500 border-gray-200';
+
 export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, status, selected, onSelect, onEdit, actions, exerciseData }) => {
   
-  const isBlocked = status === 'Bloqueada';
+  const colorClass = status ? (STATUS_STYLES[status] || DEFAULT_STATUS_STYLE) : '';
   
-  // Minimalist badges logic matching Legacy System colors
-  let statusBadge = null;
-  if (status) {
-    let colorClass = 'bg-gray-100 text-gray-500 border-gray-200'; // Default Gray
-    
-    if (status === 'Ativa' || status === 'Disponível' || status === 'Ativo') {
-        colorClass = 'bg-green-50 text-green-700 border-green-200';
-    } else if (isBlocked || status === 'Inativo') {
-        colorClass = 'bg-red-50 text-red-700 border-red-200';
-    } else if (status === 'Reservada') {
-        colorClass = 'bg-cyan-50 text-cyan-700 border-cyan-200';
-    } else if (status === 'Ocupada') {
-        colorClass = 'bg-gray-50 text-gray-600 border-gray-200'; 
-    } else if (status === 'Em Aviso Prévio' || status === 'Em Dispensa') {
-        colorClass = 'bg-yellow-50 text-yellow-700 border-yellow-200'; // Legacy Yellow for Warning/Aviso
-    } else if (status === 'Pendente') {
-        colorClass = 'bg-orange-50 text-orange-700 border-orange-200';
-    }
-    
-    statusBadge = (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${colorClass}`}>
-            {status}
-        </span>
-    );
-  }
+  // Special visual override for border color based on specific status
+  const borderOverride = status === 'Em Aviso Prévio' ? 'border-l-yellow-400' : '';
+  const blockedOverride = status === 'Bloqueada' ? 'bg-simas-dark border-l-red-500 text-white' : '';
 
   return (
     <div 
       onClick={onSelect}
       className={`
-        group relative p-4 mb-3 transition-all duration-200 cursor-pointer rounded-xl border
+        group relative p-4 mb-3 transition-all duration-200 cursor-pointer rounded-xl border border-l-[5px]
         ${selected 
           ? 'bg-white border-simas-cyan ring-1 ring-simas-cyan shadow-md z-10' 
-          : 'bg-white border-slate-200 hover:border-simas-cyan/50 shadow-sm hover:shadow-md'}
+          : `bg-white border-slate-200 hover:border-simas-cyan/50 shadow-sm hover:shadow-md border-l-simas-cyan`}
+        ${borderOverride}
+        ${blockedOverride}
       `}
     >
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0 pr-6">
-            <h4 className={`font-bold truncate text-sm leading-tight ${selected ? 'text-simas-cyan' : 'text-simas-dark'}`}>{title}</h4>
-            {subtitle && <p className="text-xs font-medium truncate text-gray-500 mt-0.5">{subtitle}</p>}
+            <h4 className={`font-bold truncate text-sm leading-tight ${selected && !blockedOverride ? 'text-simas-cyan' : (blockedOverride ? 'text-white' : 'text-simas-dark')}`}>
+                {title}
+            </h4>
+            {subtitle && <p className={`text-xs font-medium truncate mt-0.5 ${blockedOverride ? 'text-gray-300' : 'text-gray-500'}`}>{subtitle}</p>}
         </div>
       </div>
 
-      {/* Details with whitespace-pre-line to support Legacy multi-line format */}
       {details && (
-        <div className="mt-2 pt-2 border-t border-gray-50 flex items-start gap-2">
-            <div className="w-0.5 h-full min-h-[12px] bg-gray-200 rounded-full flex-shrink-0 mt-1"></div>
-            <p className="text-[11px] font-medium text-gray-500 leading-tight whitespace-pre-line">{details}</p>
+        <div className={`mt-2 pt-2 border-t flex items-start gap-2 ${blockedOverride ? 'border-white/10' : 'border-gray-50'}`}>
+            <div className={`w-0.5 h-full min-h-[12px] rounded-full flex-shrink-0 mt-1 ${blockedOverride ? 'bg-white/30' : 'bg-gray-200'}`}></div>
+            <p className={`text-[11px] font-medium leading-tight whitespace-pre-line ${blockedOverride ? 'text-gray-300' : 'text-gray-500'}`}>
+                {details}
+            </p>
         </div>
       )}
       
       {exerciseData && (
-          <div className="mt-3 pt-2 border-t border-gray-50">
+          <div className={`mt-3 pt-2 border-t ${blockedOverride ? 'border-white/10' : 'border-gray-50'}`}>
               <div className="flex items-center justify-between group/ex">
-                  <div className="flex items-center gap-2 overflow-hidden bg-slate-50 rounded px-2 py-1 max-w-full border border-slate-100">
-                      <i className="fas fa-map-marker-alt text-simas-blue text-[10px]"></i>
-                      <span className="text-[10px] font-semibold text-gray-600 truncate">{exerciseData.label}</span>
+                  <div className={`flex items-center gap-2 overflow-hidden rounded px-2 py-1 max-w-full border ${blockedOverride ? 'bg-white/10 border-white/20' : 'bg-slate-50 border-slate-100'}`}>
+                      <i className={`fas fa-map-marker-alt text-[10px] ${blockedOverride ? 'text-simas-cyan' : 'text-simas-blue'}`}></i>
+                      <span className={`text-[10px] font-semibold truncate ${blockedOverride ? 'text-gray-200' : 'text-gray-600'}`}>{exerciseData.label}</span>
                   </div>
                   <button 
                       onClick={(e) => { e.stopPropagation(); exerciseData.onEdit(); }}
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-simas-cyan hover:bg-white transition-all"
+                      className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${blockedOverride ? 'text-gray-400 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-simas-cyan hover:bg-white'}`}
                   >
                       <i className="fas fa-pencil-alt text-[10px]"></i>
                   </button>
@@ -89,7 +87,11 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
       )}
       
       <div className="flex items-center justify-between mt-3">
-          {statusBadge}
+          {status && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${colorClass}`}>
+                  {status}
+              </span>
+          )}
       </div>
 
       {/* Floating Actions */}
@@ -103,7 +105,7 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
           {onEdit && (
              <button 
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-gray-200 text-gray-400 hover:border-simas-cyan hover:text-simas-cyan shadow-sm transition-all"
+                className={`w-7 h-7 flex items-center justify-center rounded-lg border shadow-sm transition-all ${blockedOverride ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-white border-gray-200 text-gray-400 hover:border-simas-cyan hover:text-simas-cyan'}`}
                 title="Editar"
              >
                 <i className="fas fa-pen text-[10px]"></i>
