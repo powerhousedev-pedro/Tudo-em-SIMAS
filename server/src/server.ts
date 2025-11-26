@@ -1,8 +1,8 @@
-
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
+// @ts-ignore
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json() as express.RequestHandler);
 
 // --- HELPERS ---
 
@@ -35,7 +35,7 @@ const sanitizeData = (data: any) => {
     return sanitized;
 };
 
-// Map entity string to Prisma Model Delegate
+// Mapeamento entidade -> Prisma Delegate
 const getModel = (entity: string): any => {
     const map: {[key:string]: any} = {
         'pessoa': prisma.pessoa, 'servidor': prisma.servidor, 'contrato': prisma.contrato,
@@ -122,9 +122,8 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
 });
 
-// --- SPECIFIC BUSINESS LOGIC ROUTES (OPTIMIZED) ---
+// --- ROTAS DE ENTIDADES COM RELACIONAMENTOS ---
 
-// 1. GET VAGAS
 app.get('/api/vagas', authenticateToken, async (req, res) => {
     try {
         const vagas = await prisma.vaga.findMany({
@@ -171,7 +170,6 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 2. GET CONTRATO (Optimized)
 app.get('/api/contrato', authenticateToken, async (req, res) => {
     try {
         const contratos = await prisma.contrato.findMany({
@@ -189,7 +187,6 @@ app.get('/api/contrato', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 3. GET SERVIDOR (Optimized)
 app.get('/api/servidor', authenticateToken, async (req, res) => {
     try {
         const servidores = await prisma.servidor.findMany({
@@ -207,7 +204,6 @@ app.get('/api/servidor', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 4. GET ALOCACAO (Optimized)
 app.get('/api/alocacao', authenticateToken, async (req, res) => {
     try {
         const alocacoes = await prisma.alocacao.findMany({
@@ -227,10 +223,8 @@ app.get('/api/alocacao', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 5. GET PROTOCOLO (Optimized)
 app.get('/api/protocolo', authenticateToken, async (req, res) => {
     try {
-        // Manual fetch for Pessoa to avoid TS error if relation is missing
         const protocolos = await prisma.protocolo.findMany();
         const cpfs = [...new Set(protocolos.map(p => p.CPF).filter(Boolean))];
         const pessoas = await prisma.pessoa.findMany({
@@ -249,7 +243,6 @@ app.get('/api/protocolo', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 6. GET NOMEAÇÃO (Optimized)
 app.get('/api/nomeacao', authenticateToken, async (req, res) => {
     try {
         const nomeacoes = await prisma.nomeacao.findMany({
@@ -267,7 +260,6 @@ app.get('/api/nomeacao', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 7. GET EXERCICIO (Optimized)
 app.get('/api/exercicio', authenticateToken, async (req, res) => {
     try {
         const exercicios = await prisma.exercicio.findMany({
@@ -285,7 +277,6 @@ app.get('/api/exercicio', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 8. GET ATENDIMENTO (Optimized)
 app.get('/api/atendimento', authenticateToken, async (req, res) => {
     try {
         const atendimentos = await prisma.atendimento.findMany({
@@ -299,9 +290,8 @@ app.get('/api/atendimento', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// --- GDEP OPTIMIZED ROUTES ---
+// --- ROTAS GDEP ---
 
-// 9. GET TURMAS (Optimized)
 app.get('/api/turmas', authenticateToken, async (req, res) => {
     try {
         const turmas = await prisma.turma.findMany({
@@ -317,7 +307,6 @@ app.get('/api/turmas', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 10. GET ENCONTRO (Optimized)
 app.get('/api/encontro', authenticateToken, async (req, res) => {
     try {
         const encontros = await prisma.encontro.findMany({
@@ -333,7 +322,6 @@ app.get('/api/encontro', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 11. GET CHAMADA (Optimized)
 app.get('/api/chamada', authenticateToken, async (req, res) => {
     try {
         const chamadas = await prisma.chamada.findMany({
@@ -351,7 +339,6 @@ app.get('/api/chamada', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 12. GET VISITAS (Optimized)
 app.get('/api/visitas', authenticateToken, async (req, res) => {
     try {
         const visitas = await prisma.visita.findMany({
@@ -367,7 +354,6 @@ app.get('/api/visitas', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 13. GET SOLICITAÇÃO DE PESQUISA (Optimized)
 app.get('/api/solicitacao-de-pesquisa', authenticateToken, async (req, res) => {
     try {
         const solicitacoes = await prisma.solicitacaoPesquisa.findMany({
@@ -383,7 +369,6 @@ app.get('/api/solicitacao-de-pesquisa', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 14. GET PESQUISA (Optimized)
 app.get('/api/pesquisa', authenticateToken, async (req, res) => {
     try {
         const pesquisas = await prisma.pesquisa.findMany({
@@ -400,7 +385,8 @@ app.get('/api/pesquisa', authenticateToken, async (req, res) => {
 });
 
 
-// GENERIC CREATE (Validation + Logic)
+// --- AÇÕES DE NEGÓCIO ---
+
 app.post('/api/contrato', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
@@ -442,7 +428,7 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
             await tx.contratoHistorico.create({
                 data: {
                     ID_HISTORICO_CONTRATO: 'HCT' + Date.now(), 
-                    ID_CONTRATO: activeContract.ID_CONTRATO, // Store old ID reference
+                    ID_CONTRATO: activeContract.ID_CONTRATO, 
                     ID_VAGA: activeContract.ID_VAGA, 
                     CPF: activeContract.CPF, 
                     DATA_DO_CONTRATO: activeContract.DATA_DO_CONTRATO,
@@ -571,7 +557,7 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
     } catch (e: any) { res.status(500).json({ success: false }); }
 });
 
-// GENERIC CRUD (Fallback for non-optimized entities)
+// --- CRUD GENÉRICO ---
 app.get('/api/:entity', authenticateToken, async (req, res) => {
     const model = getModel(req.params.entity);
     if (!model) return res.status(404).json({ message: 'Not found' });
@@ -634,7 +620,6 @@ app.delete('/api/:entity/:id', authenticateToken, async (req: any, res) => {
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
 
-// SPECIFIC ACTIONS
 app.post('/api/vagas/:id/toggle-lock', authenticateToken, async (req, res) => {
     try {
         const vaga = await prisma.vaga.findUnique({ where: { ID_VAGA: req.params.id } });

@@ -2,11 +2,11 @@
 import { EntityConfig, DropdownOptions } from './types';
 import { validation } from './utils/validation';
 
-// Helper to format Date
+// Helper para formatar datas em UTC para exibição
 const formatDate = (val: any) => {
   if (!val) return '';
   try {
-    return new Date(val).toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // Force UTC parsing as per legacy
+    return new Date(val).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   } catch (e) {
     return val;
   }
@@ -54,14 +54,13 @@ export const PERMISSOES_POR_PAPEL: { [role: string]: string[] } = {
 };
 
 export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
-  // --- COMPARTILHADO / GERAL ---
+  // --- GERAL ---
   'PESSOA': {
     title: 'Pessoas',
     pk: 'CPF',
-    manualPk: true, // CPF é inserido manualmente
+    manualPk: true,
     filterBy: 'BAIRRO',
     cardDisplay: (item) => {
-        // Legacy: Nome | CPF, Idade | Escolaridade, Formação (se houver) | Bairro
         const age = validation.calculateAge(item.DATA_DE_NASCIMENTO);
         const ageText = age !== null ? ` | ${age} anos` : '';
         const formacaoText = item.FORMACAO ? ` | ${item.FORMACAO}` : '';
@@ -73,13 +72,12 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     }
   },
   
-  // --- GPRGP (Gestão de Pessoas e Contratos) ---
+  // --- GPRGP ---
   'CONTRATO': {
     title: 'Contratos',
     pk: 'ID_CONTRATO',
     pkPrefix: 'CTT',
     cardDisplay: (item) => ({
-      // Legacy: ID, Nome Pessoa, Nome Funcao
       title: `Contrato: ${item.ID_CONTRATO}`,
       subtitle: item.NOME_PESSOA || item.CPF,
       details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${formatDate(item.DATA_DO_CONTRATO)}`,
@@ -91,7 +89,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'VAG',
     filterBy: 'LOTACAO_NOME',
     cardDisplay: (item) => {
-        // Legacy enriched: LOTACAO_NOME, EDITAL_NOME, CARGO_NOME, STATUS_VAGA, REVERVADA_PARA
         let details = `Edital: ${item.EDITAL_NOME || 'N/A'}`;
         if (item.STATUS_VAGA === 'Reservada') {
             details += `\nReservada para: ${item.RESERVADA_PARA_NOME || item.RESERVADA_PARA_CPF || '...'}`;
@@ -100,7 +97,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
             title: item.CARGO_NOME || 'Vaga',
             subtitle: item.LOTACAO_NOME || 'Lotação N/A',
             details: details,
-            status: item.STATUS_VAGA // Disponível, Ocupada, Bloqueada, Reservada, Em Aviso Prévio
+            status: item.STATUS_VAGA 
         };
     }
   },
@@ -126,14 +123,13 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       })
   },
 
-  // --- GGT (Gestão de Gente e Trabalho - Servidores) ---
+  // --- GGT ---
   'SERVIDOR': {
     title: 'Servidores',
     pk: 'MATRICULA',
-    manualPk: true, // Matrícula é manual
+    manualPk: true,
     filterBy: 'VINCULO',
     cardDisplay: (item) => ({
-      // Legacy: Name, Matricula (enriched with Cargo/Pessoa in backend)
       title: item.NOME_PESSOA || 'Servidor',
       subtitle: `Matrícula: ${item.PREFIXO_MATRICULA ? item.PREFIXO_MATRICULA + '-' : ''}${item.MATRICULA}`,
       details: `${item.VINCULO}\nCargo Efetivo: ${item.NOME_CARGO || item.ID_CARGO}`
@@ -144,7 +140,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_ALOCACAO',
     pkPrefix: 'ALC',
     cardDisplay: (item) => ({
-        // Legacy: Pessoa, Lotacao, Funcao
         title: item.NOME_PESSOA,
         subtitle: item.NOME_LOTACAO,
         details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${formatDate(item.DATA_INICIO)}`
@@ -155,7 +150,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_NOMEACAO', 
     pkPrefix: 'NOM', 
     cardDisplay: (item) => ({
-        // Legacy: Servidor, Cargo Comissionado
         title: item.NOME_SERVIDOR,
         subtitle: item.NOME_CARGO_COMISSIONADO || item.ID_CARGO_COMISSIONADO,
         details: `Data Nomeação: ${formatDate(item.DATA_DA_NOMEACAO)}`
@@ -172,7 +166,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     }) 
   },
 
-  // --- GDEP (Gestão de Desenvolvimento - Capacitação e Pesquisa) ---
+  // --- GDEP ---
   'CAPACITAÇÃO': { 
     title: 'Capacitações', 
     pk: 'ID_CAPACITACAO', 
@@ -188,7 +182,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_TURMA', 
     pkPrefix: 'TUR', 
     cardDisplay: (item) => ({
-        // Legacy: Nome Turma, Nome Capacitacao
         title: item.NOME_TURMA,
         subtitle: item.NOME_CAPACITACAO || `Capacitação ID: ${item.ID_CAPACITACAO}`,
         details: `ID Turma: ${item.ID_TURMA}`
@@ -209,7 +202,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_CHAMADA', 
     pkPrefix: 'CHM', 
     cardDisplay: (item) => ({
-        // Legacy: Pessoa, Turma, Data
         title: item.NOME_PESSOA || item.CPF,
         subtitle: item.NOME_TURMA || item.ID_TURMA,
         status: item.PRESENCA,
@@ -241,14 +233,13 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_PESQUISA', 
     pkPrefix: 'PSQ', 
     cardDisplay: (item) => ({
-        // Legacy: Objeto Estudo (from Solicitacao), Dates
         title: item.OBJETO_ESTUDO || `Solicitação: ${item.ID_SOLICITACAO}`,
         subtitle: `Fim Previsto: ${formatDate(item.PREV_DATA_FIM)}`,
         details: item.MATERIAL_PENDENTE === 'Sim' ? 'Pendência de Material' : 'Material Regular'
     }) 
   },
 
-  // --- Tabelas de Apoio / Cross-Function ---
+  // --- TABELAS DE APOIO ---
   'ATENDIMENTO': {
     title: 'Atendimentos',
     pk: 'ID_ATENDIMENTO',
@@ -265,7 +256,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'ID_PROTOCOLO',
       pkPrefix: 'PRT',
       cardDisplay: (item) => ({
-          // Legacy: Pessoa, Detalhe Vinculo
           title: item.TIPO_DE_PROTOCOLO,
           subtitle: item.NOME_PESSOA || item.CPF,
           details: `${item.DETALHE_VINCULO || 'Vínculo N/A'}\nInício: ${formatDate(item.INICIO_PRAZO)}`
@@ -303,7 +293,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       })
   },
 
-  // --- HISTORICO E ARQUIVO (Apenas Consulta) ---
+  // --- HISTÓRICO E ARQUIVO ---
   'CONTRATO_HISTORICO': {
       title: 'Histórico de Contratos',
       pk: 'ID_CONTRATO',
