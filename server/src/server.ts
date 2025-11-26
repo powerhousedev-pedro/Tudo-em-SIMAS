@@ -90,12 +90,6 @@ const authenticateToken = (req: any, res: any, next: any) => {
 app.post('/api/auth/login', async (req, res) => {
   const { usuario, senha } = req.body;
   
-  // Keep initial admin fallback for fresh installs
-  if (usuario === 'admin' && senha === 'admin') {
-     const token = jwt.sign({ usuario: 'admin', papel: 'COORDENAÇÃO', isGerente: true }, JWT_SECRET, { expiresIn: '8h' });
-     return res.json({ success: true, token, role: 'COORDENAÇÃO', isGerente: true });
-  }
-
   const user = await prisma.usuario.findUnique({ where: { usuario } });
   if (!user) return res.status(400).json({ success: false, message: 'Usuário não encontrado' });
 
