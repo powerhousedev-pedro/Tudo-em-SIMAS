@@ -293,7 +293,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 ));
             }
 
-            // EDITAR: Diff
+            // EDITAR: Diff (Original cortado, Novo destacado)
             const allKeys = new Set([...Object.keys(valorAntigo), ...Object.keys(valorNovo)]);
             return Array.from(allKeys).map(key => {
                 const oldV = valorAntigo[key];
@@ -316,10 +316,10 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 }
 
                 return (
-                    <div key={key} className="flex flex-col mb-2 p-2 bg-yellow-50 rounded border border-yellow-100">
-                        <span className="text-[10px] font-bold uppercase text-gray-700">{key}</span>
-                        <div className="flex items-center gap-3 mt-1">
-                            <span className="text-sm text-gray-400 line-through decoration-red-400">{String(oldV === undefined ? '(vazio)' : oldV)}</span>
+                    <div key={key} className="flex flex-col mb-2 p-2 bg-white rounded border border-gray-200 shadow-sm">
+                        <span className="text-[10px] font-bold uppercase text-gray-700 mb-1">{key}</span>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-400 line-through decoration-red-400">{String(oldV === undefined ? '(vazio)' : oldV)}</span>
                             <i className="fas fa-arrow-right text-[10px] text-gray-300"></i>
                             <span className="text-sm font-bold text-red-600">{String(newV === undefined ? '(vazio)' : newV)}</span>
                         </div>
@@ -340,7 +340,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                         </button>
                     </div>
                     <div className="flex-1 overflow-y-auto p-5 space-y-1 custom-scrollbar">
-                        <div className="text-xs text-gray-400 mb-4 flex justify-between">
+                        <div className="text-xs text-gray-400 mb-4 flex justify-between border-b border-black/5 pb-2">
                             <span>Reg: {selectedLog.ID_REGISTRO_AFETADO}</span>
                             <span>Por: {selectedLog.USUARIO} em {new Date(selectedLog.DATA_HORA).toLocaleString()}</span>
                         </div>
