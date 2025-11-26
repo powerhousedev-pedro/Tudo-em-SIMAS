@@ -230,12 +230,19 @@ app.get('/api/alocacao', authenticateToken, async (req, res) => {
 // 5. GET PROTOCOLO (Optimized)
 app.get('/api/protocolo', authenticateToken, async (req, res) => {
     try {
-        const protocolos = await prisma.protocolo.findMany({
-            include: { pessoa: { select: { NOME: true } } }
+        // Manual fetch for Pessoa to avoid TS error if relation is missing
+        const protocolos = await prisma.protocolo.findMany();
+        const cpfs = [...new Set(protocolos.map(p => p.CPF).filter(Boolean))];
+        const pessoas = await prisma.pessoa.findMany({
+            where: { CPF: { in: cpfs as string[] } },
+            select: { CPF: true, NOME: true }
         });
+        
+        const pessoaMap = new Map(pessoas.map(p => [p.CPF, p.NOME]));
+
         const enriched = protocolos.map(p => ({
             ...p,
-            NOME_PESSOA: p.pessoa?.NOME || p.CPF,
+            NOME_PESSOA: p.CPF ? (pessoaMap.get(p.CPF) || p.CPF) : 'N/A',
             DETALHE_VINCULO: p.ID_CONTRATO ? `Contrato: ${p.ID_CONTRATO}` : (p.MATRICULA ? `Matrícula: ${p.MATRICULA}` : 'N/A')
         }));
         res.json(enriched);
@@ -434,7 +441,8 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
             if (!activeContract) throw new Error('Nenhum contrato ativo.');
             await tx.contratoHistorico.create({
                 data: {
-                    ID_CONTRATO: 'HCT' + Date.now(), 
+                    ID_HISTORICO_CONTRATO: 'HCT' + Date.now(), 
+                    ID_CONTRATO: activeContract.ID_CONTRATO, // Store old ID reference
                     ID_VAGA: activeContract.ID_VAGA, 
                     CPF: activeContract.CPF, 
                     DATA_DO_CONTRATO: activeContract.DATA_DO_CONTRATO,
@@ -486,7 +494,6 @@ app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
                         MATRICULA: current.MATRICULA, 
                         ID_LOTACAO: current.ID_LOTACAO, 
                         DATA_INICIO: current.DATA_INICIO, 
-                        DATA_FIM: new Date(),
                         MOTIVO_MUDANCA: 'Nova Alocação' 
                     }
                 });
@@ -682,7 +689,8 @@ cron.schedule('0 0 * * *', async () => {
             if (contrato) {
                 await prisma.contratoHistorico.create({ 
                     data: { 
-                        ID_CONTRATO: 'HCT' + Date.now(), 
+                        ID_HISTORICO_CONTRATO: 'HCT' + Date.now(), 
+                        ID_CONTRATO: contrato.ID_CONTRATO,
                         ID_VAGA: contrato.ID_VAGA,
                         CPF: contrato.CPF,
                         DATA_DO_CONTRATO: contrato.DATA_DO_CONTRATO,
