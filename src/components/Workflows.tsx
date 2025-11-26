@@ -3,9 +3,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import { Button } from './Button';
 import { UserSession, RecordData, AppContextProps } from '../types';
-import { ENTITY_CONFIGS, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, DATA_MODEL } from '../constants';
+import { DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES } from '../constants';
 import { businessLogic } from '../utils/businessLogic';
-import { Card } from './Card'; // Reusing Card for consistency, but we might style it differently
 
 interface WorkflowsProps extends AppContextProps {}
 
@@ -49,7 +48,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
       const data = await api.fetchEntity('ATENDIMENTO');
       
       // Sort by date descending
-      data.sort((a, b) => new Date(b.DATA_ENTRADA).getTime() - new Date(a.DATA_ENTRADA).getTime());
+      data.sort((a: any, b: any) => new Date(b.DATA_ENTRADA).getTime() - new Date(a.DATA_ENTRADA).getTime());
       
       setRequests(data);
     } catch (e) {
