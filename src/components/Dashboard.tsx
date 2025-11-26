@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
 import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, PERMISSOES_POR_PAPEL, READ_ONLY_ENTITIES } from '../constants';
 import { api } from '../services/api';
@@ -55,7 +54,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       return allowed.includes('TODAS') || allowed.includes(entityName);
   };
 
-  const columnsToRender = useMemo(() => {
+  const columnsToRender = useMemo<string[]>(() => {
     const columns: string[] = showMainList ? [activeTab] : [];
     const modelFields = DATA_MODEL[activeTab] || [];
     
@@ -130,7 +129,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const loadRequiredData = async () => {
     
     // Collect unique entities to fetch (columns + dropdown sources + active tab)
-    const entitiesToFetch = new Set(columnsToRender);
+    const entitiesToFetch = new Set<string>(columnsToRender);
     entitiesToFetch.add(activeTab); // Ensure active tab is fetched even if not in columns (e.g. hidden mode)
 
     const modelFields = DATA_MODEL[activeTab] || [];
@@ -149,7 +148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
     setLoadingData(true);
     try {
-      const results = await Promise.all(missingEntities.map(async (entity) => {
+      const results = await Promise.all(missingEntities.map(async (entity: string) => {
            try {
              // API fetchEntity is now cached
              const data = await api.fetchEntity(entity);
