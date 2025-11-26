@@ -1,3 +1,4 @@
+
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURATION
@@ -6,7 +7,7 @@ const TOKEN_KEY = 'simas_auth_token';
 
 // --- CACHE SYSTEM ---
 // Simple deduplication map to prevent double-fetching in StrictMode or rapid updates
-const inflightRequests: Record<string, Promise<any>> = {};
+const inflightRequests: Record<string, Promise<any> | undefined> = {};
 
 // --- HELPER: URL Normalization ---
 const normalizeEndpoint = (entityName: string) => {
@@ -67,7 +68,7 @@ export const api = {
     
     // Request Deduplication
     if (inflightRequests[endpoint] && !forceRefresh) {
-        return inflightRequests[endpoint];
+        return inflightRequests[endpoint]!;
     }
 
     // Fetch
