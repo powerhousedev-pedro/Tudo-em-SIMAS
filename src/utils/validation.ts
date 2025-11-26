@@ -26,7 +26,7 @@ export const validation = {
   generateLegacyId: (prefix: string) => {
       // Replicates Utilities.getUuid().substring(0, 8).toUpperCase() behavior
       // Using random alphanumeric string of 8 chars
-      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       let result = '';
       for (let i = 0; i < 8; i++) {
           result += chars.charAt(Math.floor(Math.random() * chars.length));
