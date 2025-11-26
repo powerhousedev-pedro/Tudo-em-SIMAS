@@ -12,44 +12,43 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
 
 const inflightRequests: Record<string, Promise<any> | undefined> = {};
 
-// Strict mapping to ensure Frontend entity names match Backend Routes/Models
+// Strict mapping to ensure Frontend entity names match Backend Routes/Models (Schema Names)
 const ENDPOINT_MAP: Record<string, string> = {
-    'LOTAÇÕES': 'lotacoes',
-    'FUNÇÃO': 'funcao',
-    'EXERCÍCIO': 'exercicio',
-    'CAPACITAÇÃO': 'capacitacao',
-    'SOLICITAÇÃO DE PESQUISA': 'solicitacao-pesquisa',
-    'NOMEAÇÃO': 'nomeacao',
-    'CARGO COMISSIONADO': 'cargo-comissionado',
-    'CONTRATO_HISTORICO': 'contrato-historico',
-    'ALOCACAO_HISTORICO': 'alocacao-historico',
-    'INATIVOS': 'inativos',
-    'VAGAS': 'vagas',
-    'EDITAIS': 'editais',
-    'CARGOS': 'cargos',
-    'PESSOA': 'pessoa',
-    'SERVIDOR': 'servidor',
-    'CONTRATO': 'contrato',
-    'ALOCACAO': 'alocacao',
-    'ATENDIMENTO': 'atendimento',
-    'PROTOCOLO': 'protocolo',
-    'TURMAS': 'turmas',
-    'ENCONTRO': 'encontro',
-    'CHAMADA': 'chamada',
-    'VISITAS': 'visitas',
-    'PESQUISA': 'pesquisa',
-    'AUDITORIA': 'auditoria'
+    // UI Key -> Prisma Model Name (PascalCase)
+    'LOTAÇÕES': 'Lotacao',
+    'FUNÇÃO': 'Funcao',
+    'EXERCÍCIO': 'Exercicio',
+    'CAPACITAÇÃO': 'Capacitacao',
+    'SOLICITAÇÃO DE PESQUISA': 'SolicitacaoPesquisa',
+    'NOMEAÇÃO': 'Nomeacao',
+    'CARGO COMISSIONADO': 'CargoComissionado',
+    'CONTRATO_HISTORICO': 'ContratoHistorico',
+    'ALOCACAO_HISTORICO': 'AlocacaoHistorico',
+    'INATIVOS': 'Inativo',
+    'VAGAS': 'Vaga',
+    'EDITAIS': 'Edital',
+    'CARGOS': 'Cargo',
+    'PESSOA': 'Pessoa',
+    'SERVIDOR': 'Servidor',
+    'CONTRATO': 'Contrato',
+    'ALOCACAO': 'Alocacao',
+    'ATENDIMENTO': 'Atendimento',
+    'PROTOCOLO': 'Protocolo',
+    'TURMAS': 'Turma',
+    'ENCONTRO': 'Encontro',
+    'CHAMADA': 'Chamada',
+    'VISITAS': 'Visita',
+    'PESQUISA': 'Pesquisa',
+    'AUDITORIA': 'Auditoria'
 };
 
 const normalizeEndpoint = (entityName: string) => {
     const upper = entityName.toUpperCase();
     if (ENDPOINT_MAP[upper]) return ENDPOINT_MAP[upper];
     
-    // Fallback for names not in map
-    return entityName.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/ /g, '-')
-        .replace(/[^a-z0-9-]/g, '');
+    // Fallback: attempt to keep it close to schema if not in map
+    // Removing accents and spaces, keeping PascalCase if possible but typically just string cleaning
+    return entityName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ /g, '');
 };
 
 // --- REAL API CLIENT ---
@@ -160,17 +159,18 @@ export const api = {
   toggleVagaBloqueada: async (idVaga: string) => {
     const res = await request(`/vagas/${idVaga}/toggle-lock`, 'POST');
     delete cache['/vagas'];
+    delete cache['/Vaga'];
     return res;
   },
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
-      const res = await request('/exercicio', 'POST', { 
+      const res = await request('/Exercicio', 'POST', { 
           ID_EXERCICIO: 'EXE' + Date.now(), 
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
       });
-      delete cache['/exercicio'];
-      delete cache['/vagas'];
+      delete cache['/Exercicio'];
+      delete cache['/Vaga'];
       return res;
   },
 
@@ -187,7 +187,7 @@ export const api = {
   },
 
   getRevisoesPendentes: async () => {
-    const data = await request('/atendimento');
+    const data = await request('/Atendimento');
     if (!Array.isArray(data)) return [];
     return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
   },
@@ -249,7 +249,7 @@ export const api = {
       }
       
       await api.updateRecord('ATENDIMENTO', 'ID_ATENDIMENTO', idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
-      delete cache['/atendimento'];
+      delete cache['/Atendimento'];
       
       return { success: true, message: 'Ação executada com sucesso.' };
   },
