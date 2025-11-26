@@ -1,9 +1,17 @@
-
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURATION
 const API_BASE_URL = 'http://localhost:3001/api';
 const TOKEN_KEY = 'simas_auth_token';
+
+// --- CACHE SYSTEM ---
+const CACHE_DURATION = 60 * 1000; // 1 minute cache for all entities to ensure snappiness
+interface CacheEntry {
+  data: any[];
+  timestamp: number;
+}
+const memoryCache: Record<string, CacheEntry> = {};
+const inflightRequests: Record<string, Promise<any>> = {};
 
 // --- REAL API CLIENT ---
 
@@ -27,7 +35,6 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
     
     if (response.status === 401 || response.status === 403) {
-        // Handle both Unauthorized and Forbidden by checking if it's a session issue
         if (method === 'GET' && response.status === 403) {
              localStorage.removeItem(TOKEN_KEY);
              window.location.href = '#/login';
@@ -52,21 +59,55 @@ export const api = {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  fetchEntity: async (entityName: string): Promise<any[]> => {
-    // Now the backend handles enrichment, so we just fetch directly.
-    return request(`/${entityName.toLowerCase().replace(/ /g, '-')}`);
+  // Optimized fetch with Cache & Deduplication
+  fetchEntity: async (entityName: string, forceRefresh = false): Promise<any[]> => {
+    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
+    
+    // 1. Return from Cache if available and valid
+    if (!forceRefresh) {
+        const cached = memoryCache[normalizedName];
+        if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+            return cached.data;
+        }
+    }
+
+    // 2. Request Deduplication
+    if (inflightRequests[normalizedName]) {
+        return inflightRequests[normalizedName];
+    }
+
+    // 3. Fetch
+    const promise = request(`/${normalizedName}`)
+        .then(data => {
+            memoryCache[normalizedName] = { data, timestamp: Date.now() };
+            return data;
+        })
+        .finally(() => {
+            delete inflightRequests[normalizedName];
+        });
+
+    inflightRequests[normalizedName] = promise;
+    return promise;
   },
 
   createRecord: async (entityName: string, data: RecordData) => {
-    return request(`/${entityName.toLowerCase().replace(/ /g, '-')}`, 'POST', data);
+    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
+    delete memoryCache[normalizedName]; // Invalidate cache
+    // Also invalidate potential dependencies (naive approach: invalidate all related to operation)
+    // For now, specific cache invalidation is complex, relying on short cache duration or specific manual refreshes
+    return request(`/${normalizedName}`, 'POST', data);
   },
 
   updateRecord: async (entityName: string, pkField: string, pkValue: string, data: RecordData) => {
-    return request(`/${entityName.toLowerCase().replace(/ /g, '-')}/${pkValue}`, 'PUT', data);
+    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
+    delete memoryCache[normalizedName];
+    return request(`/${normalizedName}/${pkValue}`, 'PUT', data);
   },
 
   deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
-    return request(`/${entityName.toLowerCase().replace(/ /g, '-')}/${pkValue}`, 'DELETE');
+    const normalizedName = entityName.toLowerCase().replace(/ /g, '-');
+    delete memoryCache[normalizedName];
+    return request(`/${normalizedName}/${pkValue}`, 'DELETE');
   },
 
   // User Management
@@ -79,10 +120,13 @@ export const api = {
   },
 
   toggleVagaBloqueada: async (idVaga: string) => {
+    delete memoryCache['vagas'];
     return request(`/vagas/${idVaga}/toggle-lock`, 'POST');
   },
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
+      delete memoryCache['exercício'];
+      delete memoryCache['vagas'];
       return request('/exercício', 'POST', { 
           ID_EXERCICIO: 'EXE' + Date.now(), 
           ID_VAGA: idVaga, 
@@ -95,6 +139,8 @@ export const api = {
   },
 
   restoreAuditLog: async (idLog: string) => {
+    // Clear cache globally as restore can touch anything
+    for (const key in memoryCache) delete memoryCache[key];
     return request(`/audit/${idLog}/restore`, 'POST');
   },
 
@@ -103,14 +149,10 @@ export const api = {
   },
 
   getRevisoesPendentes: async () => {
+    // This endpoint is lightweight
     const data = await request('/atendimento');
     if (!Array.isArray(data)) return [];
-    
-    const pending = data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
-    if (pending.length === 0) return [];
-
-    // Atendimentos now come enriched with NOME_PESSOA from backend
-    return pending; 
+    return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
   },
 
   getActionContext: async (idAtendimento: string): Promise<ActionContext> => {
@@ -124,16 +166,20 @@ export const api = {
     
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     
-    // We still need lookups for the modal dropdowns, but these fetches are simple now
+    // Parallel fetching
+    const promises: Promise<any>[] = [];
+    
     if (acao.includes('CONTRATO')) {
-        lookups['VAGAS'] = await api.fetchEntity('VAGAS');
-        lookups['FUNÇÃO'] = await api.fetchEntity('FUNÇÃO');
+        promises.push(api.fetchEntity('VAGAS').then(d => lookups['VAGAS'] = d));
+        promises.push(api.fetchEntity('FUNÇÃO').then(d => lookups['FUNÇÃO'] = d));
     } else if (acao.includes('ALOCACAO')) {
-        lookups['LOTAÇÕES'] = await api.fetchEntity('LOTAÇÕES');
-        lookups['FUNÇÃO'] = await api.fetchEntity('FUNÇÃO');
+        promises.push(api.fetchEntity('LOTAÇÕES').then(d => lookups['LOTAÇÕES'] = d));
+        promises.push(api.fetchEntity('FUNÇÃO').then(d => lookups['FUNÇÃO'] = d));
     } else if (acao.includes('NOMEAÇÃO')) {
-        lookups['CARGO COMISSIONADO'] = await api.fetchEntity('CARGO COMISSIONADO');
+        promises.push(api.fetchEntity('CARGO COMISSIONADO').then(d => lookups['CARGO COMISSIONADO'] = d));
     }
+
+    await Promise.all(promises);
 
     return {
         atendimento: atd,
@@ -146,6 +192,13 @@ export const api = {
       const atd = (await api.fetchEntity('ATENDIMENTO')).find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
       
       if (!atd) throw new Error("Atendimento não encontrado");
+
+      // Optimistic Cache Invalidation
+      if (atd.ENTIDADE_ALVO) {
+          delete memoryCache[atd.ENTIDADE_ALVO.toLowerCase().replace(/ /g, '-')];
+      }
+      // Atendimento changed
+      delete memoryCache['atendimento'];
 
       if (atd.TIPO_DE_ACAO === 'INATIVAR' && atd.ENTIDADE_ALVO === 'SERVIDOR') {
           await request('/servidores/inativar', 'POST', data);
@@ -173,7 +226,6 @@ export const api = {
   
   // --- REPORTS LOGIC (Client-Side Aggregation) ---
   getReportData: async (reportName: string): Promise<ReportData> => {
-    
     // 1. PAINEL VAGAS
     if (reportName === 'painelVagas') {
         const vagas = await api.fetchEntity('VAGAS');
@@ -228,11 +280,6 @@ export const api = {
         ]);
         
         const cargoSalarioMap = new Map(cargos.map((c:any) => [c.ID_CARGO, parseFloat(c.SALARIO || 0)]));
-        const vagaMap = new Map<string, { lotacao: string, cargo: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargo: v.CARGO_NOME }])); // CARGO_NOME is now key
-        
-        // We actually need cargo ID for salary lookup, but Vagas optimized API returns names. 
-        // Ideally Vagas optimized API should return CARGO_ID too. Assuming it returns CARGO object with ID.
-        // Let's rely on Vagas optimized returning IDs too (implied in server.ts as part of `...v`)
         const vagaMapID = new Map<string, { lotacao: string, cargoId: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargoId: v.ID_CARGO }]));
 
         const custoPorLotacao: any = {};
@@ -278,21 +325,16 @@ export const api = {
     // 6. PERFIL DEMOGRAFICO
     if (reportName === 'perfilDemografico') {
         const pessoas = await api.fetchEntity('PESSOA');
-        
         const counts: any = {};
         const bairros: any = {};
-        
         pessoas.forEach((p: any) => {
             const esc = p.ESCOLARIDADE || 'Não Inf.';
             counts[esc] = (counts[esc] || 0) + 1;
-            
             const bai = p.BAIRRO || 'Não Inf.';
             bairros[bai] = (bairros[bai] || 0) + 1;
         });
-
         const grafEsc = Object.entries(counts).map(([name, value]) => ({ name, value: Number(value) }));
         const grafBai = Object.entries(bairros).sort((a:any,b:any)=>b[1]-a[1]).slice(0, 10).map(([name, value]) => ({ name, value: Number(value) }));
-
         return {
             graficos: { escolaridade: grafEsc as any, bairro: grafBai as any }
         } as any;
@@ -307,7 +349,7 @@ export const api = {
         return { colunas: ['Turma', 'Participante', 'Presença', 'Data'], linhas };
     }
 
-    // 8. ATIVIDADE USUARIOS (Audit)
+    // 8. ATIVIDADE USUARIOS
     if (reportName === 'atividadeUsuarios') {
         const logs = await api.fetchEntity('AUDITORIA');
         const linhas = logs.map((l: any) => [

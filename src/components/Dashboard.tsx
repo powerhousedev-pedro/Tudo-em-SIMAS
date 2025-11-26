@@ -48,7 +48,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
   }, []);
 
-  // --- COMPUTED VALUES (Moved up for use in Effects) ---
+  // --- COMPUTED VALUES ---
 
   const isEntityAllowed = (entityName: string) => {
       const allowed = PERMISSOES_POR_PAPEL[session.papel] || [];
@@ -84,7 +84,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // --- EFFECTS ---
 
-  // 1. Tab Change Reset & Data Load
+  // 1. Tab Change Reset
   useEffect(() => {
     const initialData: RecordData = {};
     const today = new Date().toISOString().split('T')[0];
@@ -102,13 +102,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     setDropdownSearch('');
     setActiveFilters({});
     
-    // OPTIMIZATION: Trigger data load when columns change
   }, [activeTab]);
 
-  // Load data whenever the visible columns change
+  // Load data whenever the visible columns change or active tab changes
   useEffect(() => {
       loadRequiredData();
-  }, [columnsToRender]);
+  }, [columnsToRender, activeTab]);
 
   // 2. Load Pending Reviews
   useEffect(() => {
@@ -129,28 +128,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // --- DATA LOADING (OPTIMIZED) ---
 
   const loadRequiredData = async () => {
-    setLoadingData(true);
     
-    // Only fetch the entities we need for the current view
-    const entitiesToFetch = columnsToRender;
-    
-    // If editing, we might need dropdown data even if the column isn't visible
-    // (This can be optimized further to only load dropdowns on form focus, but this is a good middle ground)
+    // Collect unique entities to fetch (columns + dropdown sources + active tab)
+    const entitiesToFetch = new Set(columnsToRender);
+    entitiesToFetch.add(activeTab); // Ensure active tab is fetched even if not in columns (e.g. hidden mode)
+
     const modelFields = DATA_MODEL[activeTab] || [];
+    
     modelFields.forEach(field => {
         const linkedEntity = FK_MAPPING[field];
-        if (linkedEntity && !entitiesToFetch.includes(linkedEntity) && isEntityAllowed(linkedEntity)) {
-            entitiesToFetch.push(linkedEntity);
+        if (linkedEntity && isEntityAllowed(linkedEntity)) {
+            entitiesToFetch.add(linkedEntity);
         }
     });
 
+    // Filter out entities we already have data for (unless explicit refresh needed - managed by api cache)
+    const missingEntities = Array.from(entitiesToFetch);
+
+    if (missingEntities.length === 0) return;
+
+    setLoadingData(true);
     try {
-      const results = await Promise.all(entitiesToFetch.map(async (entity) => {
-           // Check if we already have data to avoid re-fetching
-           if (cardData[entity] && cardData[entity].length > 0) {
-               return { entity, data: cardData[entity] };
-           }
+      const results = await Promise.all(missingEntities.map(async (entity) => {
            try {
+             // API fetchEntity is now cached
              const data = await api.fetchEntity(entity);
              return { entity, data };
            } catch (e) {
@@ -158,9 +159,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
            }
       }));
       
-      const newCardData = { ...cardData };
-      results.forEach(res => { newCardData[res.entity] = res.data; });
-      setCardData(newCardData);
+      setCardData(prev => {
+          const next = { ...prev };
+          results.forEach(res => { next[res.entity] = res.data; });
+          return next;
+      });
     } catch (e) {
       showToast('error', 'Erro ao carregar dados.');
     } finally {
@@ -266,12 +269,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       if (res.success) {
         showToast('success', isEditing ? 'Atualizado!' : 'Criado!');
         
-        // Refresh Data only for modified tab and relevant tables
-        const newData = await api.fetchEntity(activeTab);
+        // Refresh Data forced for active tab to show new record
+        const newData = await api.fetchEntity(activeTab, true); 
         setCardData(prev => ({ ...prev, [activeTab]: newData }));
         
         if (activeTab === 'CONTRATO') {
-            const resData = await api.fetchEntity('RESERVAS');
+            const resData = await api.fetchEntity('RESERVAS', true);
             setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
         }
         
@@ -296,7 +299,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       const res = await api.deleteRecord(entityName, config.pk, item[config.pk]);
       if (res.success) {
         showToast('info', 'Registro excluído.');
-        const newData = await api.fetchEntity(entityName);
+        const newData = await api.fetchEntity(entityName, true);
         setCardData(prev => ({ ...prev, [entityName]: newData }));
       } else { showToast('error', 'Erro ao excluir.'); }
     } catch(err) { showToast('error', 'Erro de conexão.'); }
@@ -308,7 +311,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       try {
           const newStatus = await api.toggleVagaBloqueada(idVaga);
           showToast('success', newStatus ? 'Vaga bloqueada.' : 'Vaga desbloqueada.');
-          const newData = await api.fetchEntity('VAGAS');
+          const newData = await api.fetchEntity('VAGAS', true);
           setCardData(prev => ({ ...prev, 'VAGAS': newData }));
       } catch (err: any) { showToast('error', err.message); }
   };
@@ -555,7 +558,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                  
                  {/* Cards List */}
                  <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
-                   {loadingData ? <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div> : filteredData.map(item => {
+                   {loadingData && filteredData.length === 0 ? <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div> : filteredData.map(item => {
                        const pkValue = String(item[config.pk]);
                        const display = config.cardDisplay(item);
                        const isSelected = selectedItems[entity] === pkValue;
