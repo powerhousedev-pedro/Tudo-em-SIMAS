@@ -5,18 +5,17 @@ import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 const API_BASE_URL = 'http://localhost:3001/api';
 const TOKEN_KEY = 'simas_auth_token';
 
-// --- CACHE SYSTEM ---
-// Simple deduplication map to prevent double-fetching in StrictMode or rapid updates
+// Deduplicação de requisições em voo
 const inflightRequests: Record<string, Promise<any> | undefined> = {};
 
-// --- HELPER: URL Normalization ---
+// Normaliza endpoints removendo acentos e espaços
 const normalizeEndpoint = (entityName: string) => {
     return entityName.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .replace(/ /g, '-');
 };
 
-// --- REAL API CLIENT ---
+// --- CLIENTE API ---
 
 async function request(endpoint: string, method: string = 'GET', body?: any) {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -62,16 +61,14 @@ export const api = {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  // Optimized fetch with Deduplication
+  // Busca entidade com cache em memória para evitar requisições duplicadas
   fetchEntity: async (entityName: string, forceRefresh = false): Promise<any[]> => {
     const endpoint = `/${normalizeEndpoint(entityName)}`;
     
-    // Request Deduplication
     if (inflightRequests[endpoint] && !forceRefresh) {
         return inflightRequests[endpoint]!;
     }
 
-    // Fetch
     const promise = request(endpoint)
         .then(data => data)
         .finally(() => {
@@ -94,7 +91,7 @@ export const api = {
     return request(`/${normalizeEndpoint(entityName)}/${pkValue}`, 'DELETE');
   },
 
-  // User Management
+  // Gestão de Usuários
   getUsers: async () => {
       return request('/usuarios');
   },
@@ -144,7 +141,7 @@ export const api = {
     
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     
-    // Parallel fetching
+    // Busca paralela de dependências
     const promises: Promise<any>[] = [];
     
     if (acao.includes('CONTRATO')) {
@@ -195,7 +192,7 @@ export const api = {
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  // --- REPORTS LOGIC (Client-Side Aggregation) ---
+  // --- RELATÓRIOS (Agregação Client-Side) ---
   getReportData: async (reportName: string): Promise<ReportData> => {
     // 1. PAINEL VAGAS
     if (reportName === 'painelVagas') {

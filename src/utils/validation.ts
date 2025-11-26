@@ -1,6 +1,6 @@
 
 export const validation = {
-  // --- VALIDATION ---
+  // --- VALIDAÇÃO ---
   
   validateCPF: (cpf: string): boolean => {
     const cleanCPF = cpf.replace(/[^\d]+/g, '');
@@ -21,11 +21,9 @@ export const validation = {
     return true;
   },
 
-  // --- ID GENERATION (Legacy Style) ---
+  // --- GERAÇÃO DE ID ---
   
   generateLegacyId: (prefix: string) => {
-      // Replicates Utilities.getUuid().substring(0, 8).toUpperCase() behavior
-      // Using random alphanumeric string of 8 chars
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       let result = '';
       for (let i = 0; i < 8; i++) {
@@ -34,7 +32,7 @@ export const validation = {
       return `${prefix}${result}`;
   },
 
-  // --- MASKING (Visual Input) ---
+  // --- MÁSCARAS (Input Visual) ---
 
   maskCPF: (value: string) => {
     return value
@@ -48,22 +46,17 @@ export const validation = {
   maskPhone: (value: string) => {
     let v = value.replace(/\D/g, "");
     
-    // Limita tamanho máximo para evitar strings infinitas
     if (v.length > 11) v = v.substring(0, 11);
 
-    // Formato Celular (11 dígitos): (XX) XXXXX-XXXX
     if (v.length > 10) { 
         return v.replace(/^(\d\d)(\d{5})(\d{4}).*/, "($1) $2-$3"); 
     } 
-    // Formato Fixo/Legado (10 dígitos ou menos): (XX) XXXX-XXXX
     else if (v.length > 5) { 
         return v.replace(/^(\d\d)(\d{4})(\d{0,4}).*/, "($1) $2-$3"); 
     } 
-    // Formato parcial enquanto digita DDD
     else if (v.length > 2) { 
         return v.replace(/^(\d\d)(\d*)/, "($1) $2"); 
     } 
-    // Apenas parêntese inicial
     else if (v.length > 0) {
         return v.replace(/^(\d*)/, "($1");
     }
@@ -71,11 +64,9 @@ export const validation = {
   },
 
   maskCurrency: (value: string) => {
-    // Removes everything that is not digit
     let v = value.replace(/\D/g, "");
     if (!v) return "";
     
-    // Convert to float
     const floatValue = parseFloat(v) / 100;
     
     return new Intl.NumberFormat('pt-BR', { 
@@ -84,14 +75,13 @@ export const validation = {
     }).format(floatValue);
   },
 
-  // --- FORMATTING (Display) ---
+  // --- FORMATAÇÃO (Exibição) ---
 
   formatDate: (value: any) => {
     if (!value) return 'N/A';
     try {
       const date = new Date(value);
       if (isNaN(date.getTime())) return 'N/A';
-      // Use UTC to avoid timezone shifts when displaying simple dates
       return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
     } catch (e) {
       return 'N/A';
@@ -105,18 +95,17 @@ export const validation = {
   },
 
   formatPhone: (value: string) => {
-    // Applies the Legacy Logic for display
     if (!value) return "";
     let clean = value.replace(/\D/g, "");
     
-    // Legacy Logic: Auto-inject DDD 21 if length is 8 or 9
+    // Adiciona DDD 21 se ausente
     if (clean.length === 8 || clean.length === 9) {
         if (!clean.startsWith('21')) {
             clean = '21' + clean;
         }
     }
 
-    // Auto-correção visual para números antigos sem o 9 (apenas se 6-9)
+    // Correção para números antigos (6-9)
     if (clean.length === 10) {
         const numeroSemDdd = clean.substring(2);
         const firstDigit = numeroSemDdd.charAt(0);
@@ -125,14 +114,13 @@ export const validation = {
         }
     }
 
-    // Standard Formatting based on length
     if (clean.length === 11) {
         return clean.replace(/^(\d{2})(\d{5})(\d{4}).*/, "($1) $2-$3");
     } else if (clean.length === 10) {
         return clean.replace(/^(\d{2})(\d{4})(\d{4}).*/, "($1) $2-$3");
     }
     
-    return value; // Return original if it doesn't fit standard
+    return value;
   },
 
   formatCurrency: (value: any) => {
@@ -142,53 +130,41 @@ export const validation = {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(number);
   },
 
-  // --- NORMALIZATION (For Saving) ---
+  // --- NORMALIZAÇÃO (Persistência) ---
 
   normalizePhoneForSave: (phone: string): string | null => {
     if (!phone) return null;
     
-    // 1. Isolate first number if multiple
     const firstPhone = String(phone).split('/')[0].trim();
-    
-    // 2. Remove non-digits
     let clean = firstPhone.replace(/\D/g, '');
     
-    // Remove leading zero
     if (clean.startsWith('0')) clean = clean.substring(1);
 
-    // 3. Apply DDD 21 Rule (Input sem DDD)
-    // Se digitou 8 ou 9 dígitos, assume-se que é um número local do Rio (21)
     if (clean.length === 8 || clean.length === 9) {
         if (!clean.startsWith('21')) {
             clean = '21' + clean;
         }
     }
 
-    // 4. Validação e Normalização de 10 dígitos (DDD + 8 números)
     if (clean.length === 10) {
         const numeroSemDdd = clean.substring(2);
         const firstDigit = numeroSemDdd.charAt(0);
 
-        // REGRA SOLICITADA:
-        // Se o número começa com 2, 3, 4 ou 5, é um telefone FIXO válido.
-        // Aceita o formato com 10 dígitos (DDD + 8).
+        // Fixo
         if (['2', '3', '4', '5'].includes(firstDigit)) {
             return clean;
         }
 
-        // Se o número começa com 6, 7, 8 ou 9, assume-se que é um Celular que esqueceu o 9.
-        // Aplica a correção automática injetando o 9.
+        // Celular sem 9
         if (['6', '7', '8', '9'].includes(firstDigit)) {
             return clean.substring(0, 2) + '9' + numeroSemDdd;
         }
     }
 
-    // 5. Validação final para Celulares corretos (11 dígitos)
     if (clean.length === 11) {
         return clean;
     }
 
-    // Se não se encaixou em Fixo (10) nem Celular (11), retorna null (erro)
     return null;
   },
 
@@ -196,7 +172,7 @@ export const validation = {
     if (!name || typeof name !== 'string') return '';
     const exceptions = ['de', 'do', 'da', 'dos', 'das', 'e'];
     
-    let cleanName = name.replace(/'/g, '’').toLowerCase(); // Normalize apostrophe
+    let cleanName = name.replace(/'/g, '’').toLowerCase();
     
     return cleanName.split(' ').map((word, index) => {
         if (word.trim() === '') return '';
@@ -220,7 +196,6 @@ export const validation = {
 
   calculateAge: (dateString: string): number | null => {
     if (!dateString) return null;
-    // Handle both YYYY-MM-DD and ISO strings
     const birthDate = new Date(dateString);
     if (isNaN(birthDate.getTime())) return null;
     const today = new Date();
