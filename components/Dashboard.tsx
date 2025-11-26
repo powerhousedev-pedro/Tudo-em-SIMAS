@@ -14,10 +14,10 @@ import { ExerciseSelectionModal } from './ExerciseSelectionModal';
 interface DashboardProps extends AppContextProps {}
 
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
+  // --- STATE ---
   const [activeTab, setActiveTab] = useState('PESSOA');
   const [formData, setFormData] = useState<RecordData>({});
   const [isEditing, setIsEditing] = useState(false);
-  
   const [loadingData, setLoadingData] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   
@@ -26,61 +26,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const deferredSearchTerms = useDeferredValue(searchTerms);
   const [selectedItems, setSelectedItems] = useState<Record<string, string>>({});
 
-  // Advanced Filtering State
+  // UI State
   const [activeFilters, setActiveFilters] = useState<{ [entity: string]: string[] }>({});
-  const [filterPopoverOpen, setFilterPopoverOpen] = useState<string | null>(null); // Entity Name if open
+  const [filterPopoverOpen, setFilterPopoverOpen] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [dropdownSearch, setDropdownSearch] = useState('');
+  const [showMainList, setShowMainList] = useState(false);
 
-  // New State for Modals
+  // Modal State
   const [dossierCpf, setDossierCpf] = useState<string | null>(null);
   const [actionAtendimentoId, setActionAtendimentoId] = useState<string | null>(null);
   const [pendingReviews, setPendingReviews] = useState<any[]>([]);
   const [showReviewsModal, setShowReviewsModal] = useState(false);
-  
-  // Exercise Edit State
   const [exerciseVagaId, setExerciseVagaId] = useState<string | null>(null);
 
-  // Dropdown States
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [dropdownSearch, setDropdownSearch] = useState('');
-
-  // Toggle for Main Column Visibility (Generic for all tabs)
-  const [showMainList, setShowMainList] = useState(false);
-
-  // Refs for clicking outside popovers
   const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
-  // --- SESSION DATA ---
-  const getSession = (): UserSession => {
+  // --- SESSION ---
+  const session: UserSession = useMemo(() => {
       const stored = localStorage.getItem('simas_user_session');
-      if (stored) {
-          try { return JSON.parse(stored); } catch (e) {}
-      }
-      return { token: '', papel: 'GGT', usuario: '', isGerente: false }; // Fallback
-  };
-  const session = getSession();
-
-  const tabs = useMemo(() => {
-    return Object.keys(ENTITY_CONFIGS)
-      .filter(k => k !== 'AUDITORIA' && k !== 'ATENDIMENTO');
+      return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
   }, []);
 
-  const filteredTabs = useMemo(() => {
-    return tabs.filter(tab => 
-        ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())
-    );
-  }, [tabs, dropdownSearch]);
+  // --- EFFECTS ---
 
+  // 1. Tab Change Reset
   useEffect(() => {
-    resetForm();
+    const initialData: RecordData = {};
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Pre-fill dates
+    DATA_MODEL[activeTab]?.forEach(field => {
+        const isDateField = ['DATA_INICIO', 'DATA_DO_CONTRATO', 'DATA_MATRICULA', 'DATA_DA_NOMEACAO', 'DATA_VISITA', 'DATA_ATENDIMENTO'].includes(field);
+        initialData[field] = isDateField ? today : '';
+    });
+
+    setFormData(initialData);
+    setIsEditing(false);
+    setSelectedItems({});
+    setShowMainList(false);
+    setDropdownSearch('');
+    setActiveFilters({});
+    
     loadAllRequiredData();
-    loadPendingReviews();
-    setSelectedItems({}); // Clear selections on tab change
-    setShowMainList(false); // Hide main list by default to reduce pollution
-    setDropdownSearch(''); // Reset search on tab change if needed, or keep for user convenience
-    setActiveFilters({}); // Reset filters
   }, [activeTab]);
 
-  // Handle click outside filter popover
+  // 2. Load Pending Reviews
+  useEffect(() => {
+    api.getRevisoesPendentes().then(setPendingReviews).catch(console.error);
+  }, []);
+
+  // 3. Click Outside Handler
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
         if (filterPopoverOpen && popoverRefs.current[filterPopoverOpen] && !popoverRefs.current[filterPopoverOpen]?.contains(event.target as Node)) {
@@ -91,75 +87,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [filterPopoverOpen]);
 
-  const loadPendingReviews = async () => {
-    try {
-        const res = await api.getRevisoesPendentes();
-        setPendingReviews(res);
-    } catch(e) {}
-  };
-
-  // Helper for Legacy Prefix Calculation
-  const getPrefixForVinculo = (vinculo: string) => {
-      switch (vinculo) {
-        case 'Extra Quadro': return '60';
-        case 'Aposentado': return '70';
-        case 'CLT': return '29';
-        case 'Prestador de Serviços': return '39';
-        case 'Ativo': return '10';
-        default: return '10';
-      }
-  };
-
-  const resetForm = () => {
-    const initialData: RecordData = {};
-    const today = new Date().toISOString().split('T')[0];
-
-    if (DATA_MODEL[activeTab]) {
-      DATA_MODEL[activeTab].forEach(field => {
-          // Default Dates logic matching legacy behavior (pre-fill today for start dates/events)
-          if (['DATA_INICIO', 'DATA_DO_CONTRATO', 'DATA_MATRICULA', 'DATA_DA_NOMEACAO', 'DATA_VISITA', 'DATA_ATENDIMENTO'].includes(field)) {
-              initialData[field] = today;
-          } else {
-              initialData[field] = '';
-          }
-      });
-    }
-    
-    // Preserve selected Lookups in the form
-    Object.keys(selectedItems).forEach(entity => {
-        const config = ENTITY_CONFIGS[entity];
-        if (entity !== activeTab) { 
-           // Find which field maps to this entity
-           const fieldName = Object.keys(FK_MAPPING).find(key => FK_MAPPING[key] === entity);
-           if (fieldName && initialData.hasOwnProperty(fieldName)) {
-               initialData[fieldName] = selectedItems[entity];
-           }
-        }
-    });
-
-    setFormData(initialData);
-    setIsEditing(false);
-  };
+  // --- DATA LOADING ---
 
   const loadAllRequiredData = async () => {
     setLoadingData(true);
     const allEntities = Object.keys(ENTITY_CONFIGS);
     try {
-      const results = await Promise.all(
-        allEntities.map(async (entity) => {
+      const results = await Promise.all(allEntities.map(async (entity) => {
            try {
              const data = await api.fetchEntity(entity);
              return { entity, data };
            } catch (e) {
              return { entity, data: [] };
            }
-        })
-      );
-      setCardData(prev => {
-        const next = { ...prev };
-        results.forEach(res => { if (res) next[res.entity] = res.data; });
-        return next;
-      });
+      }));
+      
+      const newCardData = { ...cardData };
+      results.forEach(res => { newCardData[res.entity] = res.data; });
+      setCardData(newCardData);
     } catch (e) {
       showToast('error', 'Erro ao carregar dados.');
     } finally {
@@ -167,23 +112,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     }
   };
 
+  // --- COMPUTED VALUES ---
+
+  const tabs = useMemo(() => Object.keys(ENTITY_CONFIGS).filter(k => k !== 'AUDITORIA' && k !== 'ATENDIMENTO'), []);
+  
+  const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
+
   const columnsToRender = useMemo(() => {
-    // Only include the main entity column if "Consultar" is active
     const columns: string[] = showMainList ? [activeTab] : [];
-    
     const modelFields = DATA_MODEL[activeTab] || [];
     
     modelFields.forEach(field => {
         const linkedEntity = FK_MAPPING[field];
-        if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity)) {
-             if (linkedEntity !== activeTab) {
-                 columns.push(linkedEntity);
-             }
+        if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity) && linkedEntity !== activeTab) {
+             columns.push(linkedEntity);
         }
     });
-
     return columns;
   }, [activeTab, showMainList]);
+
+  // --- HANDLERS ---
+
+  const resetForm = () => {
+    const initialData: RecordData = {};
+    const today = new Date().toISOString().split('T')[0];
+    
+    DATA_MODEL[activeTab]?.forEach(field => {
+        const isDateField = ['DATA_INICIO', 'DATA_DO_CONTRATO', 'DATA_MATRICULA', 'DATA_DA_NOMEACAO', 'DATA_VISITA', 'DATA_ATENDIMENTO'].includes(field);
+        initialData[field] = isDateField ? today : '';
+    });
+    setFormData(initialData);
+  };
 
   const handleCardSelect = (entity: string, item: any) => {
     const config = ENTITY_CONFIGS[entity];
@@ -191,34 +150,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     
     setSelectedItems(prev => ({ ...prev, [entity]: pkValue }));
 
-    // If it's a lookup entity, update the form data FK
     if (entity !== activeTab) {
         const fkField = Object.keys(FK_MAPPING).find(key => FK_MAPPING[key] === entity);
-        if (fkField) {
-            setFormData(prev => ({ ...prev, [fkField]: pkValue }));
-        }
+        if (fkField) setFormData(prev => ({ ...prev, [fkField]: pkValue }));
     }
   };
 
   const handleEdit = (item: any) => {
-      const formattedItem = { ...item };
-      
-      if (formattedItem.SALARIO) {
-          formattedItem.SALARIO = validation.formatCurrency(formattedItem.SALARIO);
-      }
-      
-      if (formattedItem.TELEFONE) {
-          formattedItem.TELEFONE = validation.maskPhone(formattedItem.TELEFONE);
-      }
+      const formatted = { ...item };
+      if (formatted.SALARIO) formatted.SALARIO = validation.formatCurrency(formatted.SALARIO);
+      if (formatted.TELEFONE) formatted.TELEFONE = validation.maskPhone(formatted.TELEFONE);
+      if (formatted.CPF) formatted.CPF = validation.maskCPF(formatted.CPF);
 
-      if (formattedItem.CPF) {
-          formattedItem.CPF = validation.maskCPF(formattedItem.CPF);
-      }
-
-      setFormData(formattedItem);
+      setFormData(formatted);
       setIsEditing(true);
-      const config = ENTITY_CONFIGS[activeTab];
-      const pkValue = String(item[config.pk]);
+      
+      const pkValue = String(item[ENTITY_CONFIGS[activeTab].pk]);
       setSelectedItems(prev => ({ ...prev, [activeTab]: pkValue }));
   };
 
@@ -226,15 +173,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const { name, value } = e.target;
     let processedValue = value;
 
-    if (name === 'CPF') {
-        processedValue = validation.maskCPF(value);
-    } else if (name === 'TELEFONE') {
-        processedValue = validation.maskPhone(value);
-    } else if (name === 'SALARIO') {
-        processedValue = validation.maskCurrency(value);
-    }
+    if (name === 'CPF') processedValue = validation.maskCPF(value);
+    else if (name === 'TELEFONE') processedValue = validation.maskPhone(value);
+    else if (name === 'SALARIO') processedValue = validation.maskCurrency(value);
 
-    // Logic for Servidor Prefix Calculation
+    // Auto-calculate prefix for Servidor
     if (activeTab === 'SERVIDOR' && name === 'VINCULO') {
          const prefix = getPrefixForVinculo(value);
          setFormData(prev => ({ ...prev, [name]: processedValue, 'PREFIXO_MATRICULA': prefix }));
@@ -243,52 +186,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     }
   };
 
-  // Filter Logic Helpers
-  const getUniqueFilterValues = (entity: string) => {
-      const config = ENTITY_CONFIGS[entity];
-      if (!config || !config.filterBy) return [];
-      const key = config.filterBy;
-      const data = cardData[entity] || [];
-      const values = data.map(item => item[key]).filter(val => val !== undefined && val !== null && val !== '');
-      return [...new Set(values)].sort();
-  };
-
-  const toggleFilterValue = (entity: string, value: string) => {
-      setActiveFilters(prev => {
-          const current = prev[entity] || [];
-          if (current.includes(value)) {
-              return { ...prev, [entity]: current.filter(v => v !== value) };
-          } else {
-              return { ...prev, [entity]: [...current, value] };
-          }
-      });
-  };
-
-  const getFilteredOptions = (field: string): string[] => {
-      const papel = session.papel;
-      if (field === 'REMETENTE') {
-          if (papel === 'GPRGP') return DROPDOWN_STRUCTURES['REMETENTE'].filter((o: string) => o !== 'Prefeitura');
-          return DROPDOWN_STRUCTURES['REMETENTE'];
-      }
-      return (DROPDOWN_OPTIONS[field] as string[]) || [];
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = { ...formData };
 
+    // Frontend Validations
     if (activeTab === 'PESSOA') {
-        if (!validation.validateCPF(payload.CPF)) { 
-            showToast('error', 'CPF Inválido. Verifique os dígitos.'); 
-            return; 
-        }
+        if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
         payload.CPF = payload.CPF.replace(/\D/g, ""); 
         
         const normalizedPhone = validation.normalizePhoneForSave(payload.TELEFONE);
-        if (payload.TELEFONE && !normalizedPhone) {
-             showToast('error', 'Telefone inválido. O número deve ter 10 ou 11 dígitos (com DDD).');
-             return;
-        }
+        if (payload.TELEFONE && !normalizedPhone) return showToast('error', 'Telefone inválido.');
         payload.TELEFONE = normalizedPhone || "";
         payload.NOME = validation.capitalizeName(payload.NOME);
     }
@@ -301,31 +209,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     try {
       const config = ENTITY_CONFIGS[activeTab];
       
-      // Auto-Generate ID logic matching legacy backend if needed
+      // ID Generation for non-manual PKs
       if(!isEditing && !config.manualPk && config.pkPrefix && !payload[config.pk]) {
           payload[config.pk] = validation.generateLegacyId(config.pkPrefix);
       }
 
-      let res;
-      if (isEditing) {
-        res = await api.updateRecord(activeTab, config.pk, payload[config.pk], payload);
-      } else {
-        res = await api.createRecord(activeTab, payload);
-      }
+      const res = isEditing 
+        ? await api.updateRecord(activeTab, config.pk, payload[config.pk], payload)
+        : await api.createRecord(activeTab, payload);
 
       if (res.success) {
-        showToast('success', isEditing ? 'Registro atualizado!' : 'Registro criado!');
+        showToast('success', isEditing ? 'Atualizado!' : 'Criado!');
+        // Refresh Data
         const newData = await api.fetchEntity(activeTab);
         setCardData(prev => ({ ...prev, [activeTab]: newData }));
-        
         if (activeTab === 'CONTRATO') {
-            const newReservas = await api.fetchEntity('RESERVAS');
-            setCardData(prev => ({ ...prev, 'RESERVAS': newReservas }));
+            const resData = await api.fetchEntity('RESERVAS');
+            setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
         }
-
+        
+        // Reset
         resetForm();
+        setIsEditing(false);
       } else {
-        showToast('error', res.message || 'Erro ao salvar.');
+        showToast('error', res.message);
       }
     } catch (err) {
       showToast('error', 'Erro de conexão.');
@@ -336,7 +243,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const handleDelete = async (e: React.MouseEvent, item: any, entityName: string) => {
     e.stopPropagation();
-    if (!window.confirm('Tem certeza?')) return;
+    if (!window.confirm('Confirmar exclusão?')) return;
     const config = ENTITY_CONFIGS[entityName];
     try {
       const res = await api.deleteRecord(entityName, config.pk, item[config.pk]);
@@ -344,76 +251,59 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         showToast('info', 'Registro excluído.');
         const newData = await api.fetchEntity(entityName);
         setCardData(prev => ({ ...prev, [entityName]: newData }));
-        if (selectedItems[entityName] === String(item[config.pk])) {
-            setSelectedItems(prev => { const next={...prev}; delete next[entityName]; return next; });
-        }
       } else { showToast('error', 'Erro ao excluir.'); }
-    } catch(err) { showToast('error', 'Erro.'); }
+    } catch(err) { showToast('error', 'Erro de conexão.'); }
   };
 
   const handleLockVaga = async (e: React.MouseEvent, idVaga: string, isOcupada: boolean) => {
       e.stopPropagation();
-      if (isOcupada) {
-          showToast('error', 'Não é possível bloquear uma vaga ocupada.');
-          return;
-      }
+      if (isOcupada) return showToast('error', 'Vaga ocupada não pode ser bloqueada.');
       try {
           const newStatus = await api.toggleVagaBloqueada(idVaga);
           showToast('success', newStatus ? 'Vaga bloqueada.' : 'Vaga desbloqueada.');
           const newData = await api.fetchEntity('VAGAS');
           setCardData(prev => ({ ...prev, 'VAGAS': newData }));
-      } catch (err: any) { showToast('error', err.message || 'Erro ao alterar bloqueio.'); }
+      } catch (err: any) { showToast('error', err.message); }
   };
 
-  const handleRestoreAudit = async (e: React.MouseEvent, idLog: string) => {
-      e.stopPropagation();
-      if(!window.confirm('Deseja reverter esta ação?')) return;
-      try {
-          const res = await api.restoreAuditLog(idLog);
-          if(res.success) {
-              showToast('success', res.message);
-              const newData = await api.fetchEntity('AUDITORIA');
-              setCardData(prev => ({...prev, 'AUDITORIA': newData}));
-              // Refresh all data as audit restore might affect anything
-              loadAllRequiredData();
-          }
-      } catch(err) { showToast('error', 'Erro ao restaurar.'); }
+  // --- HELPER FUNCTIONS ---
+
+  const getPrefixForVinculo = (vinculo: string) => {
+      const map: Record<string, string> = { 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' };
+      return map[vinculo] || '10';
   };
+
+  const getFilteredOptions = (field: string): string[] => {
+      if (field === 'REMETENTE' && session.papel === 'GPRGP') {
+          return DROPDOWN_STRUCTURES['REMETENTE'].filter((o: string) => o !== 'Prefeitura');
+      }
+      return (DROPDOWN_OPTIONS[field] as string[]) || [];
+  };
+
+  // --- RENDER INPUTS ---
 
   const renderInput = (field: string) => {
     const config = ENTITY_CONFIGS[activeTab];
     const isPK = field === config.pk;
     const isFK = FK_MAPPING[field] !== undefined;
-    const userRole = session.papel;
-    const isCalculated = ['PREFIXO_MATRICULA'].includes(field);
+    const isCalculated = field === 'PREFIXO_MATRICULA';
 
-    // HIDE PK field if not editing and not manual PK (it will be generated automatically)
-    if (isPK && !isEditing && !config.manualPk) {
+    // Logic to hide specific fields based on role or edit state
+    if ((isPK && !isEditing && !config.manualPk) || 
+        (activeTab === 'CARGOS' && field === 'SALARIO' && session.papel === 'GGT') ||
+        (activeTab === 'PROTOCOLO' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
         return null;
     }
 
-    if (activeTab === 'CARGOS' && field === 'SALARIO' && userRole === 'GGT') return null;
-    if (activeTab === 'PROTOCOLO') {
-        if (field === 'MATRICULA' && userRole === 'GPRGP') return null;
-        if (field === 'ID_CONTRATO' && userRole === 'GGT') return null;
-    }
-
-    const wrapperClass = "relative group";
-    const labelClass = "block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1";
-    // Rounded 2XL input style
-    const inputClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all duration-200 disabled:opacity-60 disabled:bg-gray-100 placeholder-gray-300 text-sm font-medium text-simas-dark";
-    
-    // Calculated/ReadOnly Style
-    const readOnlyClass = "opacity-70 cursor-not-allowed bg-gray-100 focus:bg-gray-100 focus:border-gray-200";
-
     const options = getFilteredOptions(field);
+    const inputCommonClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all duration-200 text-sm font-medium text-simas-dark";
 
     if (options.length > 0) {
       return (
-        <div key={field} className={wrapperClass}>
-          <label className={labelClass}>{field.replace(/_/g, ' ')}</label>
+        <div key={field} className="relative group">
+          <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
           <div className="relative">
-            <select name={field} value={formData[field] || ''} onChange={handleInputChange} className={`${inputClass} appearance-none cursor-pointer hover:border-gray-300`}>
+            <select name={field} value={formData[field] || ''} onChange={handleInputChange} className={`${inputCommonClass} appearance-none cursor-pointer`}>
               <option value="">Selecione...</option>
               {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
             </select>
@@ -422,26 +312,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         </div>
       );
     }
-    const type = field.includes('DATA') ? 'date' : 'text';
-    let displayValue = formData[field] || '';
 
     const isReadOnly = (isPK && isEditing) || isCalculated;
+    const type = field.includes('DATA') ? 'date' : 'text';
 
     return (
-      <div key={field} className={wrapperClass}>
-        <label className={labelClass}>{field.replace(/_/g, ' ')}</label>
+      <div key={field} className="relative group">
+        <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
         <div className="relative">
-            {isFK && (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan">
-                    <i className="fas fa-link text-xs"></i>
-                </div>
-            )}
+            {isFK && <div className="absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan"><i className="fas fa-link text-xs"></i></div>}
             <input 
                 type={type} 
                 name={field} 
-                value={displayValue} 
+                value={formData[field] || ''} 
                 onChange={handleInputChange} 
-                className={`${inputClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? readOnlyClass : ''}`} 
+                className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} 
                 readOnly={isReadOnly}
                 placeholder={isFK ? "Selecione na lista..." : "Digite aqui..."} 
                 maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)}
@@ -451,19 +336,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     );
   };
 
-  const SkeletonCard = () => <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div>;
-
   return (
     <div className="flex flex-col h-full overflow-hidden relative bg-simas-cloud">
-      {/* Top Bar Navigation */}
+      {/* --- NAVIGATION & CONTROLS --- */}
       <div className="flex-none px-8 pt-8 pb-4 flex items-center justify-between z-20">
-        
-        {/* Rounded Searchable Dropdown */}
         <div className="relative min-w-[300px] z-50">
-            <button 
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="w-full flex items-center justify-between pl-2 pr-4 py-2 bg-white text-simas-dark font-bold text-sm rounded-full border border-gray-100 hover:border-simas-cyan transition-all outline-none shadow-soft group"
-            >
+            <button onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="w-full flex items-center justify-between pl-2 pr-4 py-2 bg-white text-simas-dark font-bold text-sm rounded-full border border-gray-100 hover:border-simas-cyan transition-all outline-none shadow-soft group">
                 <div className="flex items-center gap-3">
                      <div className="w-9 h-9 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors">
                         <i className="fas fa-folder-open text-xs"></i>
@@ -473,53 +351,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                 <i className={`fas fa-chevron-down text-xs text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}></i>
             </button>
 
-            {/* Dropdown Menu Overlay & List */}
             {isDropdownOpen && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)}></div>
                     <div className="absolute top-full left-0 right-0 mt-3 bg-white border border-gray-100 rounded-3xl shadow-2xl overflow-hidden z-50 animate-fade-in flex flex-col max-h-[400px]">
-                        
-                        {/* Search Input */}
                         <div className="p-3 border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
                             <div className="relative">
                                 <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                <input 
-                                    type="text" 
-                                    placeholder="Filtrar módulos..." 
-                                    className="w-full pl-10 pr-4 py-2.5 bg-white border-none rounded-xl text-sm outline-none shadow-sm focus:ring-2 focus:ring-simas-cyan transition-all placeholder-gray-400"
-                                    value={dropdownSearch}
-                                    onChange={(e) => setDropdownSearch(e.target.value)}
-                                    autoFocus
-                                    onClick={(e) => e.stopPropagation()} 
-                                />
+                                <input type="text" placeholder="Filtrar..." className="w-full pl-10 pr-4 py-2.5 bg-white border-none rounded-xl text-sm outline-none shadow-sm focus:ring-2 focus:ring-simas-cyan transition-all" value={dropdownSearch} onChange={(e) => setDropdownSearch(e.target.value)} autoFocus onClick={(e) => e.stopPropagation()} />
                             </div>
                         </div>
-                        
-                        {/* Options List */}
                         <div className="overflow-y-auto custom-scrollbar p-2 space-y-1">
-                            {filteredTabs.length > 0 ? filteredTabs.map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => {
-                                        setActiveTab(tab);
-                                        setIsDropdownOpen(false);
-                                        setDropdownSearch('');
-                                    }}
-                                    className={`
-                                        w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 transition-all
-                                        ${activeTab === tab 
-                                            ? 'bg-simas-cloud text-simas-dark font-bold' 
-                                            : 'text-gray-500 hover:bg-gray-50 hover:text-simas-dark'}
-                                    `}
-                                >
+                            {filteredTabs.map(tab => (
+                                <button key={tab} onClick={() => { setActiveTab(tab); setIsDropdownOpen(false); }} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 transition-all ${activeTab === tab ? 'bg-simas-cloud text-simas-dark font-bold' : 'text-gray-500 hover:bg-gray-50 hover:text-simas-dark'}`}>
                                     <div className={`w-2 h-2 rounded-full ${activeTab === tab ? 'bg-simas-cyan shadow-glow' : 'bg-gray-200'}`}></div>
                                     {ENTITY_CONFIGS[tab].title}
                                 </button>
-                            )) : (
-                                <div className="p-6 text-center text-gray-400 text-xs font-medium">
-                                    Nenhum módulo encontrado.
-                                </div>
-                            )}
+                            ))}
                         </div>
                     </div>
                 </>
@@ -527,30 +375,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         </div>
 
         <div className="pl-6 flex items-center gap-4">
-            <button
-                onClick={() => setShowMainList(!showMainList)}
-                className={`
-                    flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-sm uppercase tracking-wide
-                    ${showMainList 
-                        ? 'bg-simas-dark text-white shadow-md' 
-                        : 'bg-white text-gray-500 border border-gray-100 hover:border-gray-200 hover:text-simas-dark'}
-                `}
-            >
-                <i className={`fas ${showMainList ? 'fa-eye' : 'fa-eye-slash'}`}></i>
-                Consultar
+            <button onClick={() => setShowMainList(!showMainList)} className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-sm uppercase tracking-wide ${showMainList ? 'bg-simas-dark text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100 hover:border-gray-200 hover:text-simas-dark'}`}>
+                <i className={`fas ${showMainList ? 'fa-eye' : 'fa-eye-slash'}`}></i> Consultar
             </button>
-
-            <Button variant="secondary" onClick={() => setShowReviewsModal(true)} className="relative !rounded-full w-10 h-10 p-0 flex items-center justify-center border-none shadow-sm bg-white hover:text-simas-cyan text-gray-400 hover:shadow-md transition-all">
+            <Button variant="secondary" onClick={() => setShowReviewsModal(true)} className="relative !rounded-full w-10 h-10 p-0 flex items-center justify-center border-none shadow-sm bg-white hover:text-simas-cyan text-gray-400 hover:shadow-md">
                 <i className="fas fa-bell"></i>
                 {pendingReviews.length > 0 && <span className="absolute -top-1 -right-1 bg-simas-cyan text-white text-[9px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm border-2 border-white">{pendingReviews.length}</span>}
             </Button>
         </div>
       </div>
 
-      {/* Main Workspace */}
+      {/* --- MAIN WORKSPACE --- */}
       <div className="flex-1 flex gap-8 px-8 pb-8 overflow-hidden min-h-0 z-10">
         
-        {/* Editor Panel (Fixed Left) */}
+        {/* 1. EDITOR PANEL */}
         <div className="flex-none w-[380px] flex flex-col bg-white rounded-3xl shadow-soft overflow-hidden z-20 border border-white/50">
           <div className="p-6 border-b border-gray-50 bg-white">
             <h2 className="text-lg font-extrabold text-simas-dark flex items-center gap-3 tracking-tight">
@@ -564,14 +402,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
             <form onSubmit={handleSubmit} className="space-y-5">
               {DATA_MODEL[activeTab]?.map(field => renderInput(field))}
               <div className="pt-6 flex gap-3">
-                {isEditing && <Button type="button" variant="ghost" onClick={resetForm} className="flex-1">Cancelar</Button>}
-                <Button type="submit" isLoading={submitting} className="flex-[2]">{isEditing ? 'Salvar Alterações' : 'Criar Registro'}</Button>
+                {isEditing && <Button type="button" variant="ghost" onClick={() => { resetForm(); setIsEditing(false); }} className="flex-1">Cancelar</Button>}
+                <Button type="submit" isLoading={submitting} className="flex-[2]">{isEditing ? 'Salvar' : 'Criar'}</Button>
               </div>
             </form>
           </div>
         </div>
 
-        {/* Horizontal Data Columns (Lateral Scrolling) */}
+        {/* 2. HORIZONTAL COLUMNS */}
         <div className="flex-1 overflow-x-auto flex gap-6 pb-2 items-stretch px-2 scrollbar-thin scrollbar-thumb-simas-blue scrollbar-track-transparent snap-x">
            {columnsToRender.map((entity, index) => {
              const config = ENTITY_CONFIGS[entity];
@@ -580,26 +418,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
              const rawData = cardData[entity] || [];
              const searchTerm = (deferredSearchTerms[entity] || '').toLowerCase();
              const entityFilters = activeFilters[entity] || [];
-             const filterKey = config.filterBy;
-
-             let filteredData = rawData;
              
-             // Apply Text Filter
-             if (searchTerm) {
-                filteredData = filteredData.filter(item => {
-                    const display = config.cardDisplay(item);
-                    return `${display.title} ${display.subtitle} ${display.details || ''}`.toLowerCase().includes(searchTerm);
-                });
-             }
+             const filteredData = rawData.filter(item => {
+                 const display = config.cardDisplay(item);
+                 const textMatch = !searchTerm || `${display.title} ${display.subtitle} ${display.details || ''}`.toLowerCase().includes(searchTerm);
+                 const filterMatch = entityFilters.length === 0 || (config.filterBy && entityFilters.includes(item[config.filterBy]));
+                 return textMatch && filterMatch;
+             });
 
-             // Apply Checkbox Filters
-             if (filterKey && entityFilters.length > 0) {
-                 filteredData = filteredData.filter(item => entityFilters.includes(item[filterKey]));
-             }
-
-             const isLookup = entity !== activeTab;
              const isFilterOpen = filterPopoverOpen === entity;
-             const filterOptions = isFilterOpen ? getUniqueFilterValues(entity) : [];
+             const filterOptions = isFilterOpen && config.filterBy 
+                ? [...new Set(rawData.map(i => i[config.filterBy!]).filter(Boolean))].sort() 
+                : [];
 
              return (
                <div key={`${entity}-${index}`} className="flex-none w-[340px] flex flex-col bg-slate-200 rounded-3xl overflow-hidden snap-center h-full border border-slate-300 backdrop-blur-sm shadow-inner">
@@ -607,22 +437,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                  <div className="p-4 bg-gray-50/80 sticky top-0 z-10 backdrop-blur-md border-b border-gray-100">
                    <div className="flex items-center justify-between mb-4">
                      <h3 className="font-bold flex items-center gap-2 text-simas-dark uppercase text-xs tracking-wider pl-1">
-                        {isLookup && <i className="fas fa-link text-gray-400"></i>}
-                        {config.title}
+                        {entity !== activeTab && <i className="fas fa-link text-gray-400"></i>} {config.title}
                      </h3>
                      <span className="text-[10px] font-bold bg-white shadow-sm border border-gray-100 px-2.5 py-1 rounded-full text-gray-500">{filteredData.length}</span>
                    </div>
                    <div className="flex gap-2">
                        <div className="relative group flex-grow">
                            <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-colors group-hover:text-simas-cyan"></i>
-                           <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white shadow-sm text-xs focus:ring-2 focus:ring-simas-cyan/50 outline-none transition-all placeholder-gray-400" value={searchTerms[entity] || ''} onChange={(e) => setSearchTerms(prev => ({ ...prev, [entity]: e.target.value }))} />
+                           <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white shadow-sm text-xs focus:ring-2 focus:ring-simas-cyan/50 outline-none transition-all" value={searchTerms[entity] || ''} onChange={(e) => setSearchTerms(prev => ({ ...prev, [entity]: e.target.value }))} />
                        </div>
                        {config.filterBy && (
                            <div className="relative" ref={el => { popoverRefs.current[entity] = el; }}>
-                               <button 
-                                   className={`w-9 h-full rounded-xl flex items-center justify-center transition-all shadow-sm border border-transparent ${isFilterOpen || entityFilters.length > 0 ? 'bg-simas-cyan text-white shadow-glow' : 'bg-white text-gray-400 hover:text-simas-cyan'}`}
-                                   onClick={() => setFilterPopoverOpen(isFilterOpen ? null : entity)}
-                               >
+                               <button className={`w-9 h-full rounded-xl flex items-center justify-center transition-all shadow-sm border border-transparent ${isFilterOpen || entityFilters.length > 0 ? 'bg-simas-cyan text-white shadow-glow' : 'bg-white text-gray-400 hover:text-simas-cyan'}`} onClick={() => setFilterPopoverOpen(isFilterOpen ? null : entity)}>
                                    <i className="fas fa-filter text-xs"></i>
                                </button>
                                {isFilterOpen && (
@@ -634,16 +460,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                                        <div className="max-h-[200px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
                                            {filterOptions.map(opt => (
                                                <label key={opt} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors text-xs text-gray-600">
-                                                   <input 
-                                                       type="checkbox" 
-                                                       checked={entityFilters.includes(opt)} 
-                                                       onChange={() => toggleFilterValue(entity, opt)}
-                                                       className="rounded text-simas-cyan focus:ring-simas-cyan border-gray-300"
-                                                   />
+                                                   <input type="checkbox" checked={entityFilters.includes(opt)} onChange={() => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))} className="rounded text-simas-cyan focus:ring-simas-cyan border-gray-300"/>
                                                    <span className="truncate">{opt}</span>
                                                </label>
                                            ))}
-                                           {filterOptions.length === 0 && <div className="text-center py-4 text-gray-400 text-xs">Nada para filtrar.</div>}
                                        </div>
                                    </div>
                                )}
@@ -652,9 +472,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                    </div>
                  </div>
                  
-                 {/* Column Content */}
+                 {/* Cards List */}
                  <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
-                   {loadingData ? <SkeletonCard /> : filteredData.map(item => {
+                   {loadingData ? <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div> : filteredData.map(item => {
                        const pkValue = String(item[config.pk]);
                        const display = config.cardDisplay(item);
                        const isSelected = selectedItems[entity] === pkValue;
@@ -662,10 +482,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        
                        let exerciseData = undefined;
                        if (entity === 'VAGAS') {
-                           exerciseData = {
-                               label: item.NOME_LOTACAO_EXERCICIO || 'Sem exercício definido',
-                               onEdit: () => setExerciseVagaId(pkValue)
-                           };
+                           exerciseData = { label: item.NOME_LOTACAO_EXERCICIO || 'Sem exercício definido', onEdit: () => setExerciseVagaId(pkValue) };
                        }
 
                        return (
@@ -677,23 +494,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                             status={display.status} 
                             selected={isSelected} 
                             onSelect={() => handleCardSelect(entity, item)} 
-                            onEdit={!isLookup ? () => handleEdit(item) : undefined}
+                            onEdit={entity === activeTab ? () => handleEdit(item) : undefined}
                             exerciseData={exerciseData}
                             actions={
-                             // ACTIONS prop now passes ONLY the buttons, no wrapper styling. Card.tsx handles the pill wrapper.
                              <>
                                {entity === 'PESSOA' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
-                               {entity === 'VAGAS' && (
-                                   <Button 
-                                       variant="icon" 
-                                       icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} 
-                                       className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`}
-                                       title={isOcupada ? "Não é possível bloquear uma vaga ocupada" : "Bloquear/Desbloquear"}
-                                       disabled={isOcupada}
-                                       onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} 
-                                   />
-                               )}
-                               {entity === 'AUDITORIA' && <Button variant="icon" icon="fas fa-undo" className="text-orange-500" onClick={(e) => handleRestoreAudit(e, pkValue)} />}
+                               {entity === 'VAGAS' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
                                {entity !== 'AUDITORIA' && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDelete(e, item, entity)} />}
                              </>
                            }
@@ -707,34 +513,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      
-      {exerciseVagaId && (
-          <ExerciseSelectionModal 
-              vagaId={exerciseVagaId}
-              onClose={() => setExerciseVagaId(null)}
-              onSuccess={() => {
-                  setExerciseVagaId(null);
-                  showToast('success', 'Exercício atualizado com sucesso!');
-                  api.fetchEntity('VAGAS').then(data => setCardData(prev => ({...prev, 'VAGAS': data})));
-              }}
-          />
-      )}
-
-      {actionAtendimentoId && (
-        <ActionExecutionModal 
-            idAtendimento={actionAtendimentoId} 
-            onClose={() => setActionAtendimentoId(null)}
-            onSuccess={() => {
-                setActionAtendimentoId(null);
-                loadPendingReviews();
-                loadAllRequiredData();
-                showToast('success', 'Ação executada com sucesso!');
-            }}
-        />
-      )}
-
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('VAGAS').then(d => setCardData(p => ({...p, 'VAGAS': d}))); }} />}
+      {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadAllRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
       {showReviewsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">
               <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-slide-in">
@@ -747,13 +529,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                         pendingReviews.map(rev => (
                             <div key={rev.ID_ATENDIMENTO} className="bg-white p-5 rounded-2xl border border-gray-100 flex justify-between items-center hover:shadow-lg hover:border-simas-cyan/30 transition-all group">
                                 <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors">
-                                        <i className="fas fa-tasks text-lg"></i>
-                                    </div>
+                                    <div className="w-12 h-12 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors"><i className="fas fa-tasks text-lg"></i></div>
                                     <div>
                                         <h4 className="font-bold text-simas-dark text-lg leading-tight group-hover:text-simas-cyan transition-colors">{rev.TIPO_DE_ACAO} {rev.ENTIDADE_ALVO}</h4>
                                         <p className="text-sm text-gray-500">Para: <span className="font-medium text-gray-700">{rev.NOME_PESSOA}</span></p>
-                                        <p className="text-xs text-gray-400 mt-1 font-medium bg-gray-50 inline-flex items-center gap-1 px-2 py-0.5 rounded-full"><i className="far fa-calendar"></i> {rev.DATA_AGENDAMENTO}</p>
                                     </div>
                                 </div>
                                 <Button onClick={() => { setShowReviewsModal(false); setActionAtendimentoId(rev.ID_ATENDIMENTO); }} className="rounded-full px-6">Executar</Button>
