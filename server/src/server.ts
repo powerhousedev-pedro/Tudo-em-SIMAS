@@ -20,95 +20,69 @@ app.use(express.json() as any);
 
 // --- HELPERS & MAPPINGS ---
 
-// Mapa explícito Rota -> Prisma Model Delegate
+// Mapa explícito Rota (Schema Model Name Lowercased) -> Prisma Model Delegate
 const getModel = (entityName: string): any => {
     const map: { [key: string]: any } = {
         'usuario': prisma.usuario,
-        'usuarios': prisma.usuario,
         'pessoa': prisma.pessoa,
         'servidor': prisma.servidor,
         'contrato': prisma.contrato,
         'vaga': prisma.vaga,
-        'vagas': prisma.vaga,
         'lotacao': prisma.lotacao,
-        'lotacoes': prisma.lotacao,
         'cargo': prisma.cargo,
-        'cargos': prisma.cargo,
         'funcao': prisma.funcao,
         'edital': prisma.edital,
-        'editais': prisma.edital,
         'alocacao': prisma.alocacao,
         'exercicio': prisma.exercicio,
         'nomeacao': prisma.nomeacao,
-        'cargo-comissionado': prisma.cargoComissionado,
         'cargocomissionado': prisma.cargoComissionado,
         'capacitacao': prisma.capacitacao,
         'turma': prisma.turma,
-        'turmas': prisma.turma,
         'encontro': prisma.encontro,
         'chamada': prisma.chamada,
         'visita': prisma.visita,
-        'visitas': prisma.visita,
-        'solicitacao-pesquisa': prisma.solicitacaoPesquisa,
         'solicitacaopesquisa': prisma.solicitacaoPesquisa,
         'pesquisa': prisma.pesquisa,
         'atendimento': prisma.atendimento,
         'protocolo': prisma.protocolo,
         'reserva': prisma.reserva,
-        'reservas': prisma.reserva,
-        'contrato-historico': prisma.contratoHistorico,
         'contratohistorico': prisma.contratoHistorico,
-        'alocacao-historico': prisma.alocacaoHistorico,
         'alocacaohistorico': prisma.alocacaoHistorico,
         'inativo': prisma.inativo,
-        'inativos': prisma.inativo,
         'auditoria': prisma.auditoria
     };
     return map[entityName.toLowerCase()];
 };
 
-// Mapa explícito de Primary Keys conforme schema.prisma
+// Mapa explícito de Primary Keys conforme schema.prisma (keys must be lowercase model names)
 const getPKField = (entityName: string): string => {
     const map: { [key: string]: string } = {
         'usuario': 'usuario',
-        'usuarios': 'usuario',
         'pessoa': 'CPF',
         'servidor': 'MATRICULA',
         'contrato': 'ID_CONTRATO',
         'vaga': 'ID_VAGA',
-        'vagas': 'ID_VAGA',
         'lotacao': 'ID_LOTACAO',
-        'lotacoes': 'ID_LOTACAO',
         'cargo': 'ID_CARGO',
-        'cargos': 'ID_CARGO',
         'funcao': 'ID_FUNCAO',
         'edital': 'ID_EDITAL',
-        'editais': 'ID_EDITAL',
         'alocacao': 'ID_ALOCACAO',
         'exercicio': 'ID_EXERCICIO',
         'nomeacao': 'ID_NOMEACAO',
-        'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
         'cargocomissionado': 'ID_CARGO_COMISSIONADO',
         'capacitacao': 'ID_CAPACITACAO',
         'turma': 'ID_TURMA',
-        'turmas': 'ID_TURMA',
         'encontro': 'ID_ENCONTRO',
         'chamada': 'ID_CHAMADA',
         'visita': 'ID_VISITA',
-        'visitas': 'ID_VISITA',
-        'solicitacao-pesquisa': 'ID_SOLICITACAO',
         'solicitacaopesquisa': 'ID_SOLICITACAO',
         'pesquisa': 'ID_PESQUISA',
         'atendimento': 'ID_ATENDIMENTO',
         'protocolo': 'ID_PROTOCOLO',
         'reserva': 'ID_RESERVA',
-        'reservas': 'ID_RESERVA',
-        'contrato-historico': 'ID_HISTORICO_CONTRATO',
         'contratohistorico': 'ID_HISTORICO_CONTRATO',
-        'alocacao-historico': 'ID_HISTORICO_ALOCACAO',
         'alocacaohistorico': 'ID_HISTORICO_ALOCACAO',
         'inativo': 'ID_INATIVO',
-        'inativos': 'ID_INATIVO',
         'auditoria': 'ID_LOG'
     };
     return map[entityName.toLowerCase()] || 'id';
@@ -450,17 +424,17 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
         let include: any = undefined;
         const entity = req.params.entity.toLowerCase();
         
-        // Enrich Relations
+        // Enrich Relations (using lowercase key matches)
         if (entity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
         if (entity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
         if (entity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
         if (entity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
         if (entity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
         if (entity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
-        if (entity === 'turmas') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
+        if (entity === 'turmas' || entity === 'turma') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
         if (entity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
         if (entity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
-        if (entity === 'vagas') include = { lotacao: true, cargo: true, edital: true, exercicio: {include: {lotacao:true}} };
+        if (entity === 'vaga' || entity === 'vagas') include = { lotacao: true, cargo: true, edital: true, exercicio: {include: {lotacao:true}} };
 
         const data = await model.findMany({ include });
         
@@ -471,9 +445,9 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
             if (item.funcao) ret.NOME_FUNCAO = item.funcao.FUNCAO;
             if (item.cargo) ret.NOME_CARGO = item.cargo.NOME_CARGO;
             if (item.lotacao) ret.NOME_LOTACAO = item.lotacao.LOTACAO;
-            if (item.lotacao && entity === 'vagas') ret.LOTACAO_NOME = item.lotacao.LOTACAO;
-            if (item.edital && entity === 'vagas') ret.EDITAL_NOME = item.edital.EDITAL;
-            if (item.cargo && entity === 'vagas') ret.CARGO_NOME = item.cargo.NOME_CARGO;
+            if (item.lotacao && (entity === 'vagas' || entity === 'vaga')) ret.LOTACAO_NOME = item.lotacao.LOTACAO;
+            if (item.edital && (entity === 'vagas' || entity === 'vaga')) ret.EDITAL_NOME = item.edital.EDITAL;
+            if (item.cargo && (entity === 'vagas' || entity === 'vaga')) ret.CARGO_NOME = item.cargo.NOME_CARGO;
             
             if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; 
             if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
@@ -496,7 +470,7 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
 app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
     // Block entities that have specialized endpoints
-    if (['contrato', 'servidor', 'alocacao', 'usuarios', 'atendimento'].includes(entityName)) {
+    if (['contrato', 'servidor', 'alocacao', 'usuarios', 'atendimento'].includes(entityName.toLowerCase())) {
         return res.status(400).json({ message: 'Use specific endpoint.' });
     }
     
