@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
 import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, PERMISSOES_POR_PAPEL, READ_ONLY_ENTITIES } from '../constants';
 import { api } from '../services/api';
@@ -30,7 +31,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const [filterPopoverOpen, setFilterPopoverOpen] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [dropdownSearch, setDropdownSearch] = useState('');
-  const [showMainList, setShowMainList] = useState(false);
+  const [showMainList, setShowMainList] = useState(true);
 
   // Modal State
   const [dossierCpf, setDossierCpf] = useState<string | null>(null);
@@ -97,7 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     setFormData(initialData);
     setIsEditing(false);
     setSelectedItems({});
-    setShowMainList(false);
+    setShowMainList(true); // Reset to true to show cards
     setDropdownSearch('');
     setActiveFilters({});
     

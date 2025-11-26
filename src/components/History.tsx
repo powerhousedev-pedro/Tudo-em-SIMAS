@@ -217,7 +217,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                         onClick={() => setSelectedLog(item)} 
                         className="bg-white border border-gray-200 text-simas-dark hover:border-simas-cyan hover:text-simas-cyan text-xs font-bold py-1.5 px-3 rounded-full transition-all flex items-center gap-2 shadow-sm hover:shadow-md"
                      >
-                         <i className="fas fa-id-card"></i> Ver Card
+                         <i className="fas fa-eye"></i> Ver Card
                      </button>
                  );
             }
