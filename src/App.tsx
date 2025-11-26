@@ -10,6 +10,7 @@ import { ToastContainer, ToastMessage } from './components/Toast';
 import { UserAdminModal } from './components/UserAdminModal';
 import { UserSession, AppRoute, AppContextProps } from './types';
 import { api } from './services/api';
+import { schemaManager } from './utils/schemaManager';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
@@ -17,19 +18,23 @@ const App: React.FC = () => {
   const [showUserAdminModal, setShowUserAdminModal] = useState(false);
 
   useEffect(() => {
-      // Restore session from localStorage
-      const storedSession = localStorage.getItem('simas_user_session');
-      const storedToken = localStorage.getItem('simas_auth_token');
-      if (storedSession && storedToken) {
-          try {
-              setSession(JSON.parse(storedSession));
-          } catch (e) {
-              console.error("Failed to restore session", e);
+      const init = async () => {
+          // Restore session from localStorage
+          const storedSession = localStorage.getItem('simas_user_session');
+          const storedToken = localStorage.getItem('simas_auth_token');
+          if (storedSession && storedToken) {
+              try {
+                  setSession(JSON.parse(storedSession));
+                  // Initialize Schema logic in background if user is already logged in
+                  await schemaManager.initialize();
+              } catch (e) {
+                  console.error("Failed to restore session", e);
+              }
           }
-      }
-
-      // Run simulated background jobs
-      api.processDailyRoutines();
+          // Run simulated background jobs
+          api.processDailyRoutines();
+      };
+      init();
   }, []);
 
   const showToast = useCallback((type: 'success' | 'error' | 'info', message: string) => {

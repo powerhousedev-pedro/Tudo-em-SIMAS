@@ -12,7 +12,7 @@ const formatDate = (val: any) => {
   }
 };
 
-export const READ_ONLY_ENTITIES = ['VAGAS', 'EDITAIS', 'LOTAÇÕES', 'CARGOS'];
+export const READ_ONLY_ENTITIES = ['VAGAS', 'EDITAIS', 'LOTAÇÕES', 'CARGOS', 'CONTRATO_HISTORICO', 'ALOCACAO_HISTORICO', 'INATIVOS', 'AUDITORIA'];
 
 export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
   'GPRGP': ['painelVagas', 'contratosAtivos'],
@@ -28,6 +28,7 @@ export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
   ]
 };
 
+// Mapeamento de FK (Campo do Schema -> Chave da Configuração de Entidade UI)
 export const FK_MAPPING: { [field: string]: string } = {
     'CPF': 'PESSOA',
     'MATRICULA': 'SERVIDOR',
@@ -43,18 +44,19 @@ export const FK_MAPPING: { [field: string]: string } = {
     'ID_SOLICITACAO': 'SOLICITAÇÃO DE PESQUISA',
     'ID_CARGO_COMISSIONADO': 'CARGO COMISSIONADO',
     'ID_ATENDIMENTO': 'ATENDIMENTO',
-    'ID_ALOCACAO': 'ALOCACAO'
+    'ID_ALOCACAO': 'ALOCACAO',
+    'ID_EXERCICIO': 'EXERCÍCIO'
 };
 
 export const PERMISSOES_POR_PAPEL: { [role: string]: string[] } = {
   'COORDENAÇÃO': ['TODAS', 'USUARIOS_ADMIN'],
-  'GGT': ['SERVIDOR', 'NOMEAÇÃO', 'PROTOCOLO', 'CARGO COMISSIONADO', 'PESSOA', 'FUNÇÃO', 'LOTAÇÕES', 'CARGOS', 'ATENDIMENTO', 'ALOCACAO', 'AUDITORIA'],
-  'GPRGP': ['CONTRATO', 'PROTOCOLO', 'VAGAS', 'EDITAIS', 'PESSOA', 'FUNÇÃO', 'LOTAÇÕES', 'CARGOS', 'ATENDIMENTO', 'EXERCÍCIO', 'AUDITORIA'],
+  'GGT': ['SERVIDOR', 'NOMEAÇÃO', 'PROTOCOLO', 'CARGO COMISSIONADO', 'PESSOA', 'FUNÇÃO', 'LOTAÇÕES', 'CARGOS', 'ATENDIMENTO', 'ALOCACAO', 'AUDITORIA', 'INATIVOS', 'ALOCACAO_HISTORICO'],
+  'GPRGP': ['CONTRATO', 'PROTOCOLO', 'VAGAS', 'EDITAIS', 'PESSOA', 'FUNÇÃO', 'LOTAÇÕES', 'CARGOS', 'ATENDIMENTO', 'EXERCÍCIO', 'AUDITORIA', 'CONTRATO_HISTORICO'],
   'GDEP': ['TURMAS', 'CHAMADA', 'CAPACITAÇÃO', 'ENCONTRO', 'VISITAS', 'PESQUISA', 'SOLICITAÇÃO DE PESQUISA', 'PESSOA', 'FUNÇÃO', 'LOTAÇÕES', 'CARGOS', 'AUDITORIA']
 };
 
 export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
-  // --- GERAL ---
+  // --- GERAL (Base) ---
   'PESSOA': {
     title: 'Pessoas',
     pk: 'CPF',
@@ -72,7 +74,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     }
   },
   
-  // --- GPRGP ---
+  // --- GPRGP (Contratos & Estrutura) ---
   'CONTRATO': {
     title: 'Contratos',
     pk: 'ID_CONTRATO',
@@ -87,7 +89,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Vagas',
     pk: 'ID_VAGA',
     pkPrefix: 'VAG',
-    filterBy: 'LOTACAO_NOME',
+    filterBy: 'LOTACAO_NOME', // Campo enriquecido
     cardDisplay: (item) => {
         let details = `Edital: ${item.EDITAL_NOME || 'N/A'}`;
         if (item.STATUS_VAGA === 'Reservada') {
@@ -123,7 +125,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       })
   },
 
-  // --- GGT ---
+  // --- GGT (Servidores & Lotação) ---
   'SERVIDOR': {
     title: 'Servidores',
     pk: 'MATRICULA',
@@ -166,7 +168,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     }) 
   },
 
-  // --- GDEP ---
+  // --- GDEP (Desenvolvimento & Pesquisa) ---
   'CAPACITAÇÃO': { 
     title: 'Capacitações', 
     pk: 'ID_CAPACITACAO', 
@@ -205,7 +207,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
         title: item.NOME_PESSOA || item.CPF,
         subtitle: item.NOME_TURMA || item.ID_TURMA,
         status: item.PRESENCA,
-        details: `Data: ${formatDate(item.DATA_ENCONTRO)}`
+        details: `Data: ${formatDate(item.DATA_ENCONTRO)}` // enriquecido
     }) 
   },
   'VISITAS': { 
@@ -296,7 +298,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   // --- HISTÓRICO E ARQUIVO ---
   'CONTRATO_HISTORICO': {
       title: 'Histórico de Contratos',
-      pk: 'ID_CONTRATO',
+      pk: 'ID_HISTORICO_CONTRATO',
       cardDisplay: (item) => ({ 
           title: `Contrato Antigo: ${item.ID_CONTRATO}`, 
           subtitle: item.NOME_PESSOA || item.CPF,
@@ -305,7 +307,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   },
   'ALOCACAO_HISTORICO': {
       title: 'Histórico de Alocações',
-      pk: 'ID_ALOCACAO',
+      pk: 'ID_HISTORICO_ALOCACAO',
       cardDisplay: (item) => ({ 
           title: `Alocação Antiga: ${item.ID_ALOCACAO}`, 
           subtitle: `Matrícula: ${item.MATRICULA}`,
@@ -314,27 +316,44 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   },
   'INATIVOS': {
       title: 'Servidores Inativos',
-      pk: 'MATRICULA',
+      pk: 'ID_INATIVO',
       cardDisplay: (item) => ({ 
-          title: item.NOME || `Matrícula: ${item.MATRICULA}`, 
-          subtitle: item.CARGO || 'Cargo N/A',
+          title: item.NOME || `Matrícula Original: ${item.MATRICULA_ORIGINAL}`, 
+          subtitle: item.CARGO || item.ID_CARGO || 'Cargo N/A',
           details: `Inativado em: ${formatDate(item.DATA_INATIVACAO)}\nMotivo: ${item.MOTIVO_INATIVACAO}`
+      })
+  },
+  'AUDITORIA': {
+      title: 'Auditoria',
+      pk: 'ID_LOG',
+      cardDisplay: (item) => ({
+          title: `${item.ACAO} - ${item.TABELA_AFETADA}`,
+          subtitle: `Por: ${item.USUARIO}`,
+          details: `Em: ${new Date(item.DATA_HORA).toLocaleString()}`
       })
   }
 };
 
+// Definição exata dos campos dos formulários baseada no Schema
 export const DATA_MODEL: { [key: string]: string[] } = {
+  // Base
   "PESSOA": ["CPF", "NOME", "SEXO", "DATA_DE_NASCIMENTO", "EMAIL", "TELEFONE", "ESCOLARIDADE", "FORMACAO", "BAIRRO"],
   "SERVIDOR": ["MATRICULA", "PREFIXO_MATRICULA", "CPF", "ID_CARGO", "DATA_MATRICULA", "VINCULO"],
   "CONTRATO": ["ID_CONTRATO", "ID_VAGA", "CPF", "DATA_DO_CONTRATO", "ID_FUNCAO"],
   "VAGAS": ["ID_VAGA", "ID_LOTACAO", "ID_EDITAL", "ID_CARGO", "BLOQUEADA"],
   "LOTAÇÕES": ["ID_LOTACAO", "LOTACAO", "VINCULACAO", "TIPO_DA_LOTACAO", "BAIRRO", "COMPLEXIDADE", "UNIDADE"],
   "CARGOS": ["ID_CARGO", "NOME_CARGO", "ESCOLARIDADE_CARGO", "SALARIO"],
-  "ALOCACAO": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "ID_FUNCAO", "DATA_INICIO"],
   "FUNÇÃO": ["ID_FUNCAO", "FUNCAO", "CBO"],
-  "ATENDIMENTO": ["ID_ATENDIMENTO", "REMETENTE", "CPF", "RESPONSAVEL", "DATA_ATENDIMENTO", "TIPO_PEDIDO", "DESCRICAO", "STATUS_PEDIDO", "JUSTIFICATIVA", "DATA_AGENDAMENTO"],
   "EDITAIS": ["ID_EDITAL", "PROCESSO", "EDITAL", "NUMERO", "COGESTORA", "INICIO", "TERMINO"],
-  "PROTOCOLO": ["ID_PROTOCOLO", "CPF", "TIPO_DE_PROTOCOLO", "INICIO_PRAZO", "TERMINO_PRAZO", "ID_CONTRATO", "MATRICULA"],
+  
+  // Alocação
+  "ALOCACAO": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "ID_FUNCAO", "DATA_INICIO"],
+  "EXERCÍCIO": ["ID_EXERCICIO", "ID_VAGA", "ID_LOTACAO"],
+  
+  // GGT
+  "NOMEAÇÃO": ["ID_NOMEACAO", "MATRICULA", "ID_CARGO_COMISSIONADO", "DATA_DA_NOMEACAO", "PAGINA_DO", "STATUS"],
+  "CARGO COMISSIONADO": ["ID_CARGO_COMISSIONADO", "NOME", "UNIDADE", "TIPO_DE_CARGO"],
+  
   // GDEP
   "CAPACITAÇÃO": ["ID_CAPACITACAO", "ATIVIDADE_DE_CAPACITACAO", "PERCURSO_FORMATIVO", "TIPO_CAPACITACAO", "FORMATO", "MODALIDADE", "TEMATICA_CENTRAL"],
   "TURMAS": ["ID_TURMA", "NOME_TURMA", "ID_CAPACITACAO"],
@@ -343,15 +362,16 @@ export const DATA_MODEL: { [key: string]: string[] } = {
   "VISITAS": ["ID_VISITA", "CPF", "DATA_VISITA", "LOCAL", "CATEGORIA", "ZONA", "SETOR", "MODALIDADE_VISITA", "TIPO_DE_GRADUACAO"],
   "SOLICITAÇÃO DE PESQUISA": ["ID_SOLICITACAO", "OBJETO_DE_ESTUDO", "CPF", "ANO_ENTRADA", "AUTORIZO", "DATA_DEF_INDEF", "DATA_INICIO"],
   "PESQUISA": ["ID_PESQUISA", "ID_SOLICITACAO", "PREV_DATA_FIM", "DATA_FIM", "ABANDONO", "MATERIAL_PENDENTE"],
-  // GGT
-  "NOMEAÇÃO": ["ID_NOMEACAO", "MATRICULA", "ID_CARGO_COMISSIONADO", "DATA_DA_NOMEACAO", "PAGINA_DO", "STATUS"],
-  "CARGO COMISSIONADO": ["ID_CARGO_COMISSIONADO", "NOME", "UNIDADE", "TIPO_DE_CARGO"],
-  "EXERCÍCIO": ["ID_EXERCICIO", "ID_VAGA", "ID_LOTACAO"],
   
-  // HISTORICO
-  "CONTRATO_HISTORICO": ["ID_CONTRATO", "CPF", "DATA_DO_CONTRATO", "DATA_ARQUIVAMENTO", "MOTIVO_ARQUIVAMENTO", "ID_VAGA", "ID_FUNCAO"],
-  "ALOCACAO_HISTORICO": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "DATA_INICIO", "DATA_FIM", "MOTIVO_MUDANCA"],
-  "INATIVOS": ["MATRICULA", "CPF", "NOME", "CARGO", "DATA_INATIVACAO", "MOTIVO", "PROCESSO", "DATA_PUBLICACAO"]
+  // Workflows & Apoio
+  "ATENDIMENTO": ["ID_ATENDIMENTO", "REMETENTE", "CPF", "RESPONSAVEL", "DATA_ENTRADA", "DATA_ATENDIMENTO", "TIPO_PEDIDO", "DESCRICAO", "STATUS_PEDIDO", "JUSTIFICATIVA", "DATA_AGENDAMENTO", "STATUS_AGENDAMENTO"],
+  "PROTOCOLO": ["ID_PROTOCOLO", "CPF", "TIPO_DE_PROTOCOLO", "INICIO_PRAZO", "TERMINO_PRAZO", "ID_CONTRATO", "MATRICULA"],
+  
+  // Histórico (Apenas leitura geralmente, mas definidos aqui)
+  "CONTRATO_HISTORICO": ["ID_HISTORICO_CONTRATO", "ID_CONTRATO", "ID_VAGA", "CPF", "DATA_DO_CONTRATO", "ID_FUNCAO", "DATA_ARQUIVAMENTO", "MOTIVO_ARQUIVAMENTO"],
+  "ALOCACAO_HISTORICO": ["ID_HISTORICO_ALOCACAO", "ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "ID_FUNCAO", "DATA_INICIO", "DATA_ARQUIVAMENTO"],
+  "INATIVOS": ["ID_INATIVO", "MATRICULA_ORIGINAL", "CPF", "ID_CARGO", "DATA_MATRICULA", "VINCULO_ANTERIOR", "PREFIXO_ANTERIOR", "DATA_INATIVACAO", "MOTIVO_INATIVACAO"],
+  "AUDITORIA": ["ID_LOG", "DATA_HORA", "USUARIO", "ACAO", "TABELA_AFETADA", "ID_REGISTRO_AFETADO", "CAMPO_AFETADO", "VALOR_ANTIGO", "VALOR_NOVO"]
 };
 
 export const ENTITY_RELATIONSHIPS: { [key: string]: { entity: string; pk: string }[] } = {
@@ -387,7 +407,7 @@ export const ENTITY_RELATIONSHIPS: { [key: string]: { entity: string; pk: string
   ],
   'LOTAÇÕES': [], 'CARGOS': [], 'FUNÇÃO': [], 'EDITAIS': [], 'ALOCACAO': [], 'EXERCÍCIO': [],
   'NOMEAÇÃO': [], 'CHAMADA': [], 'VISITAS': [], 'PESQUISA': [], 'ATENDIMENTO': [], 'PROTOCOLO': [], 'CARGO COMISSIONADO': [],
-  'INATIVOS': []
+  'INATIVOS': [], 'CONTRATO_HISTORICO': [], 'ALOCACAO_HISTORICO': [], 'AUDITORIA': []
 };
 
 export const DROPDOWN_STRUCTURES: any = {

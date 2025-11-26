@@ -4,7 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
 // @ts-ignore
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
@@ -18,74 +18,37 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 app.use(cors());
 app.use(express.json() as any);
 
-// --- HELPERS & MAPPINGS ---
+// --- DYNAMIC SCHEMA REFLECTION ---
 
-// Mapa explícito Rota (Schema Model Name Lowercased) -> Prisma Model Delegate
-const getModel = (entityName: string): any => {
-    const map: { [key: string]: any } = {
-        'usuario': prisma.usuario,
-        'pessoa': prisma.pessoa,
-        'servidor': prisma.servidor,
-        'contrato': prisma.contrato,
-        'vaga': prisma.vaga,
-        'lotacao': prisma.lotacao,
-        'cargo': prisma.cargo,
-        'funcao': prisma.funcao,
-        'edital': prisma.edital,
-        'alocacao': prisma.alocacao,
-        'exercicio': prisma.exercicio,
-        'nomeacao': prisma.nomeacao,
-        'cargocomissionado': prisma.cargoComissionado,
-        'capacitacao': prisma.capacitacao,
-        'turma': prisma.turma,
-        'encontro': prisma.encontro,
-        'chamada': prisma.chamada,
-        'visita': prisma.visita,
-        'solicitacaopesquisa': prisma.solicitacaoPesquisa,
-        'pesquisa': prisma.pesquisa,
-        'atendimento': prisma.atendimento,
-        'protocolo': prisma.protocolo,
-        'reserva': prisma.reserva,
-        'contratohistorico': prisma.contratoHistorico,
-        'alocacaohistorico': prisma.alocacaoHistorico,
-        'inativo': prisma.inativo,
-        'auditoria': prisma.auditoria
-    };
-    return map[entityName.toLowerCase()];
+// Cache do DMMF para evitar reprocessamento
+let cachedModelMeta: any[] | null = null;
+
+const getModelMeta = () => {
+    if (cachedModelMeta) return cachedModelMeta;
+    
+    // Acessa os metadados gerados pelo Prisma Client
+    const dmmf = Prisma.dmmf.datamodel;
+    
+    cachedModelMeta = dmmf.models.map(model => {
+        const pkField = model.fields.find(f => f.isId)?.name || model.primaryKey?.fields[0] || 'id';
+        return {
+            name: model.name,
+            pk: pkField,
+            fields: model.fields.map(f => f.name)
+        };
+    });
+    
+    return cachedModelMeta;
 };
 
-// Mapa explícito de Primary Keys conforme schema.prisma (keys must be lowercase model names)
-const getPKField = (entityName: string): string => {
-    const map: { [key: string]: string } = {
-        'usuario': 'usuario',
-        'pessoa': 'CPF',
-        'servidor': 'MATRICULA',
-        'contrato': 'ID_CONTRATO',
-        'vaga': 'ID_VAGA',
-        'lotacao': 'ID_LOTACAO',
-        'cargo': 'ID_CARGO',
-        'funcao': 'ID_FUNCAO',
-        'edital': 'ID_EDITAL',
-        'alocacao': 'ID_ALOCACAO',
-        'exercicio': 'ID_EXERCICIO',
-        'nomeacao': 'ID_NOMEACAO',
-        'cargocomissionado': 'ID_CARGO_COMISSIONADO',
-        'capacitacao': 'ID_CAPACITACAO',
-        'turma': 'ID_TURMA',
-        'encontro': 'ID_ENCONTRO',
-        'chamada': 'ID_CHAMADA',
-        'visita': 'ID_VISITA',
-        'solicitacaopesquisa': 'ID_SOLICITACAO',
-        'pesquisa': 'ID_PESQUISA',
-        'atendimento': 'ID_ATENDIMENTO',
-        'protocolo': 'ID_PROTOCOLO',
-        'reserva': 'ID_RESERVA',
-        'contratohistorico': 'ID_HISTORICO_CONTRATO',
-        'alocacaohistorico': 'ID_HISTORICO_ALOCACAO',
-        'inativo': 'ID_INATIVO',
-        'auditoria': 'ID_LOG'
-    };
-    return map[entityName.toLowerCase()] || 'id';
+// Helper para obter o Delegate do Prisma dinamicamente
+// Ex: "SolicitacaoPesquisa" -> prisma.solicitacaoPesquisa
+const getPrismaDelegate = (modelName: string) => {
+    // Prisma client properties usually start with lowercase
+    // But we can try to find the matching key in the prisma instance
+    const key = Object.keys(prisma).find(k => k.toLowerCase() === modelName.toLowerCase());
+    // @ts-ignore
+    return key ? prisma[key] : null;
 };
 
 const sanitizeData = (data: any) => {
@@ -119,6 +82,17 @@ const authenticateToken = (req: any, res: any, next: any) => {
   });
 };
 
+// --- META ENDPOINT (The Brain) ---
+
+app.get('/api/meta/schema', authenticateToken, (req, res) => {
+    try {
+        const meta = getModelMeta();
+        res.json(meta);
+    } catch (e: any) {
+        res.status(500).json({ error: 'Failed to load schema metadata', details: e.message });
+    }
+});
+
 // --- AUTH ROUTES ---
 
 app.post('/api/auth/login', async (req, res) => {
@@ -135,7 +109,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 // --- SPECIAL ENTITY ROUTES (Complex Logic) ---
 
-app.get('/api/vagas', authenticateToken, async (req, res) => {
+app.get('/api/Vaga', authenticateToken, async (req, res) => {
     try {
         const vagas = await prisma.vaga.findMany({
             include: {
@@ -183,10 +157,9 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
 
 // --- TRANSACTIONAL ACTIONS ---
 
-// Create Atendimento & Reserva (if applicable)
-app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
+app.post('/api/Atendimento', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
-    const idVaga = data.ID_VAGA; // Aux field, not in Atendimento model
+    const idVaga = data.ID_VAGA; 
     delete data.ID_VAGA; 
 
     try {
@@ -194,7 +167,6 @@ app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
             const atendimento = await tx.atendimento.create({ data });
             
             if (idVaga) {
-                // Validate Vaga before Reserving
                 const vaga = await tx.vaga.findUnique({ 
                     where: { ID_VAGA: idVaga }, 
                     include: { contrato: true, reserva: true } 
@@ -227,11 +199,9 @@ app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
 
-// Create Contrato & Clear Reserva
-app.post('/api/contrato', authenticateToken, async (req: any, res) => {
+app.post('/api/Contrato', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
-        // Validate Constraints
         const vaga = await prisma.vaga.findUnique({ 
             where: { ID_VAGA: data.ID_VAGA }, include: { contrato: true }
         });
@@ -245,7 +215,6 @@ app.post('/api/contrato', authenticateToken, async (req: any, res) => {
         await prisma.$transaction(async (tx) => {
             await tx.contrato.create({ data });
             
-            // If vacancy was reserved, delete reservation to free ID_VAGA constraint
             const reserva = await tx.reserva.findUnique({ where: { ID_VAGA: data.ID_VAGA } });
             if (reserva) {
                 await tx.reserva.delete({ where: { ID_RESERVA: reserva.ID_RESERVA } });
@@ -298,7 +267,7 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
 
-app.post('/api/servidor', authenticateToken, async (req: any, res) => {
+app.post('/api/Servidor', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
         const hasContract = await prisma.contrato.findFirst({ where: { CPF: data.CPF } });
@@ -316,11 +285,10 @@ app.post('/api/servidor', authenticateToken, async (req: any, res) => {
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
 
-app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
+app.post('/api/Alocacao', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
         await prisma.$transaction(async (tx) => {
-            // Unique MATRICULA constraint logic
             const current = await tx.alocacao.findUnique({ where: { MATRICULA: data.MATRICULA } });
             if (current) {
                 await tx.alocacaoHistorico.create({
@@ -383,7 +351,7 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
 
 // --- USERS ---
 
-app.get('/api/usuarios', authenticateToken, async (req: any, res) => {
+app.get('/api/Usuarios', authenticateToken, async (req: any, res) => {
     try {
         let whereClause = {};
         if (req.user.papel !== 'COORDENAÇÃO') whereClause = { papel: req.user.papel };
@@ -394,7 +362,7 @@ app.get('/api/usuarios', authenticateToken, async (req: any, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/usuarios', authenticateToken, async (req: any, res) => {
+app.post('/api/Usuarios', authenticateToken, async (req: any, res) => {
     if (req.user.papel !== 'COORDENAÇÃO' && !req.user.isGerente) return res.status(403).json({ success: false });
     const { usuario, senha, papel, isGerente } = req.body;
     try {
@@ -406,7 +374,7 @@ app.post('/api/usuarios', authenticateToken, async (req: any, res) => {
     } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) => {
+app.delete('/api/Usuarios/:usuarioId', authenticateToken, async (req: any, res) => {
     if (!req.user.isGerente && req.user.papel !== 'COORDENAÇÃO') return res.status(403).json({ success: false });
     try {
         await prisma.usuario.delete({ where: { usuario: req.params.usuarioId } });
@@ -414,40 +382,40 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
     } catch (e: any) { res.status(500).json({ success: false }); }
 });
 
-// --- GENERIC CRUD ---
+// --- DYNAMIC GENERIC CRUD ---
 
 app.get('/api/:entity', authenticateToken, async (req, res) => {
-    const model = getModel(req.params.entity);
-    if (!model) return res.status(404).json({ message: 'Not found' });
+    const entityName = req.params.entity;
+    const model = getPrismaDelegate(entityName);
+    
+    if (!model) return res.status(404).json({ message: `Model ${entityName} not found via Reflection.` });
     
     try {
         let include: any = undefined;
-        const entity = req.params.entity.toLowerCase();
+        const lowerEntity = entityName.toLowerCase();
         
-        // Enrich Relations (using lowercase key matches)
-        if (entity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
-        if (entity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
-        if (entity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
-        if (entity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
-        if (entity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
-        if (entity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
-        if (entity === 'turmas' || entity === 'turma') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
-        if (entity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
-        if (entity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
-        if (entity === 'vaga' || entity === 'vagas') include = { lotacao: true, cargo: true, edital: true, exercicio: {include: {lotacao:true}} };
+        // Enrich Relations based on recognized names (kept for enrichment logic only)
+        if (lowerEntity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
+        else if (lowerEntity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
+        else if (lowerEntity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
+        else if (lowerEntity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
+        else if (lowerEntity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
+        else if (lowerEntity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
+        else if (lowerEntity === 'turma') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
+        else if (lowerEntity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
+        else if (lowerEntity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
+        
+        // Note: 'Vaga' has a specific endpoint above, so it won't hit here if routed correctly.
 
         const data = await model.findMany({ include });
         
+        // Generic Flattening (O(n) scan)
         const enriched = data.map((item: any) => {
             const ret = { ...item };
-            // Flatten fields for UI
             if (item.pessoa) ret.NOME_PESSOA = item.pessoa.NOME;
             if (item.funcao) ret.NOME_FUNCAO = item.funcao.FUNCAO;
             if (item.cargo) ret.NOME_CARGO = item.cargo.NOME_CARGO;
             if (item.lotacao) ret.NOME_LOTACAO = item.lotacao.LOTACAO;
-            if (item.lotacao && (entity === 'vagas' || entity === 'vaga')) ret.LOTACAO_NOME = item.lotacao.LOTACAO;
-            if (item.edital && (entity === 'vagas' || entity === 'vaga')) ret.EDITAL_NOME = item.edital.EDITAL;
-            if (item.cargo && (entity === 'vagas' || entity === 'vaga')) ret.CARGO_NOME = item.cargo.NOME_CARGO;
             
             if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; 
             if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
@@ -456,7 +424,7 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
             if (item.capacitacao) ret.NOME_CAPACITACAO = item.capacitacao.ATIVIDADE_DE_CAPACITACAO;
             if (item.turma) ret.NOME_TURMA = item.turma.NOME_TURMA;
             
-            if (entity === 'exercicio') {
+            if (lowerEntity === 'exercicio') {
                 ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO;
                 ret.NOME_LOTACAO_EXERCICIO = item.lotacao?.LOTACAO;
             }
@@ -470,20 +438,27 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
 app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
     // Block entities that have specialized endpoints
-    if (['contrato', 'servidor', 'alocacao', 'usuarios', 'atendimento'].includes(entityName.toLowerCase())) {
-        return res.status(400).json({ message: 'Use specific endpoint.' });
+    // Note: The specialized endpoints above (e.g. /api/Contrato) must match exactly what Frontend sends
+    if (['Contrato', 'Servidor', 'Alocacao', 'Usuarios', 'Atendimento'].includes(entityName)) {
+        return res.status(400).json({ message: 'Use specific endpoint logic for this entity.' });
     }
     
-    const model = getModel(entityName);
+    const model = getPrismaDelegate(entityName);
     if (!model) return res.status(404).json({ message: 'Not found' });
+    
     const data = sanitizeData(req.body);
+    
     try {
         const created = await model.create({ data });
-        const pk = getPKField(entityName);
+        
+        // Try to find PK from cache metadata
+        const meta = getModelMeta().find(m => m.name === entityName);
+        const pkValue = meta ? created[meta.pk] : 'N/A';
+
         await prisma.auditoria.create({
             data: {
                 ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
-                TABELA_AFETADA: entityName.toUpperCase(), ID_REGISTRO_AFETADO: String(created[pk]), VALOR_NOVO: JSON.stringify(data)
+                TABELA_AFETADA: entityName.toUpperCase(), ID_REGISTRO_AFETADO: String(pkValue), VALOR_NOVO: JSON.stringify(data)
             }
         });
         res.json({ success: true, message: 'Criado.', data: created });
@@ -492,10 +467,15 @@ app.post('/api/:entity', authenticateToken, async (req: any, res) => {
 
 app.put('/api/:entity/:id', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
-    const model = getModel(entityName);
+    const model = getPrismaDelegate(entityName);
     if (!model) return res.status(404).json({ message: 'Not found' });
+    
+    const meta = getModelMeta().find(m => m.name === entityName);
+    if (!meta) return res.status(400).json({message: 'Metadata not found'});
+
     const data = sanitizeData(req.body);
-    const pkField = getPKField(entityName);
+    const pkField = meta.pk;
+
     try {
         const oldData = await model.findUnique({ where: { [pkField]: req.params.id } });
         await model.update({ where: { [pkField]: req.params.id }, data });
@@ -512,8 +492,13 @@ app.put('/api/:entity/:id', authenticateToken, async (req: any, res) => {
 
 app.delete('/api/:entity/:id', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
-    const model = getModel(entityName);
-    const pkField = getPKField(entityName);
+    const model = getPrismaDelegate(entityName);
+    if (!model) return res.status(404).json({ message: 'Not found' });
+
+    const meta = getModelMeta().find(m => m.name === entityName);
+    if (!meta) return res.status(400).json({message: 'Metadata not found'});
+    const pkField = meta.pk;
+
     try {
         const oldData = await model.findUnique({ where: { [pkField]: req.params.id } });
         await model.delete({ where: { [pkField]: req.params.id } });
@@ -526,6 +511,8 @@ app.delete('/api/:entity/:id', authenticateToken, async (req: any, res) => {
         res.json({ success: true });
     } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
+
+// --- OTHER ENDPOINTS ---
 
 app.post('/api/vagas/:id/toggle-lock', authenticateToken, async (req, res) => {
     try {
@@ -540,11 +527,22 @@ app.post('/api/audit/:id/restore', authenticateToken, async (req, res) => {
     try {
         const log = await prisma.auditoria.findUnique({ where: { ID_LOG: req.params.id } });
         if (!log) return res.status(404).json({ message: 'Log não encontrado' });
-        const model = getModel(log.TABELA_AFETADA);
-        const pkField = getPKField(log.TABELA_AFETADA);
+        
+        // Restore needs dynamic model access too based on TABLE_AFFECTED (assumes UPPERCASE stored in logs)
+        // We need to match TABLE_AFFECTED to a real model name
+        const meta = getModelMeta();
+        // Fuzzy match log table name to model name
+        const modelInfo = meta.find(m => m.name.toUpperCase() === log.TABELA_AFETADA.toUpperCase());
+        
+        if (!modelInfo) return res.status(400).json({message: `Cannot restore: Table ${log.TABELA_AFETADA} not found in schema.`});
+        
+        const model = getPrismaDelegate(modelInfo.name);
+        const pkField = modelInfo.pk;
+
         if (log.ACAO === 'EDITAR' && log.VALOR_ANTIGO) await model.update({ where: { [pkField]: log.ID_REGISTRO_AFETADO }, data: JSON.parse(log.VALOR_ANTIGO) });
         else if (log.ACAO === 'EXCLUIR' && log.VALOR_ANTIGO) await model.create({ data: JSON.parse(log.VALOR_ANTIGO) });
         else if (log.ACAO === 'CRIAR') await model.delete({ where: { [pkField]: log.ID_REGISTRO_AFETADO } });
+        
         await prisma.auditoria.delete({ where: { ID_LOG: req.params.id } });
         res.json({ success: true });
     } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
