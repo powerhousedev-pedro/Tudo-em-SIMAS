@@ -16,7 +16,7 @@ interface DashboardProps extends AppContextProps {}
 
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // --- STATE ---
-  const [activeTab, setActiveTab] = useState('PESSOA');
+  const [activeTab, setActiveTab] = useState('Pessoa');
   const [formData, setFormData] = useState<RecordData>({});
   const [isEditing, setIsEditing] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -71,7 +71,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const tabs = useMemo(() => {
       return Object.keys(ENTITY_CONFIGS).filter(k => 
-          k !== 'AUDITORIA' && k !== 'ATENDIMENTO' && isEntityAllowed(k)
+          k !== 'Auditoria' && k !== 'Atendimento' && isEntityAllowed(k)
       );
   }, [session.papel]);
   
@@ -113,10 +113,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   useEffect(() => {
     api.getRevisoesPendentes().then(setPendingReviews).catch(console.error);
   }, []);
-
-  // 3. Close popovers on click outside is handled in EntityColumn via refs/local logic, 
-  // but global click listener can be here if we want a central handler.
-  // Using individual refs in EntityColumn is cleaner.
 
   // --- DATA LOADING ---
 
@@ -204,7 +200,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     else if (name === 'TELEFONE') processedValue = validation.maskPhone(value);
     else if (name === 'SALARIO') processedValue = validation.maskCurrency(value);
 
-    if (activeTab === 'SERVIDOR' && name === 'VINCULO') {
+    if (activeTab === 'Servidor' && name === 'VINCULO') {
          const map: Record<string, string> = { 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' };
          const prefix = map[value] || '10';
          setFormData(prev => ({ ...prev, [name]: processedValue, 'PREFIXO_MATRICULA': prefix }));
@@ -219,7 +215,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
     let payload = { ...formData };
 
-    if (activeTab === 'PESSOA') {
+    if (activeTab === 'Pessoa') {
         if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
         payload.CPF = payload.CPF.replace(/\D/g, ""); 
         
@@ -229,11 +225,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         payload.NOME = validation.capitalizeName(payload.NOME);
     }
 
-    if (activeTab === 'CARGOS' && payload.SALARIO) {
+    if (activeTab === 'Cargo' && payload.SALARIO) {
         payload.SALARIO = payload.SALARIO.replace(/[R$\.\s]/g, '').replace(',', '.');
     }
 
-    if (activeTab === 'ATENDIMENTO') {
+    if (activeTab === 'Atendimento') {
         const metadata = businessLogic.calculateAtendimentoMetadata(payload);
         payload = { ...payload, ...metadata };
     }
@@ -255,9 +251,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         const newData = await api.fetchEntity(activeTab, true); 
         setCardData(prev => ({ ...prev, [activeTab]: newData }));
         
-        if (activeTab === 'CONTRATO') {
-            const resData = await api.fetchEntity('RESERVAS', true);
-            setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
+        if (activeTab === 'Contrato') {
+            const resData = await api.fetchEntity('Reserva', true);
+            setCardData(prev => ({ ...prev, 'Reserva': resData }));
         }
         
         resetForm();
@@ -291,8 +287,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       try {
           const newStatus = await api.toggleVagaBloqueada(idVaga);
           showToast('success', newStatus ? 'Vaga bloqueada.' : 'Vaga desbloqueada.');
-          const newData = await api.fetchEntity('VAGAS', true);
-          setCardData(prev => ({ ...prev, 'VAGAS': newData }));
+          const newData = await api.fetchEntity('Vaga', true);
+          setCardData(prev => ({ ...prev, 'Vaga': newData }));
       } catch (err: any) { showToast('error', err.message); }
   };
 
@@ -393,7 +389,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('VAGAS', true).then((d: any) => setCardData(p => ({...p, 'VAGAS': d}))); }} />}
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga', true).then((d: any) => setCardData(p => ({...p, 'Vaga': d}))); }} />}
       {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
       {showReviewsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">

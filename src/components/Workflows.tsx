@@ -38,7 +38,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
   const loadRequests = async () => {
     try {
-      const data = await api.fetchEntity('ATENDIMENTO');
+      const data = await api.fetchEntity('Atendimento');
       data.sort((a: any, b: any) => new Date(b.DATA_ENTRADA).getTime() - new Date(a.DATA_ENTRADA).getTime());
       setRequests(data);
     } catch (e) {
@@ -49,10 +49,10 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
   const loadLookups = async () => {
       try {
           const [pData, vData, cData, sData] = await Promise.all([
-              api.fetchEntity('PESSOA'),
-              api.fetchEntity('VAGAS'),
-              api.fetchEntity('CONTRATO'),
-              api.fetchEntity('SERVIDOR')
+              api.fetchEntity('Pessoa'),
+              api.fetchEntity('Vaga'),
+              api.fetchEntity('Contrato'),
+              api.fetchEntity('Servidor')
           ]);
           setPeople(pData);
           setVagas(vData);
@@ -113,7 +113,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
           const metadata = businessLogic.calculateAtendimentoMetadata(payload);
           payload = { ...payload, ...metadata };
 
-          const res = await api.createRecord('ATENDIMENTO', payload);
+          const res = await api.createRecord('Atendimento', payload);
           if (res.success) {
               showToast('success', 'Fluxo iniciado com sucesso!');
               setShowNewModal(false);

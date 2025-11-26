@@ -21,7 +21,7 @@ export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ 
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await api.fetchEntity('LOTAÇÕES');
+        const data = await api.fetchEntity('Lotacao');
         setLotacoes(data);
       } catch (e) {
         console.error(e);
@@ -49,7 +49,7 @@ export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ 
     }
   };
 
-  const config = ENTITY_CONFIGS['LOTAÇÕES'];
+  const config = ENTITY_CONFIGS['Lotacao'];
   
   const filteredLotacoes = lotacoes.filter(item => {
       const display = config.cardDisplay(item);

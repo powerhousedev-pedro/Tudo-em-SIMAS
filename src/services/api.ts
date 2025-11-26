@@ -1,6 +1,6 @@
 
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
-import { schemaManager } from '../utils/schemaManager';
+import { ENTITY_CONFIGS } from '../constants';
 
 // CONFIGURATION
 const API_BASE_URL = 'http://localhost:3001/api';
@@ -47,22 +47,13 @@ export const api = {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  // Called by SchemaManager
   fetchSchemaMeta: async () => {
       return request('/meta/schema');
   },
 
-  // Dynamic Entity Fetch
-  fetchEntity: async (uiEntityName: string, forceRefresh = false): Promise<any[]> => {
-    // Resolve Real Name
-    const realName = schemaManager.getRealModelName(uiEntityName);
-    
-    if (!realName) {
-        console.error(`Entity ${uiEntityName} not mapped to any database table.`);
-        return Promise.resolve([]); // Return empty to avoid breaking UI
-    }
-
-    const endpoint = `/${realName}`;
+  // Fetch simples direto pelo nome da tabela
+  fetchEntity: async (entityName: string, forceRefresh = false): Promise<any[]> => {
+    const endpoint = `/${entityName}`;
     
     const now = Date.now();
     if (!forceRefresh && cache[endpoint] && (now - cache[endpoint].timestamp < CACHE_TTL)) {
@@ -86,67 +77,46 @@ export const api = {
     return promise;
   },
 
-  createRecord: async (uiEntityName: string, data: RecordData) => {
-    const realName = schemaManager.getRealModelName(uiEntityName);
-    if (!realName) throw new Error(`Tabela não encontrada para ${uiEntityName}`);
-    
-    const endpoint = `/${realName}`;
+  createRecord: async (entityName: string, data: RecordData) => {
+    const endpoint = `/${entityName}`;
     const res = await request(endpoint, 'POST', data);
     if (res.success) delete cache[endpoint];
     return res;
   },
 
-  updateRecord: async (uiEntityName: string, pkField: string, pkValue: string, data: RecordData) => {
-    const realName = schemaManager.getRealModelName(uiEntityName);
-    if (!realName) throw new Error(`Tabela não encontrada para ${uiEntityName}`);
-
-    const endpoint = `/${realName}`;
+  updateRecord: async (entityName: string, pkField: string, pkValue: string, data: RecordData) => {
+    const endpoint = `/${entityName}`;
     const res = await request(`${endpoint}/${pkValue}`, 'PUT', data);
     if (res.success) delete cache[endpoint];
     return res;
   },
 
-  deleteRecord: async (uiEntityName: string, pkField: string, pkValue: string) => {
-    const realName = schemaManager.getRealModelName(uiEntityName);
-    if (!realName) throw new Error(`Tabela não encontrada para ${uiEntityName}`);
-
-    const endpoint = `/${realName}`;
+  deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
+    const endpoint = `/${entityName}`;
     const res = await request(`${endpoint}/${pkValue}`, 'DELETE');
     if (res.success) delete cache[endpoint];
     return res;
   },
 
-  // Specific endpoints that might use special logic or explicit routes in backend
-  // Note: Backend logic has been updated to accept PascalCase names for these too if needed,
-  // but standard endpoints are preferred unless custom logic exists.
-  
+  // User Management
   getUsers: async () => { return request('/Usuarios'); },
   deleteUser: async (usuarioId: string) => { return request(`/Usuarios/${usuarioId}`, 'DELETE'); },
 
   toggleVagaBloqueada: async (idVaga: string) => {
-    const res = await request(`/vagas/${idVaga}/toggle-lock`, 'POST');
-    // Invalidate caches that depend on Vaga
-    const realVaga = schemaManager.getRealModelName('VAGAS');
-    if (realVaga) delete cache[`/${realVaga}`];
+    const res = await request(`/Vaga/${idVaga}/toggle-lock`, 'POST');
+    delete cache[`/Vaga`];
     return res;
   },
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
-      // Special case: Exercicio creation might be handled by a custom route or generic
-      const realEx = schemaManager.getRealModelName('EXERCÍCIO');
-      const endpoint = realEx ? `/${realEx}` : '/Exercicio';
-      
-      const res = await request(endpoint, 'POST', { 
+      const res = await request('/Exercicio', 'POST', { 
           ID_EXERCICIO: 'EXE' + Date.now(), 
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
       });
       
-      // Invalidate
-      if (realEx) delete cache[`/${realEx}`];
-      const realVaga = schemaManager.getRealModelName('VAGAS');
-      if (realVaga) delete cache[`/${realVaga}`];
-      
+      delete cache[`/Exercicio`];
+      delete cache[`/Vaga`];
       return res;
   },
 
@@ -163,19 +133,13 @@ export const api = {
   },
 
   getRevisoesPendentes: async () => {
-    // We need to find what 'ATENDIMENTO' maps to
-    const realName = schemaManager.getRealModelName('ATENDIMENTO');
-    if (!realName) return [];
-    const data = await request(`/${realName}`);
+    const data = await request(`/Atendimento`);
     if (!Array.isArray(data)) return [];
     return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
   },
 
   getActionContext: async (idAtendimento: string): Promise<ActionContext> => {
-    const realAtdName = schemaManager.getRealModelName('ATENDIMENTO');
-    if (!realAtdName) throw new Error("Configuration Error: Atendimento table not found.");
-
-    const atendimentos = await api.fetchEntity('ATENDIMENTO');
+    const atendimentos = await api.fetchEntity('Atendimento');
     const atd = atendimentos.find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
     
     if (!atd) throw new Error("Atendimento não encontrado");
@@ -187,15 +151,14 @@ export const api = {
     
     const promises: Promise<any>[] = [];
     
-    // We use the UI keys here, fetchEntity handles the mapping
-    if (acao.includes('CONTRATO')) {
-        promises.push(api.fetchEntity('VAGAS').then(d => lookups['VAGAS'] = d));
-        promises.push(api.fetchEntity('FUNÇÃO').then(d => lookups['FUNÇÃO'] = d));
-    } else if (acao.includes('ALOCACAO')) {
-        promises.push(api.fetchEntity('LOTAÇÕES').then(d => lookups['LOTAÇÕES'] = d));
-        promises.push(api.fetchEntity('FUNÇÃO').then(d => lookups['FUNÇÃO'] = d));
-    } else if (acao.includes('NOMEAÇÃO')) {
-        promises.push(api.fetchEntity('CARGO COMISSIONADO').then(d => lookups['CARGO COMISSIONADO'] = d));
+    if (acao.includes('Contrato')) {
+        promises.push(api.fetchEntity('Vaga').then(d => lookups['Vaga'] = d));
+        promises.push(api.fetchEntity('Funcao').then(d => lookups['Funcao'] = d));
+    } else if (acao.includes('Alocacao')) {
+        promises.push(api.fetchEntity('Lotacao').then(d => lookups['Lotacao'] = d));
+        promises.push(api.fetchEntity('Funcao').then(d => lookups['Funcao'] = d));
+    } else if (acao.includes('Nomeacao')) {
+        promises.push(api.fetchEntity('CargoComissionado').then(d => lookups['CargoComissionado'] = d));
     }
 
     await Promise.all(promises);
@@ -204,52 +167,40 @@ export const api = {
   },
 
   executeAction: async (idAtendimento: string, data: any) => {
-      const atendimentos = await api.fetchEntity('ATENDIMENTO');
+      const atendimentos = await api.fetchEntity('Atendimento');
       const atd = atendimentos.find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
       
       if (!atd) throw new Error("Atendimento não encontrado");
 
-      // Custom specialized endpoints in backend still exist for complex logic
-      // We try to match them, or fall back to generic create/update
-      
-      if (atd.TIPO_DE_ACAO === 'INATIVAR' && atd.ENTIDADE_ALVO === 'SERVIDOR') {
+      if (atd.TIPO_DE_ACAO === 'INATIVAR' && atd.ENTIDADE_ALVO === 'Servidor') {
           await request('/servidores/inativar', 'POST', data);
-      } else if (atd.TIPO_DE_ACAO === 'EDITAR' && atd.ENTIDADE_ALVO === 'CONTRATO') {
+      } else if (atd.TIPO_DE_ACAO === 'EDITAR' && atd.ENTIDADE_ALVO === 'Contrato') {
           await request('/contratos/arquivar', 'POST', { CPF: data.CPF, MOTIVO: atd.TIPO_PEDIDO });
-          // Create new contract
           if (!data.ID_CONTRATO) data.ID_CONTRATO = 'CTT' + Date.now();
-          await api.createRecord('CONTRATO', data);
+          await api.createRecord('Contrato', data);
       } else if (atd.TIPO_DE_ACAO === 'CRIAR') {
           await api.createRecord(atd.ENTIDADE_ALVO, data);
       } else {
-          // Generic Update or Edit
           if (atd.TIPO_DE_ACAO === 'EDITAR' && data.ID_ALOCACAO) {
-               await api.createRecord('ALOCACAO', data); // Alocacao 'update' is often a new record in history logic
+               await api.createRecord('Alocacao', data);
           } else {
-               // Determine PK field dynamically from SchemaManager
-               const realModel = schemaManager.getRealModelName(atd.ENTIDADE_ALVO);
-               if (realModel) {
-                   const pk = schemaManager.getPrimaryKey(realModel);
-                   if (data[pk]) {
-                       await api.updateRecord(atd.ENTIDADE_ALVO, pk, data[pk], data);
-                   }
+               // Update genérico assumindo que a tabela está correta em ENTIDADE_ALVO
+               const config = ENTITY_CONFIGS[atd.ENTIDADE_ALVO];
+               if (config && data[config.pk]) {
+                   await api.updateRecord(atd.ENTIDADE_ALVO, config.pk, data[config.pk], data);
                }
           }
       }
       
-      // Update Status
-      const realAtd = schemaManager.getRealModelName('ATENDIMENTO');
-      const pkAtd = schemaManager.getPrimaryKey(realAtd!);
-      await api.updateRecord('ATENDIMENTO', pkAtd, idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
+      // Atualizar atendimento
+      await api.updateRecord('Atendimento', 'ID_ATENDIMENTO', idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
       
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  // Reports Logic
   getReportData: async (reportName: string): Promise<ReportData> => {
-    // Logic remains mostly client-side aggregation, but fetches use mapped entities
     if (reportName === 'painelVagas') {
-        const vagas = await api.fetchEntity('VAGAS');
+        const vagas = await api.fetchEntity('Vaga');
         const quantitativo = vagas.map((v: any) => ({
             VINCULACAO: v.LOTACAO_NOME && v.LOTACAO_NOME.includes('CRAS') ? 'Proteção Básica' : 'Proteção Especial',
             LOTACAO: v.LOTACAO_NOME,
@@ -258,15 +209,123 @@ export const api = {
         }));
         return { panorama: vagas, quantitativo: quantitativo, filtrosDisponiveis: {} as any };
     }
-    // ... (Other reports use fetchEntity which is now dynamic)
+
+    if (reportName === 'dashboardPessoal') {
+        const [contratos, servidores, alocacoes, vagas] = await Promise.all([
+            api.fetchEntity('Contrato'), api.fetchEntity('Servidor'), 
+            api.fetchEntity('Alocacao'), api.fetchEntity('Vaga')
+        ]);
+        
+        const vinculoCounts: any = { 'OSC': contratos.length };
+        servidores.forEach((s: any) => {
+            const v = s.VINCULO || 'Não especificado';
+            vinculoCounts[v] = (vinculoCounts[v] || 0) + 1;
+        });
+        const graficoVinculo = Object.entries(vinculoCounts).map(([name, value]) => ({ name, value: Number(value) }));
+
+        const lotacaoCounts: any = {};
+        alocacoes.forEach((a: any) => {
+            lotacaoCounts[a.NOME_LOTACAO] = (lotacaoCounts[a.NOME_LOTACAO] || 0) + 1;
+        });
+        const vagaMap = new Map<string, string>(vagas.map((v:any) => [v.ID_VAGA, v.LOTACAO_NOME]));
+        contratos.forEach((c: any) => {
+            const lot = vagaMap.get(c.ID_VAGA) || 'Desconhecida';
+            lotacaoCounts[lot] = (lotacaoCounts[lot] || 0) + 1;
+        });
+        
+        const graficoLotacao = Object.entries(lotacaoCounts)
+            .sort((a:any, b:any) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([name, value]) => ({ name, value: Number(value) }));
+
+        return {
+            totais: { 'Contratados': contratos.length, 'Servidores': servidores.length, 'Total': contratos.length + servidores.length },
+            graficos: { vinculo: graficoVinculo as any, lotacao: graficoLotacao as any }
+        } as any;
+    }
+
+    if (reportName === 'analiseCustos') {
+        const [contratos, vagas, cargos] = await Promise.all([
+            api.fetchEntity('Contrato'), api.fetchEntity('Vaga'), api.fetchEntity('Cargo')
+        ]);
+        
+        const cargoSalarioMap = new Map(cargos.map((c:any) => [c.ID_CARGO, parseFloat(c.SALARIO || 0)]));
+        const vagaMap = new Map<string, { lotacao: string, cargo: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargo: v.ID_CARGO }]));
+        
+        const custoPorLotacao: any = {};
+        contratos.forEach((c: any) => {
+            const v = vagaMap.get(c.ID_VAGA);
+            if (v) {
+                const sal = cargoSalarioMap.get(v.cargo) || 0;
+                custoPorLotacao[v.lotacao] = (custoPorLotacao[v.lotacao] || 0) + sal;
+            }
+        });
+
+        const topCustos = Object.entries(custoPorLotacao)
+            .sort((a:any, b:any) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([name, value]) => ({ name, value: Number(value) }));
+            
+        const linhasTabela = Object.entries(custoPorLotacao).map(([lot, val]) => [lot, new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(val))]);
+
+        return {
+            graficos: { custoPorLotacao: topCustos as any },
+            tabela: { colunas: ['Lotação', 'Custo Mensal Estimado'], linhas: linhasTabela }
+        } as any;
+    }
+
     if (reportName === 'contratosAtivos') {
-        const contratos = await api.fetchEntity('CONTRATO');
+        const contratos = await api.fetchEntity('Contrato');
         const linhas = contratos.map((c: any) => [
             c.NOME_PESSOA, c.CPF, c.ID_CONTRATO, c.NOME_FUNCAO, new Date(c.DATA_DO_CONTRATO).toLocaleDateString('pt-BR')
         ]);
         return { colunas: ['Nome', 'CPF', 'Contrato', 'Função', 'Início'], linhas };
     }
-    // Shortened for brevity, logic applies to all report fetches
+
+    if (reportName === 'quadroLotacaoServidores') {
+        const alocacoes = await api.fetchEntity('Alocacao');
+        const linhas = alocacoes.map((a: any) => [
+            a.NOME_LOTACAO, a.NOME_PESSOA, a.MATRICULA, a.NOME_FUNCAO
+        ]);
+        return { colunas: ['Lotação', 'Servidor', 'Matrícula', 'Função'], linhas };
+    }
+
+    if (reportName === 'perfilDemografico') {
+        const pessoas = await api.fetchEntity('Pessoa');
+        const counts: any = {};
+        const bairros: any = {};
+        
+        pessoas.forEach((p: any) => {
+            const esc = p.ESCOLARIDADE || 'Não Inf.';
+            counts[esc] = (counts[esc] || 0) + 1;
+            const bai = p.BAIRRO || 'Não Inf.';
+            bairros[bai] = (bairros[bai] || 0) + 1;
+        });
+
+        const grafEsc = Object.entries(counts).map(([name, value]) => ({ name, value: Number(value) }));
+        const grafBai = Object.entries(bairros).sort((a:any,b:any)=>b[1]-a[1]).slice(0, 10).map(([name, value]) => ({ name, value: Number(value) }));
+
+        return {
+            graficos: { escolaridade: grafEsc as any, bairro: grafBai as any }
+        } as any;
+    }
+
+    if (reportName === 'adesaoFrequencia') {
+        const chamadas = await api.fetchEntity('Chamada');
+        const linhas = chamadas.map((c: any) => [
+            c.NOME_TURMA, c.NOME_PESSOA, c.PRESENCA, new Date(c.DATA_ENCONTRO || Date.now()).toLocaleDateString()
+        ]);
+        return { colunas: ['Turma', 'Participante', 'Presença', 'Data'], linhas };
+    }
+
+    if (reportName === 'atividadeUsuarios') {
+        const logs = await api.fetchEntity('Auditoria');
+        const linhas = logs.map((l: any) => [
+            new Date(l.DATA_HORA).toLocaleString(), l.USUARIO, l.ACAO, l.TABELA_AFETADA, l.ID_REGISTRO_AFETADO
+        ]);
+        return { colunas: ['Data/Hora', 'Usuário', 'Ação', 'Tabela', 'ID Registro'], linhas };
+    }
+
     return {};
   }
 };
