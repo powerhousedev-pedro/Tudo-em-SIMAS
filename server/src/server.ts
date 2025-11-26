@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 app.use(cors());
-app.use(express.json() as express.RequestHandler);
+app.use(express.json() as any);
 
 // --- HELPERS ---
 
@@ -35,7 +35,6 @@ const sanitizeData = (data: any) => {
     return sanitized;
 };
 
-// Mapeamento entidade -> Prisma Delegate
 const getModel = (entity: string): any => {
     const map: {[key:string]: any} = {
         'pessoa': prisma.pessoa, 'servidor': prisma.servidor, 'contrato': prisma.contrato,
@@ -89,7 +88,6 @@ const seedAdmin = async () => {
     try {
         const count = await prisma.usuario.count();
         if (count === 0) {
-            console.log('Creating default admin user...');
             const hashedPassword = await bcrypt.hash('admin', 10);
             await prisma.usuario.create({
                 data: {
@@ -99,7 +97,6 @@ const seedAdmin = async () => {
                     isGerente: true
                 }
             });
-            console.log('Default user created: admin / admin');
         }
     } catch (e) {
         console.error('Seed error:', e);
@@ -122,7 +119,7 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
 });
 
-// --- ROTAS DE ENTIDADES COM RELACIONAMENTOS ---
+// --- ROTAS OTIMIZADAS COM JOIN ---
 
 app.get('/api/vagas', authenticateToken, async (req, res) => {
     try {
@@ -225,6 +222,7 @@ app.get('/api/alocacao', authenticateToken, async (req, res) => {
 
 app.get('/api/protocolo', authenticateToken, async (req, res) => {
     try {
+        // Protocolo não tem relação direta no schema, fazemos join manual
         const protocolos = await prisma.protocolo.findMany();
         const cpfs = [...new Set(protocolos.map(p => p.CPF).filter(Boolean))];
         const pessoas = await prisma.pessoa.findMany({
@@ -476,10 +474,13 @@ app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
             if (current) {
                 await tx.alocacaoHistorico.create({
                     data: {
-                        ID_ALOCACAO: 'HAL' + Date.now(),
+                        ID_HISTORICO_ALOCACAO: 'HAL' + Date.now(),
+                        ID_ALOCACAO: current.ID_ALOCACAO,
                         MATRICULA: current.MATRICULA, 
-                        ID_LOTACAO: current.ID_LOTACAO, 
-                        DATA_INICIO: current.DATA_INICIO
+                        ID_LOTACAO: current.ID_LOTACAO,
+                        ID_FUNCAO: current.ID_FUNCAO,
+                        DATA_INICIO: current.DATA_INICIO,
+                        DATA_ARQUIVAMENTO: new Date()
                     }
                 });
                 await tx.alocacao.delete({ where: { ID_ALOCACAO: current.ID_ALOCACAO } });
