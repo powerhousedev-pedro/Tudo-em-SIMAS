@@ -213,8 +213,11 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         if (currentView === 'AUDITORIA') {
             if (col === 'DETALHES') {
                  return (
-                     <button onClick={() => setSelectedLog(item)} className="text-xs font-bold text-simas-blue hover:underline flex items-center gap-1">
-                         <i className="fas fa-eye"></i> Ver Alterações
+                     <button 
+                        onClick={() => setSelectedLog(item)} 
+                        className="bg-white border border-gray-200 text-simas-dark hover:border-simas-cyan hover:text-simas-cyan text-xs font-bold py-1.5 px-3 rounded-full transition-all flex items-center gap-2 shadow-sm hover:shadow-md"
+                     >
+                         <i className="fas fa-id-card"></i> Ver Card
                      </button>
                  );
             }
@@ -291,20 +294,16 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             }
 
             // EDITAR: Diff
-            // Union of keys
             const allKeys = new Set([...Object.keys(valorAntigo), ...Object.keys(valorNovo)]);
             return Array.from(allKeys).map(key => {
                 const oldV = valorAntigo[key];
                 const newV = valorNovo[key];
                 
-                if (oldV == newV) return null; // Skip unchanged? Or show them? User asked to verify changes. Let's show only changes + identifiers?
-                // If it's an identifier (ID, NAME, CPF), show it for context even if not changed?
-                // Let's show all, but highlight changes.
+                if (oldV == newV) return null; 
                 
                 const isChanged = JSON.stringify(oldV) !== JSON.stringify(newV);
                 
                 if (!isChanged) {
-                     // Optional: Hide unchanged fields to reduce noise, or keep generic ones
                      if(key.includes('ID') || key === 'NOME' || key === 'CPF') {
                          return (
                             <div key={key} className="flex flex-col mb-2 p-2 bg-gray-50 rounded border border-gray-100 opacity-70">
@@ -393,6 +392,8 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                             {Object.keys(activeFilters).length > 0 && <span className="text-simas-accent ml-2 font-medium">(Filtrado)</span>}
                         </p>
                     </div>
+                    
+                    {/* Global Search Bar */}
                     <div className="relative w-80">
                         <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
                         <input 
@@ -405,6 +406,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                     </div>
                 </div>
 
+                {/* Table Container */}
                 <div className="flex-1 overflow-auto p-8">
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-visible min-h-[400px] relative">
                         {loading ? (

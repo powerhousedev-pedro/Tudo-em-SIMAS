@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -36,37 +37,62 @@ const sanitizeData = (data: any) => {
 };
 
 const getModel = (entity: string): any => {
+    // 1. Normalize input
+    const normalized = entity.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, ""); // aggressive strip
+
+    // 2. Direct Map
     const map: {[key:string]: any} = {
         'pessoa': prisma.pessoa, 'servidor': prisma.servidor, 'contrato': prisma.contrato,
-        'vagas': prisma.vaga, 'lotacoes': prisma.lotacao, 'cargos': prisma.cargo,
-        'alocacao': prisma.alocacao, 'funcao': prisma.funcao, 'atendimento': prisma.atendimento,
-        'editais': prisma.edital, 'protocolo': prisma.protocolo, 'capacitacao': prisma.capacitacao,
-        'turmas': prisma.turma, 'encontro': prisma.encontro, 'chamada': prisma.chamada,
-        'visitas': prisma.visita, 'solicitacao-de-pesquisa': prisma.solicitacaoPesquisa,
-        'pesquisa': prisma.pesquisa, 'nomeacao': prisma.nomeacao, 'cargo-comissionado': prisma.cargoComissionado,
-        'exercicio': prisma.exercicio, 'reservas': prisma.reserva, 'contrato_historico': prisma.contratoHistorico,
-        'alocacao_historico': prisma.alocacaoHistorico, 'inativos': prisma.inativo, 'auditoria': prisma.auditoria,
-        'usuarios': prisma.usuario
+        'vagas': prisma.vaga, 'vaga': prisma.vaga, 'lotacoes': prisma.lotacao, 'lotacao': prisma.lotacao,
+        'cargos': prisma.cargo, 'cargo': prisma.cargo, 'alocacao': prisma.alocacao, 'funcao': prisma.funcao,
+        'atendimento': prisma.atendimento, 'editais': prisma.edital, 'edital': prisma.edital,
+        'protocolo': prisma.protocolo, 'capacitacao': prisma.capacitacao, 'turmas': prisma.turma, 'turma': prisma.turma,
+        'encontro': prisma.encontro, 'chamada': prisma.chamada, 'visitas': prisma.visita, 'visita': prisma.visita,
+        'solicitacaodepesquisa': prisma.solicitacaoPesquisa, 'solicitacaopesquisa': prisma.solicitacaoPesquisa,
+        'pesquisa': prisma.pesquisa, 'nomeacao': prisma.nomeacao,
+        'cargocomissionado': prisma.cargoComissionado, 'exercicio': prisma.exercicio,
+        'reservas': prisma.reserva, 'reserva': prisma.reserva,
+        'contratohistorico': prisma.contratoHistorico,
+        'alocacaohistorico': prisma.alocacaoHistorico,
+        'inativos': prisma.inativo, 'inativo': prisma.inativo,
+        'auditoria': prisma.auditoria, 'usuarios': prisma.usuario, 'usuario': prisma.usuario
     };
-    return map[entity];
+
+    if (map[normalized]) return map[normalized];
+
+    // 3. Fallback: Search Prisma Client keys dynamically
+    // This handles cases where normalization mismatches slightly or casing differs
+    const prismaKeys = Object.keys(prisma);
+    const match = prismaKeys.find(key => key.toLowerCase() === normalized || key.toLowerCase() === entity.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    if (match && (prisma as any)[match]) return (prisma as any)[match];
+
+    console.warn(`Model not found for entity: ${entity} (Normalized: ${normalized})`);
+    return null;
 };
 
 const getPKField = (entity: string) => {
+    const normalized = entity.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, "");
+
     const pkMap: any = {
-        'pessoa': 'CPF', 'servidor': 'MATRICULA', 'contrato': 'ID_CONTRATO', 'vagas': 'ID_VAGA',
+        'pessoa': 'CPF', 'servidor': 'MATRICULA', 'contrato': 'ID_CONTRATO', 'vaga': 'ID_VAGA', 'vagas': 'ID_VAGA',
         'atendimento': 'ID_ATENDIMENTO', 'auditoria': 'ID_LOG', 'alocacao': 'ID_ALOCACAO',
-        'lotacoes': 'ID_LOTACAO', 'cargos': 'ID_CARGO', 'funcao': 'ID_FUNCAO', 'editais': 'ID_EDITAL',
-        'protocolo': 'ID_PROTOCOLO', 'capacitacao': 'ID_CAPACITACAO', 'turmas': 'ID_TURMA',
-        'encontro': 'ID_ENCONTRO', 'chamada': 'ID_CHAMADA', 'visitas': 'ID_VISITA',
-        'solicitacao-de-pesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
-        'nomeacao': 'ID_NOMEACAO', 'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
-        'exercicio': 'ID_EXERCICIO', 'reservas': 'ID_RESERVA', 
-        'contrato_historico': 'ID_CONTRATO', 
-        'alocacao_historico': 'ID_ALOCACAO', 
-        'inativos': 'ID_INATIVO',
-        'usuarios': 'usuario'
+        'lotacao': 'ID_LOTACAO', 'lotacoes': 'ID_LOTACAO', 'cargo': 'ID_CARGO', 'cargos': 'ID_CARGO',
+        'funcao': 'ID_FUNCAO', 'edital': 'ID_EDITAL', 'editais': 'ID_EDITAL',
+        'protocolo': 'ID_PROTOCOLO', 'capacitacao': 'ID_CAPACITACAO', 'turma': 'ID_TURMA', 'turmas': 'ID_TURMA',
+        'encontro': 'ID_ENCONTRO', 'chamada': 'ID_CHAMADA', 'visita': 'ID_VISITA', 'visitas': 'ID_VISITA',
+        'solicitacaodepesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
+        'nomeacao': 'ID_NOMEACAO', 'cargocomissionado': 'ID_CARGO_COMISSIONADO',
+        'exercicio': 'ID_EXERCICIO', 'reserva': 'ID_RESERVA', 'reservas': 'ID_RESERVA',
+        'contratohistorico': 'ID_CONTRATO', 
+        'alocacaohistorico': 'ID_ALOCACAO', 
+        'inativo': 'ID_INATIVO', 'inativos': 'ID_INATIVO',
+        'usuario': 'usuario', 'usuarios': 'usuario'
     };
-    return pkMap[entity] || 'id';
+    return pkMap[normalized] || 'id';
 };
 
 // --- MIDDLEWARE ---
@@ -82,27 +108,6 @@ const authenticateToken = (req: any, res: any, next: any) => {
     next();
   });
 };
-
-// --- SEED DEFAULT USER ---
-const seedAdmin = async () => {
-    try {
-        const count = await prisma.usuario.count();
-        if (count === 0) {
-            const hashedPassword = await bcrypt.hash('admin', 10);
-            await prisma.usuario.create({
-                data: {
-                    usuario: 'admin',
-                    senha: hashedPassword,
-                    papel: 'COORDENAÇÃO',
-                    isGerente: true
-                }
-            });
-        }
-    } catch (e) {
-        console.error('Seed error:', e);
-    }
-};
-seedAdmin();
 
 // --- AUTH ROUTES ---
 
@@ -148,9 +153,13 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
                 status = 'Bloqueada';
             } else if (v.contrato) {
                 status = contratosEmAviso.has(v.contrato.ID_CONTRATO) ? 'Em Aviso Prévio' : 'Ocupada';
-            } else if (v.reserva) {
+            } else if (v.reserva && v.reserva.length > 0) {
                 status = 'Reservada';
-                reservadaPara = v.reserva.ID_ATENDIMENTO; 
+                reservadaPara = v.reserva[0].ID_ATENDIMENTO; 
+            } else if (v.reserva && !Array.isArray(v.reserva)) {
+                 // Handle case where it might not be an array depending on prisma version/mock
+                 status = 'Reservada';
+                 reservadaPara = (v.reserva as any).ID_ATENDIMENTO;
             }
 
             return {
@@ -222,7 +231,6 @@ app.get('/api/alocacao', authenticateToken, async (req, res) => {
 
 app.get('/api/protocolo', authenticateToken, async (req, res) => {
     try {
-        // Protocolo não tem relação direta no schema, fazemos join manual
         const protocolos = await prisma.protocolo.findMany();
         const cpfs = [...new Set(protocolos.map(p => p.CPF).filter(Boolean))];
         const pessoas = await prisma.pessoa.findMany({
@@ -561,13 +569,18 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
 // --- CRUD GENÉRICO ---
 app.get('/api/:entity', authenticateToken, async (req, res) => {
     const model = getModel(req.params.entity);
-    if (!model) return res.status(404).json({ message: 'Not found' });
+    if (!model) {
+        console.error(`Model not found for ${req.params.entity}`);
+        return res.status(404).json({ message: 'Not found' });
+    }
     try { const data = await model.findMany(); res.json(data); } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
 app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
+    // Block manually creating entities that have dedicated logic endpoints
     if (['contrato', 'servidor', 'alocacao', 'usuarios'].includes(entityName)) return;
+    
     const model = getModel(entityName);
     if (!model) return res.status(404).json({ message: 'Not found' });
     const data = sanitizeData(req.body);
