@@ -18,7 +18,101 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 app.use(cors());
 app.use(express.json() as any);
 
-// --- HELPERS ---
+// --- HELPERS & MAPPINGS ---
+
+// Mapa explícito Rota -> Prisma Model Delegate
+const getModel = (entityName: string): any => {
+    const map: { [key: string]: any } = {
+        'usuario': prisma.usuario,
+        'usuarios': prisma.usuario,
+        'pessoa': prisma.pessoa,
+        'servidor': prisma.servidor,
+        'contrato': prisma.contrato,
+        'vaga': prisma.vaga,
+        'vagas': prisma.vaga,
+        'lotacao': prisma.lotacao,
+        'lotacoes': prisma.lotacao,
+        'cargo': prisma.cargo,
+        'cargos': prisma.cargo,
+        'funcao': prisma.funcao,
+        'edital': prisma.edital,
+        'editais': prisma.edital,
+        'alocacao': prisma.alocacao,
+        'exercicio': prisma.exercicio,
+        'nomeacao': prisma.nomeacao,
+        'cargo-comissionado': prisma.cargoComissionado,
+        'cargocomissionado': prisma.cargoComissionado,
+        'capacitacao': prisma.capacitacao,
+        'turma': prisma.turma,
+        'turmas': prisma.turma,
+        'encontro': prisma.encontro,
+        'chamada': prisma.chamada,
+        'visita': prisma.visita,
+        'visitas': prisma.visita,
+        'solicitacao-pesquisa': prisma.solicitacaoPesquisa,
+        'solicitacaopesquisa': prisma.solicitacaoPesquisa,
+        'pesquisa': prisma.pesquisa,
+        'atendimento': prisma.atendimento,
+        'protocolo': prisma.protocolo,
+        'reserva': prisma.reserva,
+        'reservas': prisma.reserva,
+        'contrato-historico': prisma.contratoHistorico,
+        'contratohistorico': prisma.contratoHistorico,
+        'alocacao-historico': prisma.alocacaoHistorico,
+        'alocacaohistorico': prisma.alocacaoHistorico,
+        'inativo': prisma.inativo,
+        'inativos': prisma.inativo,
+        'auditoria': prisma.auditoria
+    };
+    return map[entityName.toLowerCase()];
+};
+
+// Mapa explícito de Primary Keys conforme schema.prisma
+const getPKField = (entityName: string): string => {
+    const map: { [key: string]: string } = {
+        'usuario': 'usuario',
+        'usuarios': 'usuario',
+        'pessoa': 'CPF',
+        'servidor': 'MATRICULA',
+        'contrato': 'ID_CONTRATO',
+        'vaga': 'ID_VAGA',
+        'vagas': 'ID_VAGA',
+        'lotacao': 'ID_LOTACAO',
+        'lotacoes': 'ID_LOTACAO',
+        'cargo': 'ID_CARGO',
+        'cargos': 'ID_CARGO',
+        'funcao': 'ID_FUNCAO',
+        'edital': 'ID_EDITAL',
+        'editais': 'ID_EDITAL',
+        'alocacao': 'ID_ALOCACAO',
+        'exercicio': 'ID_EXERCICIO',
+        'nomeacao': 'ID_NOMEACAO',
+        'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
+        'cargocomissionado': 'ID_CARGO_COMISSIONADO',
+        'capacitacao': 'ID_CAPACITACAO',
+        'turma': 'ID_TURMA',
+        'turmas': 'ID_TURMA',
+        'encontro': 'ID_ENCONTRO',
+        'chamada': 'ID_CHAMADA',
+        'visita': 'ID_VISITA',
+        'visitas': 'ID_VISITA',
+        'solicitacao-pesquisa': 'ID_SOLICITACAO',
+        'solicitacaopesquisa': 'ID_SOLICITACAO',
+        'pesquisa': 'ID_PESQUISA',
+        'atendimento': 'ID_ATENDIMENTO',
+        'protocolo': 'ID_PROTOCOLO',
+        'reserva': 'ID_RESERVA',
+        'reservas': 'ID_RESERVA',
+        'contrato-historico': 'ID_HISTORICO_CONTRATO',
+        'contratohistorico': 'ID_HISTORICO_CONTRATO',
+        'alocacao-historico': 'ID_HISTORICO_ALOCACAO',
+        'alocacaohistorico': 'ID_HISTORICO_ALOCACAO',
+        'inativo': 'ID_INATIVO',
+        'inativos': 'ID_INATIVO',
+        'auditoria': 'ID_LOG'
+    };
+    return map[entityName.toLowerCase()] || 'id';
+};
 
 const sanitizeData = (data: any) => {
     const sanitized: any = {};
@@ -27,6 +121,7 @@ const sanitizeData = (data: any) => {
         if (value === '') value = null;
         else if (typeof value === 'string') {
             if (key === 'ANO_ENTRADA' && !isNaN(parseInt(value))) value = parseInt(value);
+            // Converter strings ISO ou YYYY-MM-DD para Date object
             else if ((key.includes('DATA') || key.includes('INICIO') || key.includes('TERMINO') || key.includes('PRAZO')) && /^\d{4}-\d{2}-\d{2}/.test(value)) {
                 value = new Date(value);
             }
@@ -34,65 +129,6 @@ const sanitizeData = (data: any) => {
         sanitized[key] = value;
     }
     return sanitized;
-};
-
-const getModel = (entity: string): any => {
-    // 1. Normalize input
-    const normalized = entity.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]/g, ""); // aggressive strip
-
-    // 2. Direct Map
-    const map: {[key:string]: any} = {
-        'pessoa': prisma.pessoa, 'servidor': prisma.servidor, 'contrato': prisma.contrato,
-        'vagas': prisma.vaga, 'vaga': prisma.vaga, 'lotacoes': prisma.lotacao, 'lotacao': prisma.lotacao,
-        'cargos': prisma.cargo, 'cargo': prisma.cargo, 'alocacao': prisma.alocacao, 'funcao': prisma.funcao,
-        'atendimento': prisma.atendimento, 'editais': prisma.edital, 'edital': prisma.edital,
-        'protocolo': prisma.protocolo, 'capacitacao': prisma.capacitacao, 'turmas': prisma.turma, 'turma': prisma.turma,
-        'encontro': prisma.encontro, 'chamada': prisma.chamada, 'visitas': prisma.visita, 'visita': prisma.visita,
-        'solicitacaodepesquisa': prisma.solicitacaoPesquisa, 'solicitacaopesquisa': prisma.solicitacaoPesquisa,
-        'pesquisa': prisma.pesquisa, 'nomeacao': prisma.nomeacao,
-        'cargocomissionado': prisma.cargoComissionado, 'exercicio': prisma.exercicio,
-        'reservas': prisma.reserva, 'reserva': prisma.reserva,
-        'contratohistorico': prisma.contratoHistorico,
-        'alocacaohistorico': prisma.alocacaoHistorico,
-        'inativos': prisma.inativo, 'inativo': prisma.inativo,
-        'auditoria': prisma.auditoria, 'usuarios': prisma.usuario, 'usuario': prisma.usuario
-    };
-
-    if (map[normalized]) return map[normalized];
-
-    // 3. Fallback: Search Prisma Client keys dynamically
-    // This handles cases where normalization mismatches slightly or casing differs
-    const prismaKeys = Object.keys(prisma);
-    const match = prismaKeys.find(key => key.toLowerCase() === normalized || key.toLowerCase() === entity.toLowerCase().replace(/[^a-z0-9]/g, ""));
-    if (match && (prisma as any)[match]) return (prisma as any)[match];
-
-    console.warn(`Model not found for entity: ${entity} (Normalized: ${normalized})`);
-    return null;
-};
-
-const getPKField = (entity: string) => {
-    const normalized = entity.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]/g, "");
-
-    const pkMap: any = {
-        'pessoa': 'CPF', 'servidor': 'MATRICULA', 'contrato': 'ID_CONTRATO', 'vaga': 'ID_VAGA', 'vagas': 'ID_VAGA',
-        'atendimento': 'ID_ATENDIMENTO', 'auditoria': 'ID_LOG', 'alocacao': 'ID_ALOCACAO',
-        'lotacao': 'ID_LOTACAO', 'lotacoes': 'ID_LOTACAO', 'cargo': 'ID_CARGO', 'cargos': 'ID_CARGO',
-        'funcao': 'ID_FUNCAO', 'edital': 'ID_EDITAL', 'editais': 'ID_EDITAL',
-        'protocolo': 'ID_PROTOCOLO', 'capacitacao': 'ID_CAPACITACAO', 'turma': 'ID_TURMA', 'turmas': 'ID_TURMA',
-        'encontro': 'ID_ENCONTRO', 'chamada': 'ID_CHAMADA', 'visita': 'ID_VISITA', 'visitas': 'ID_VISITA',
-        'solicitacaodepesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
-        'nomeacao': 'ID_NOMEACAO', 'cargocomissionado': 'ID_CARGO_COMISSIONADO',
-        'exercicio': 'ID_EXERCICIO', 'reserva': 'ID_RESERVA', 'reservas': 'ID_RESERVA',
-        'contratohistorico': 'ID_CONTRATO', 
-        'alocacaohistorico': 'ID_ALOCACAO', 
-        'inativo': 'ID_INATIVO', 'inativos': 'ID_INATIVO',
-        'usuario': 'usuario', 'usuarios': 'usuario'
-    };
-    return pkMap[normalized] || 'id';
 };
 
 // --- MIDDLEWARE ---
@@ -113,7 +149,6 @@ const authenticateToken = (req: any, res: any, next: any) => {
 
 app.post('/api/auth/login', async (req, res) => {
   const { usuario, senha } = req.body;
-  
   const user = await prisma.usuario.findUnique({ where: { usuario } });
   if (!user) return res.status(400).json({ success: false, message: 'Usuário não encontrado' });
 
@@ -124,29 +159,7 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
 });
 
-// --- ROTAS DE DADOS ESTÁTICOS E DE REFERÊNCIA (Sem enriquecimento complexo) ---
-
-app.get('/api/lotacoes', authenticateToken, async (req, res) => {
-    try { const data = await prisma.lotacao.findMany(); res.json(data); }
-    catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/cargos', authenticateToken, async (req, res) => {
-    try { const data = await prisma.cargo.findMany(); res.json(data); }
-    catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/editais', authenticateToken, async (req, res) => {
-    try { const data = await prisma.edital.findMany(); res.json(data); }
-    catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/funcao', authenticateToken, async (req, res) => {
-    try { const data = await prisma.funcao.findMany(); res.json(data); }
-    catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// --- ROTAS OTIMIZADAS COM JOIN (Enriquecimento no Backend) ---
+// --- SPECIAL ENTITY ROUTES (Complex Logic) ---
 
 app.get('/api/vagas', authenticateToken, async (req, res) => {
     try {
@@ -156,7 +169,7 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
                 cargo: true,
                 edital: true,
                 contrato: { select: { ID_CONTRATO: true, CPF: true } },
-                reserva: { where: { STATUS: 'Ativa' } },
+                reserva: true, // 1-to-1 relation
                 exercicio: { include: { lotacao: true } }
             }
         });
@@ -176,14 +189,8 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
             } else if (v.contrato) {
                 status = contratosEmAviso.has(v.contrato.ID_CONTRATO) ? 'Em Aviso Prévio' : 'Ocupada';
             } else if (v.reserva) {
-                const res = v.reserva as any;
-                const hasReserva = Array.isArray(res) ? res.length > 0 : !!res;
-                
-                if (hasReserva) {
-                    status = 'Reservada';
-                    const reservaObj = Array.isArray(res) ? res[0] : res;
-                    reservadaPara = reservaObj.ID_ATENDIMENTO;
-                }
+                status = 'Reservada';
+                reservadaPara = v.reserva.ID_ATENDIMENTO;
             }
 
             return {
@@ -200,226 +207,57 @@ app.get('/api/vagas', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/contrato', authenticateToken, async (req, res) => {
+// --- TRANSACTIONAL ACTIONS ---
+
+// Create Atendimento & Reserva (if applicable)
+app.post('/api/atendimento', authenticateToken, async (req: any, res) => {
+    const data = sanitizeData(req.body);
+    const idVaga = data.ID_VAGA; // Aux field, not in Atendimento model
+    delete data.ID_VAGA; 
+
     try {
-        const contratos = await prisma.contrato.findMany({
-            include: {
-                pessoa: { select: { NOME: true } },
-                funcao: { select: { FUNCAO: true } }
+        await prisma.$transaction(async (tx) => {
+            const atendimento = await tx.atendimento.create({ data });
+            
+            if (idVaga) {
+                // Validate Vaga before Reserving
+                const vaga = await tx.vaga.findUnique({ 
+                    where: { ID_VAGA: idVaga }, 
+                    include: { contrato: true, reserva: true } 
+                });
+                
+                if (!vaga) throw new Error('Vaga não encontrada.');
+                if (vaga.contrato) throw new Error('Vaga já ocupada por contrato.');
+                if (vaga.reserva) throw new Error('Vaga já possui uma reserva ativa.');
+                if (vaga.BLOQUEADA) throw new Error('Vaga bloqueada.');
+
+                await tx.reserva.create({
+                    data: {
+                        ID_RESERVA: 'RES' + Date.now(),
+                        ID_ATENDIMENTO: atendimento.ID_ATENDIMENTO,
+                        ID_VAGA: idVaga,
+                        DATA_RESERVA: new Date(),
+                        STATUS: 'Ativa'
+                    }
+                });
             }
+            
+            await tx.auditoria.create({
+                data: {
+                    ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR',
+                    TABELA_AFETADA: 'ATENDIMENTO', ID_REGISTRO_AFETADO: atendimento.ID_ATENDIMENTO, VALOR_NOVO: JSON.stringify(data)
+                }
+            });
         });
-        const enriched = contratos.map(c => ({
-            ...c,
-            NOME_PESSOA: c.pessoa?.NOME || c.CPF,
-            NOME_FUNCAO: c.funcao?.FUNCAO || 'N/A'
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+        res.json({ success: true, message: 'Atendimento criado.' });
+    } catch (e: any) { res.status(400).json({ success: false, message: e.message }); }
 });
 
-app.get('/api/servidor', authenticateToken, async (req, res) => {
-    try {
-        const servidores = await prisma.servidor.findMany({
-            include: {
-                pessoa: { select: { NOME: true } },
-                cargo: { select: { NOME_CARGO: true } }
-            }
-        });
-        const enriched = servidores.map(s => ({
-            ...s,
-            NOME_PESSOA: s.pessoa?.NOME || s.CPF,
-            NOME_CARGO: s.cargo?.NOME_CARGO || s.ID_CARGO
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/alocacao', authenticateToken, async (req, res) => {
-    try {
-        const alocacoes = await prisma.alocacao.findMany({
-            include: {
-                servidor: { include: { pessoa: { select: { NOME: true } } } },
-                lotacao: { select: { LOTACAO: true } },
-                funcao: { select: { FUNCAO: true } }
-            }
-        });
-        const enriched = alocacoes.map(a => ({
-            ...a,
-            NOME_PESSOA: a.servidor?.pessoa?.NOME || `Mat: ${a.MATRICULA}`,
-            NOME_LOTACAO: a.lotacao?.LOTACAO || a.ID_LOTACAO,
-            NOME_FUNCAO: a.funcao?.FUNCAO || 'N/A'
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/protocolo', authenticateToken, async (req, res) => {
-    try {
-        const protocolos = await prisma.protocolo.findMany();
-        const cpfs = [...new Set(protocolos.map(p => p.CPF).filter(Boolean))];
-        const pessoas = await prisma.pessoa.findMany({
-            where: { CPF: { in: cpfs as string[] } },
-            select: { CPF: true, NOME: true }
-        });
-        
-        const pessoaMap = new Map(pessoas.map(p => [p.CPF, p.NOME]));
-
-        const enriched = protocolos.map(p => ({
-            ...p,
-            NOME_PESSOA: p.CPF ? (pessoaMap.get(p.CPF) || p.CPF) : 'N/A',
-            DETALHE_VINCULO: p.ID_CONTRATO ? `Contrato: ${p.ID_CONTRATO}` : (p.MATRICULA ? `Matrícula: ${p.MATRICULA}` : 'N/A')
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/nomeacao', authenticateToken, async (req, res) => {
-    try {
-        const nomeacoes = await prisma.nomeacao.findMany({
-            include: {
-                servidor: { include: { pessoa: { select: { NOME: true } } } },
-                cargoComissionado: { select: { NOME: true } }
-            }
-        });
-        const enriched = nomeacoes.map(n => ({
-            ...n,
-            NOME_SERVIDOR: n.servidor?.pessoa?.NOME || n.MATRICULA,
-            NOME_CARGO_COMISSIONADO: n.cargoComissionado?.NOME || n.ID_CARGO_COMISSIONADO
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/exercicio', authenticateToken, async (req, res) => {
-    try {
-        const exercicios = await prisma.exercicio.findMany({
-            include: {
-                vaga: { include: { cargo: { select: { NOME_CARGO: true } } } },
-                lotacao: { select: { LOTACAO: true } }
-            }
-        });
-        const enriched = exercicios.map(e => ({
-            ...e,
-            NOME_CARGO_VAGA: e.vaga?.cargo?.NOME_CARGO || 'N/A',
-            NOME_LOTACAO_EXERCICIO: e.lotacao?.LOTACAO || 'N/A'
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/atendimento', authenticateToken, async (req, res) => {
-    try {
-        const atendimentos = await prisma.atendimento.findMany({
-            include: { pessoa: { select: { NOME: true } } }
-        });
-        const enriched = atendimentos.map(a => ({
-            ...a,
-            NOME_PESSOA: a.pessoa?.NOME || a.CPF
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-// --- ROTAS GDEP ---
-
-app.get('/api/turmas', authenticateToken, async (req, res) => {
-    try {
-        const turmas = await prisma.turma.findMany({
-            include: {
-                capacitacao: { select: { ATIVIDADE_DE_CAPACITACAO: true } }
-            }
-        });
-        const enriched = turmas.map(t => ({
-            ...t,
-            NOME_CAPACITACAO: t.capacitacao?.ATIVIDADE_DE_CAPACITACAO || t.ID_CAPACITACAO
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/encontro', authenticateToken, async (req, res) => {
-    try {
-        const encontros = await prisma.encontro.findMany({
-            include: {
-                turma: { select: { NOME_TURMA: true } }
-            }
-        });
-        const enriched = encontros.map(e => ({
-            ...e,
-            NOME_TURMA: e.turma?.NOME_TURMA || e.ID_TURMA
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/chamada', authenticateToken, async (req, res) => {
-    try {
-        const chamadas = await prisma.chamada.findMany({
-            include: {
-                pessoa: { select: { NOME: true } },
-                turma: { select: { NOME_TURMA: true } }
-            }
-        });
-        const enriched = chamadas.map(c => ({
-            ...c,
-            NOME_PESSOA: c.pessoa?.NOME || c.CPF,
-            NOME_TURMA: c.turma?.NOME_TURMA || c.ID_TURMA
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/visitas', authenticateToken, async (req, res) => {
-    try {
-        const visitas = await prisma.visita.findMany({
-            include: {
-                pessoa: { select: { NOME: true } }
-            }
-        });
-        const enriched = visitas.map(v => ({
-            ...v,
-            NOME_PESSOA: v.pessoa?.NOME || v.CPF
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/solicitacao-de-pesquisa', authenticateToken, async (req, res) => {
-    try {
-        const solicitacoes = await prisma.solicitacaoPesquisa.findMany({
-            include: {
-                pessoa: { select: { NOME: true } }
-            }
-        });
-        const enriched = solicitacoes.map(s => ({
-            ...s,
-            NOME_PESSOA: s.pessoa?.NOME || s.CPF
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/pesquisa', authenticateToken, async (req, res) => {
-    try {
-        const pesquisas = await prisma.pesquisa.findMany({
-            include: {
-                solicitacao: { select: { OBJETO_DE_ESTUDO: true } }
-            }
-        });
-        const enriched = pesquisas.map(p => ({
-            ...p,
-            OBJETO_ESTUDO: p.solicitacao?.OBJETO_DE_ESTUDO || `Solicitação: ${p.ID_SOLICITACAO}`
-        }));
-        res.json(enriched);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-
-// --- AÇÕES DE NEGÓCIO ---
-
+// Create Contrato & Clear Reserva
 app.post('/api/contrato', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
+        // Validate Constraints
         const vaga = await prisma.vaga.findUnique({ 
             where: { ID_VAGA: data.ID_VAGA }, include: { contrato: true }
         });
@@ -432,10 +270,13 @@ app.post('/api/contrato', authenticateToken, async (req: any, res) => {
 
         await prisma.$transaction(async (tx) => {
             await tx.contrato.create({ data });
+            
+            // If vacancy was reserved, delete reservation to free ID_VAGA constraint
             const reserva = await tx.reserva.findUnique({ where: { ID_VAGA: data.ID_VAGA } });
-            if (reserva && reserva.STATUS === 'Ativa') {
-                await tx.reserva.update({ where: { ID_RESERVA: reserva.ID_RESERVA }, data: { STATUS: 'Utilizada' } });
+            if (reserva) {
+                await tx.reserva.delete({ where: { ID_RESERVA: reserva.ID_RESERVA } });
             }
+
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario,
@@ -455,6 +296,7 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
         await prisma.$transaction(async (tx) => {
             const activeContract = await tx.contrato.findFirst({ where: { CPF } });
             if (!activeContract) throw new Error('Nenhum contrato ativo.');
+            
             await tx.contratoHistorico.create({
                 data: {
                     ID_HISTORICO_CONTRATO: 'HCT' + Date.now(), 
@@ -467,7 +309,9 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
                     MOTIVO_ARQUIVAMENTO: MOTIVO || 'Mudança'
                 }
             });
+            
             await tx.contrato.delete({ where: { ID_CONTRATO: activeContract.ID_CONTRATO } });
+            
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'ARQUIVAR',
@@ -502,6 +346,7 @@ app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
     try {
         await prisma.$transaction(async (tx) => {
+            // Unique MATRICULA constraint logic
             const current = await tx.alocacao.findUnique({ where: { MATRICULA: data.MATRICULA } });
             if (current) {
                 await tx.alocacaoHistorico.create({
@@ -536,6 +381,7 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
         await prisma.$transaction(async (tx) => {
             const servidor = await tx.servidor.findUnique({ where: { MATRICULA } });
             if (!servidor) throw new Error('Servidor não encontrado.');
+            
             await tx.inativo.create({
                 data: {
                     ID_INATIVO: 'INA' + Date.now(), MATRICULA_ORIGINAL: servidor.MATRICULA, CPF: servidor.CPF,
@@ -544,10 +390,12 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
                     DATA_INATIVACAO: DATA_INATIVACAO ? new Date(DATA_INATIVACAO) : new Date(), MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
                 }
             });
+            
             const alocacao = await tx.alocacao.findUnique({ where: { MATRICULA } });
             if (alocacao) await tx.alocacao.delete({ where: { MATRICULA } });
             await tx.nomeacao.deleteMany({ where: { MATRICULA } });
             await tx.servidor.delete({ where: { MATRICULA } });
+            
             await tx.auditoria.create({
                 data: {
                     ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'INATIVAR',
@@ -558,6 +406,8 @@ app.post('/api/servidores/inativar', authenticateToken, async (req: any, res) =>
         res.json({ success: true, message: 'Servidor inativado.' });
     } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
+
+// --- USERS ---
 
 app.get('/api/usuarios', authenticateToken, async (req: any, res) => {
     try {
@@ -590,20 +440,65 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
     } catch (e: any) { res.status(500).json({ success: false }); }
 });
 
-// --- CRUD GENÉRICO ---
+// --- GENERIC CRUD ---
+
 app.get('/api/:entity', authenticateToken, async (req, res) => {
     const model = getModel(req.params.entity);
-    if (!model) {
-        console.error(`Model not found for ${req.params.entity}`);
-        return res.status(404).json({ message: 'Not found' });
-    }
-    try { const data = await model.findMany(); res.json(data); } catch (e) { res.status(500).json({ error: String(e) }); }
+    if (!model) return res.status(404).json({ message: 'Not found' });
+    
+    try {
+        let include: any = undefined;
+        const entity = req.params.entity.toLowerCase();
+        
+        // Enrich Relations
+        if (entity === 'contrato') include = { pessoa: {select:{NOME:true}}, funcao: {select:{FUNCAO:true}} };
+        if (entity === 'servidor') include = { pessoa: {select:{NOME:true}}, cargo: {select:{NOME_CARGO:true}} };
+        if (entity === 'alocacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, lotacao:{select:{LOTACAO:true}}, funcao:{select:{FUNCAO:true}} };
+        if (entity === 'nomeacao') include = { servidor:{include:{pessoa:{select:{NOME:true}}}}, cargoComissionado:{select:{NOME:true}} };
+        if (entity === 'exercicio') include = { vaga:{include:{cargo:{select:{NOME_CARGO:true}}}}, lotacao:{select:{LOTACAO:true}} };
+        if (entity === 'atendimento') include = { pessoa: {select:{NOME:true}} };
+        if (entity === 'turmas') include = { capacitacao:{select:{ATIVIDADE_DE_CAPACITACAO:true}} };
+        if (entity === 'encontro') include = { turma:{select:{NOME_TURMA:true}} };
+        if (entity === 'chamada') include = { pessoa:{select:{NOME:true}}, turma:{select:{NOME_TURMA:true}} };
+        if (entity === 'vagas') include = { lotacao: true, cargo: true, edital: true, exercicio: {include: {lotacao:true}} };
+
+        const data = await model.findMany({ include });
+        
+        const enriched = data.map((item: any) => {
+            const ret = { ...item };
+            // Flatten fields for UI
+            if (item.pessoa) ret.NOME_PESSOA = item.pessoa.NOME;
+            if (item.funcao) ret.NOME_FUNCAO = item.funcao.FUNCAO;
+            if (item.cargo) ret.NOME_CARGO = item.cargo.NOME_CARGO;
+            if (item.lotacao) ret.NOME_LOTACAO = item.lotacao.LOTACAO;
+            if (item.lotacao && entity === 'vagas') ret.LOTACAO_NOME = item.lotacao.LOTACAO;
+            if (item.edital && entity === 'vagas') ret.EDITAL_NOME = item.edital.EDITAL;
+            if (item.cargo && entity === 'vagas') ret.CARGO_NOME = item.cargo.NOME_CARGO;
+            
+            if (item.servidor?.pessoa) ret.NOME_PESSOA = item.servidor.pessoa.NOME; 
+            if (item.servidor && !item.servidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
+            
+            if (item.cargoComissionado) ret.NOME_CARGO_COMISSIONADO = item.cargoComissionado.NOME;
+            if (item.capacitacao) ret.NOME_CAPACITACAO = item.capacitacao.ATIVIDADE_DE_CAPACITACAO;
+            if (item.turma) ret.NOME_TURMA = item.turma.NOME_TURMA;
+            
+            if (entity === 'exercicio') {
+                ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO;
+                ret.NOME_LOTACAO_EXERCICIO = item.lotacao?.LOTACAO;
+            }
+            return ret;
+        });
+
+        res.json(enriched);
+    } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
 app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
-    // Block manually creating entities that have dedicated logic endpoints
-    if (['contrato', 'servidor', 'alocacao', 'usuarios'].includes(entityName)) return;
+    // Block entities that have specialized endpoints
+    if (['contrato', 'servidor', 'alocacao', 'usuarios', 'atendimento'].includes(entityName)) {
+        return res.status(400).json({ message: 'Use specific endpoint.' });
+    }
     
     const model = getModel(entityName);
     if (!model) return res.status(404).json({ message: 'Not found' });
@@ -671,8 +566,8 @@ app.post('/api/audit/:id/restore', authenticateToken, async (req, res) => {
     try {
         const log = await prisma.auditoria.findUnique({ where: { ID_LOG: req.params.id } });
         if (!log) return res.status(404).json({ message: 'Log não encontrado' });
-        const model = getModel(log.TABELA_AFETADA.toLowerCase());
-        const pkField = getPKField(log.TABELA_AFETADA.toLowerCase());
+        const model = getModel(log.TABELA_AFETADA);
+        const pkField = getPKField(log.TABELA_AFETADA);
         if (log.ACAO === 'EDITAR' && log.VALOR_ANTIGO) await model.update({ where: { [pkField]: log.ID_REGISTRO_AFETADO }, data: JSON.parse(log.VALOR_ANTIGO) });
         else if (log.ACAO === 'EXCLUIR' && log.VALOR_ANTIGO) await model.create({ data: JSON.parse(log.VALOR_ANTIGO) });
         else if (log.ACAO === 'CRIAR') await model.delete({ where: { [pkField]: log.ID_REGISTRO_AFETADO } });
@@ -702,6 +597,7 @@ app.get('/api/pessoas/:cpf/dossier', authenticateToken, async (req, res) => {
     } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
+// --- CRON JOBS ---
 cron.schedule('0 0 * * *', async () => {
     const today = new Date();
     const protocols = await prisma.protocolo.findMany({ where: { TIPO_DE_PROTOCOLO: 'Aviso Prévio', TERMINO_PRAZO: { lt: today } } });
