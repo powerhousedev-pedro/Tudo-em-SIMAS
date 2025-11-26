@@ -62,8 +62,8 @@ const getPKField = (entity: string) => {
         'solicitação-de-pesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
         'nomeação': 'ID_NOMEACAO', 'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
         'exercício': 'ID_EXERCICIO', 'reservas': 'ID_RESERVA', 
-        'contrato_historico': 'ID_CONTRATO', // Fixed: matches DATA_MODEL
-        'alocacao_historico': 'ID_ALOCACAO', // Fixed: matches DATA_MODEL
+        'contrato_historico': 'ID_CONTRATO', 
+        'alocacao_historico': 'ID_ALOCACAO', 
         'inativos': 'ID_INATIVO',
         'usuarios': 'usuario'
     };
@@ -83,6 +83,29 @@ const authenticateToken = (req: any, res: any, next: any) => {
     next();
   });
 };
+
+// --- SEED DEFAULT USER ---
+const seedAdmin = async () => {
+    try {
+        const count = await prisma.usuario.count();
+        if (count === 0) {
+            console.log('Creating default admin user...');
+            const hashedPassword = await bcrypt.hash('admin', 10);
+            await prisma.usuario.create({
+                data: {
+                    usuario: 'admin',
+                    senha: hashedPassword,
+                    papel: 'COORDENAÇÃO',
+                    isGerente: true
+                }
+            });
+            console.log('Default user created: admin / admin');
+        }
+    } catch (e) {
+        console.error('Seed error:', e);
+    }
+};
+seedAdmin();
 
 // --- AUTH ROUTES ---
 
@@ -269,6 +292,107 @@ app.get('/api/atendimento', authenticateToken, async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// --- GDEP OPTIMIZED ROUTES ---
+
+// 9. GET TURMAS (Optimized)
+app.get('/api/turmas', authenticateToken, async (req, res) => {
+    try {
+        const turmas = await prisma.turma.findMany({
+            include: {
+                capacitacao: { select: { ATIVIDADE_DE_CAPACITACAO: true } }
+            }
+        });
+        const enriched = turmas.map(t => ({
+            ...t,
+            NOME_CAPACITACAO: t.capacitacao?.ATIVIDADE_DE_CAPACITACAO || t.ID_CAPACITACAO
+        }));
+        res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// 10. GET ENCONTRO (Optimized)
+app.get('/api/encontro', authenticateToken, async (req, res) => {
+    try {
+        const encontros = await prisma.encontro.findMany({
+            include: {
+                turma: { select: { NOME_TURMA: true } }
+            }
+        });
+        const enriched = encontros.map(e => ({
+            ...e,
+            NOME_TURMA: e.turma?.NOME_TURMA || e.ID_TURMA
+        }));
+        res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// 11. GET CHAMADA (Optimized)
+app.get('/api/chamada', authenticateToken, async (req, res) => {
+    try {
+        const chamadas = await prisma.chamada.findMany({
+            include: {
+                pessoa: { select: { NOME: true } },
+                turma: { select: { NOME_TURMA: true } }
+            }
+        });
+        const enriched = chamadas.map(c => ({
+            ...c,
+            NOME_PESSOA: c.pessoa?.NOME || c.CPF,
+            NOME_TURMA: c.turma?.NOME_TURMA || c.ID_TURMA
+        }));
+        res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// 12. GET VISITAS (Optimized)
+app.get('/api/visitas', authenticateToken, async (req, res) => {
+    try {
+        const visitas = await prisma.visita.findMany({
+            include: {
+                pessoa: { select: { NOME: true } }
+            }
+        });
+        const enriched = visitas.map(v => ({
+            ...v,
+            NOME_PESSOA: v.pessoa?.NOME || v.CPF
+        }));
+        res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// 13. GET SOLICITAÇÃO DE PESQUISA (Optimized)
+app.get('/api/solicitação-de-pesquisa', authenticateToken, async (req, res) => {
+    try {
+        const solicitacoes = await prisma.solicitacaoPesquisa.findMany({
+            include: {
+                pessoa: { select: { NOME: true } }
+            }
+        });
+        const enriched = solicitacoes.map(s => ({
+            ...s,
+            NOME_PESSOA: s.pessoa?.NOME || s.CPF
+        }));
+        res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// 14. GET PESQUISA (Optimized)
+app.get('/api/pesquisa', authenticateToken, async (req, res) => {
+    try {
+        const pesquisas = await prisma.pesquisa.findMany({
+            include: {
+                solicitacao: { select: { OBJETO_DE_ESTUDO: true } }
+            }
+        });
+        const enriched = pesquisas.map(p => ({
+            ...p,
+            OBJETO_ESTUDO: p.solicitacao?.OBJETO_DE_ESTUDO || `Solicitação: ${p.ID_SOLICITACAO}`
+        }));
+        res.json(enriched);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+
 // GENERIC CREATE (Validation + Logic)
 app.post('/api/contrato', authenticateToken, async (req: any, res) => {
     const data = sanitizeData(req.body);
@@ -310,7 +434,7 @@ app.post('/api/contratos/arquivar', authenticateToken, async (req: any, res) => 
             if (!activeContract) throw new Error('Nenhum contrato ativo.');
             await tx.contratoHistorico.create({
                 data: {
-                    ID_CONTRATO: 'HCT' + Date.now(), // Fixed: Mapped to ID_CONTRATO
+                    ID_CONTRATO: 'HCT' + Date.now(), 
                     ID_VAGA: activeContract.ID_VAGA, 
                     CPF: activeContract.CPF, 
                     DATA_DO_CONTRATO: activeContract.DATA_DO_CONTRATO,
@@ -358,13 +482,12 @@ app.post('/api/alocacao', authenticateToken, async (req: any, res) => {
             if (current) {
                 await tx.alocacaoHistorico.create({
                     data: {
-                        ID_ALOCACAO: 'HAL' + Date.now(), // Fixed: Mapped to ID_ALOCACAO
+                        ID_ALOCACAO: 'HAL' + Date.now(),
                         MATRICULA: current.MATRICULA, 
                         ID_LOTACAO: current.ID_LOTACAO, 
-                        // ID_FUNCAO: current.ID_FUNCAO, // Removed if not in ALOCACAO_HISTORICO DATA_MODEL, assuming standard fields
                         DATA_INICIO: current.DATA_INICIO, 
-                        DATA_FIM: new Date(), // Fixed: Mapped to DATA_FIM
-                        MOTIVO_MUDANCA: 'Nova Alocação' // Added: Required by DATA_MODEL
+                        DATA_FIM: new Date(),
+                        MOTIVO_MUDANCA: 'Nova Alocação' 
                     }
                 });
                 await tx.alocacao.delete({ where: { ID_ALOCACAO: current.ID_ALOCACAO } });
@@ -442,10 +565,14 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
     } catch (e: any) { res.status(500).json({ success: false }); }
 });
 
-// GENERIC CRUD
+// GENERIC CRUD (Fallback for non-optimized entities)
 app.get('/api/:entity', authenticateToken, async (req, res) => {
-    const skipEntities = ['vagas', 'contrato', 'servidor', 'alocacao', 'protocolo', 'nomeação', 'exercício', 'atendimento', 'usuarios'];
-    if (skipEntities.includes(req.params.entity)) return;
+    const optimizedEntities = [
+        'vagas', 'contrato', 'servidor', 'alocacao', 'protocolo', 'nomeação', 'exercício', 'atendimento', 'usuarios',
+        'turmas', 'encontro', 'chamada', 'visitas', 'solicitação-de-pesquisa', 'pesquisa'
+    ];
+    if (optimizedEntities.includes(req.params.entity)) return; // Already handled
+    
     const model = getModel(req.params.entity);
     if (!model) return res.status(404).json({ message: 'Not found' });
     try { const data = await model.findMany(); res.json(data); } catch (e) { res.status(500).json({ error: String(e) }); }
@@ -561,7 +688,7 @@ cron.schedule('0 0 * * *', async () => {
             if (contrato) {
                 await prisma.contratoHistorico.create({ 
                     data: { 
-                        ID_CONTRATO: 'HCT' + Date.now(), // Fixed: Mapped to ID_CONTRATO
+                        ID_CONTRATO: 'HCT' + Date.now(), 
                         ID_VAGA: contrato.ID_VAGA,
                         CPF: contrato.CPF,
                         DATA_DO_CONTRATO: contrato.DATA_DO_CONTRATO,
