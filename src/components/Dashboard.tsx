@@ -1,15 +1,16 @@
 
-import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
-import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, PERMISSOES_POR_PAPEL, READ_ONLY_ENTITIES } from '../constants';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
+import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, PERMISSOES_POR_PAPEL, READ_ONLY_ENTITIES } from '../constants';
 import { api } from '../services/api';
 import { Button } from './Button';
-import { Card } from './Card';
 import { RecordData, UserSession, AppContextProps } from '../types';
 import { validation } from '../utils/validation';
 import { businessLogic } from '../utils/businessLogic';
 import { DossierModal } from './DossierModal';
 import { ActionExecutionModal } from './ActionExecutionModal';
 import { ExerciseSelectionModal } from './ExerciseSelectionModal';
+import { EntityForm } from './EntityForm';
+import { EntityColumn } from './EntityColumn';
 
 interface DashboardProps extends AppContextProps {}
 
@@ -39,8 +40,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const [pendingReviews, setPendingReviews] = useState<any[]>([]);
   const [showReviewsModal, setShowReviewsModal] = useState(false);
   const [exerciseVagaId, setExerciseVagaId] = useState<string | null>(null);
-
-  const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   // --- SESSION ---
   const session: UserSession = useMemo(() => {
@@ -98,9 +97,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     setFormData(initialData);
     setIsEditing(false);
     setSelectedItems({});
-    setShowMainList(true); // Reset to true to show cards
+    setShowMainList(true); 
     setDropdownSearch('');
     setActiveFilters({});
+    setFilterPopoverOpen(null);
     
   }, [activeTab]);
 
@@ -114,27 +114,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     api.getRevisoesPendentes().then(setPendingReviews).catch(console.error);
   }, []);
 
-  // 3. Click Outside Handler
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-        if (filterPopoverOpen && popoverRefs.current[filterPopoverOpen] && !popoverRefs.current[filterPopoverOpen]?.contains(event.target as Node)) {
-            setFilterPopoverOpen(null);
-        }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [filterPopoverOpen]);
+  // 3. Close popovers on click outside is handled in EntityColumn via refs/local logic, 
+  // but global click listener can be here if we want a central handler.
+  // Using individual refs in EntityColumn is cleaner.
 
-  // --- DATA LOADING (OPTIMIZED) ---
+  // --- DATA LOADING ---
 
   const loadRequiredData = async () => {
-    
-    // Collect unique entities to fetch (columns + dropdown sources + active tab)
     const entitiesToFetch = new Set<string>(columnsToRender);
-    entitiesToFetch.add(activeTab); // Ensure active tab is fetched even if not in columns (e.g. hidden mode)
+    entitiesToFetch.add(activeTab); 
 
     const modelFields = DATA_MODEL[activeTab] || [];
-    
     modelFields.forEach(field => {
         const linkedEntity = FK_MAPPING[field];
         if (linkedEntity && isEntityAllowed(linkedEntity)) {
@@ -142,16 +132,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         }
     });
 
-    // Filter out entities we already have data for (unless explicit refresh needed - managed by api cache)
     const missingEntities = Array.from(entitiesToFetch);
-
     if (missingEntities.length === 0) return;
 
     setLoadingData(true);
     try {
       const results = await Promise.all(missingEntities.map(async (entity: string) => {
            try {
-             // API fetchEntity is now cached
              const data = await api.fetchEntity(entity);
              return { entity, data };
            } catch (e) {
@@ -217,9 +204,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     else if (name === 'TELEFONE') processedValue = validation.maskPhone(value);
     else if (name === 'SALARIO') processedValue = validation.maskCurrency(value);
 
-    // Auto-calculate prefix for Servidor
     if (activeTab === 'SERVIDOR' && name === 'VINCULO') {
-         const prefix = getPrefixForVinculo(value);
+         const map: Record<string, string> = { 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' };
+         const prefix = map[value] || '10';
          setFormData(prev => ({ ...prev, [name]: processedValue, 'PREFIXO_MATRICULA': prefix }));
     } else {
          setFormData(prev => ({ ...prev, [name]: processedValue }));
@@ -232,7 +219,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
     let payload = { ...formData };
 
-    // Frontend Validations
     if (activeTab === 'PESSOA') {
         if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
         payload.CPF = payload.CPF.replace(/\D/g, ""); 
@@ -247,7 +233,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         payload.SALARIO = payload.SALARIO.replace(/[R$\.\s]/g, '').replace(',', '.');
     }
 
-    // Business Logic: Calculate Metadata for Atendimento
     if (activeTab === 'ATENDIMENTO') {
         const metadata = businessLogic.calculateAtendimentoMetadata(payload);
         payload = { ...payload, ...metadata };
@@ -257,7 +242,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     try {
       const config = ENTITY_CONFIGS[activeTab];
       
-      // ID Generation for non-manual PKs
       if(!isEditing && !config.manualPk && config.pkPrefix && !payload[config.pk]) {
           payload[config.pk] = validation.generateLegacyId(config.pkPrefix);
       }
@@ -268,8 +252,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       if (res.success) {
         showToast('success', isEditing ? 'Atualizado!' : 'Criado!');
-        
-        // Refresh Data forced for active tab to show new record
         const newData = await api.fetchEntity(activeTab, true); 
         setCardData(prev => ({ ...prev, [activeTab]: newData }));
         
@@ -278,7 +260,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
             setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
         }
         
-        // Reset
         resetForm();
         setIsEditing(false);
       } else {
@@ -291,22 +272,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, item: any, entityName: string) => {
-    e.stopPropagation();
+  const handleDelete = async (item: any, entityName?: string) => {
+    const targetEntity = entityName || activeTab;
     if (!window.confirm('Confirmar exclusão?')) return;
-    const config = ENTITY_CONFIGS[entityName];
+    const config = ENTITY_CONFIGS[targetEntity];
     try {
-      const res = await api.deleteRecord(entityName, config.pk, item[config.pk]);
+      const res = await api.deleteRecord(targetEntity, config.pk, item[config.pk]);
       if (res.success) {
         showToast('info', 'Registro excluído.');
-        const newData = await api.fetchEntity(entityName, true);
-        setCardData(prev => ({ ...prev, [entityName]: newData }));
+        const newData = await api.fetchEntity(targetEntity, true);
+        setCardData(prev => ({ ...prev, [targetEntity]: newData }));
       } else { showToast('error', 'Erro ao excluir.'); }
     } catch(err) { showToast('error', 'Erro de conexão.'); }
   };
 
-  const handleLockVaga = async (e: React.MouseEvent, idVaga: string, isOcupada: boolean) => {
-      e.stopPropagation();
+  const handleLockVaga = async (idVaga: string, isOcupada: boolean) => {
       if (isOcupada) return showToast('error', 'Vaga ocupada não pode ser bloqueada.');
       try {
           const newStatus = await api.toggleVagaBloqueada(idVaga);
@@ -314,103 +294,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
           const newData = await api.fetchEntity('VAGAS', true);
           setCardData(prev => ({ ...prev, 'VAGAS': newData }));
       } catch (err: any) { showToast('error', err.message); }
-  };
-
-  // --- HELPER FUNCTIONS ---
-
-  const getPrefixForVinculo = (vinculo: string) => {
-      const map: Record<string, string> = { 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' };
-      return map[vinculo] || '10';
-  };
-
-  const getFilteredOptions = (field: string): string[] => {
-      const papel = session.papel;
-
-      if (field === 'REMETENTE' && papel === 'GPRGP') {
-          return DROPDOWN_STRUCTURES['REMETENTE'].filter((o: string) => o !== 'Prefeitura');
-      }
-
-      if (field === 'TIPO_PEDIDO') {
-          const struct = DROPDOWN_STRUCTURES['TIPO_PEDIDO'];
-          let options: string[] = [...struct.GERAL];
-          if (papel === 'GPRGP') options.push(...struct.CONTRATADO, ...struct.GPRGP_ESPECIFICO);
-          else if (papel === 'GGT') options.push(...struct.SERVIDOR);
-          else if (papel === 'COORDENAÇÃO') options.push(...struct.CONTRATADO, ...struct.SERVIDOR, ...struct.GPRGP_ESPECIFICO);
-          return [...new Set(options)].sort();
-      }
-      
-      if (field === 'JUSTIFICATIVA') {
-          const struct = DROPDOWN_STRUCTURES['JUSTIFICATIVA'];
-          let options: string[] = [...struct.GERAL];
-          if (papel === 'GPRGP') options.push(...struct.CONTRATADO);
-          else if (papel === 'GGT') options.push(...struct.SERVIDOR);
-          else if (papel === 'COORDENAÇÃO') options.push(...struct.CONTRATADO, ...struct.SERVIDOR);
-          return [...new Set(options)].sort();
-      }
-
-      return (DROPDOWN_OPTIONS[field] as string[]) || [];
-  };
-
-  // --- RENDER INPUTS ---
-
-  const renderInput = (field: string) => {
-    const config = ENTITY_CONFIGS[activeTab];
-    const isPK = field === config.pk;
-    const isFK = FK_MAPPING[field] !== undefined;
-    const isCalculated = field === 'PREFIXO_MATRICULA';
-
-    // Logic to hide specific fields based on role or edit state
-    if ((isPK && !isEditing && !config.manualPk) || 
-        (activeTab === 'CARGOS' && field === 'SALARIO' && session.papel === 'GGT') ||
-        (activeTab === 'PROTOCOLO' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
-        return null;
-    }
-
-    const options = getFilteredOptions(field);
-    const inputCommonClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all duration-200 text-sm font-medium text-simas-dark";
-
-    if (options.length > 0) {
-      return (
-        <div key={field} className="relative group">
-          <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
-          <div className="relative">
-            <select 
-                name={field} 
-                value={formData[field] || ''} 
-                onChange={handleInputChange} 
-                className={`${inputCommonClass} appearance-none cursor-pointer ${isReadOnly ? 'opacity-60 cursor-not-allowed bg-gray-100' : ''}`}
-                disabled={isReadOnly}
-            >
-              <option value="">Selecione...</option>
-              {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><i className="fas fa-chevron-down text-xs"></i></div>
-          </div>
-        </div>
-      );
-    }
-
-    const isFieldReadOnly = (isPK && isEditing) || isCalculated || isReadOnly;
-    const type = field.includes('DATA') ? 'date' : 'text';
-
-    return (
-      <div key={field} className="relative group">
-        <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
-        <div className="relative">
-            {isFK && <div className="absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan"><i className="fas fa-link text-xs"></i></div>}
-            <input 
-                type={type} 
-                name={field} 
-                value={formData[field] || ''} 
-                onChange={handleInputChange} 
-                className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isFieldReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} 
-                readOnly={isFieldReadOnly}
-                placeholder={isFK ? "Selecione na lista..." : "Digite aqui..."} 
-                maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)}
-            />
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -465,134 +348,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       {/* --- MAIN WORKSPACE --- */}
       <div className="flex-1 flex gap-8 px-8 pb-8 overflow-hidden min-h-0 z-10">
         
-        {/* 1. EDITOR PANEL */}
-        <div className="flex-none w-[380px] flex flex-col bg-white rounded-3xl shadow-soft overflow-hidden z-20 border border-white/50">
-          <div className="p-6 border-b border-gray-50 bg-white">
-            <h2 className="text-lg font-extrabold text-simas-dark flex items-center gap-3 tracking-tight">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isEditing ? 'bg-simas-cyan/10 text-simas-cyan' : 'bg-simas-blue/10 text-simas-blue'}`}>
-                    <i className={`fas ${isEditing ? 'fa-pen' : 'fa-plus'} text-xs`}></i>
-                </div>
-                {isEditing ? 'Editar Registro' : 'Novo Registro'}
-            </h2>
-          </div>
-          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-white">
-            {isReadOnly && !isEditing ? (
-                <div className="text-center py-10 px-4 text-gray-400 flex flex-col items-center">
-                    <i className="fas fa-lock text-3xl mb-3 opacity-50"></i>
-                    <p className="text-sm font-medium">Esta tabela é somente leitura para o seu perfil.</p>
-                </div>
-            ) : (
-                <form onSubmit={handleSubmit} className="space-y-5">
-                  {DATA_MODEL[activeTab]?.map(field => renderInput(field))}
-                  <div className="pt-6 flex gap-3">
-                    {isEditing && <Button type="button" variant="ghost" onClick={() => { resetForm(); setIsEditing(false); }} className="flex-1">Cancelar</Button>}
-                    <Button type="submit" isLoading={submitting} className="flex-[2]">{isEditing ? 'Salvar' : 'Criar'}</Button>
-                  </div>
-                </form>
-            )}
-          </div>
-        </div>
+        <EntityForm 
+            activeTab={activeTab}
+            formData={formData}
+            isEditing={isEditing}
+            isReadOnly={isReadOnly}
+            submitting={submitting}
+            session={session}
+            onInputChange={handleInputChange}
+            onSubmit={handleSubmit}
+            onCancel={() => { resetForm(); setIsEditing(false); }}
+        />
 
-        {/* 2. HORIZONTAL COLUMNS */}
+        {/* COLUMNS */}
         <div className="flex-1 overflow-x-auto flex gap-6 pb-2 items-stretch px-2 scrollbar-thin scrollbar-thumb-simas-blue scrollbar-track-transparent snap-x">
            {columnsToRender.map((entity, index) => {
-             const config = ENTITY_CONFIGS[entity];
-             if (!config) return null;
-             
-             const rawData = cardData[entity] || [];
-             const searchTerm = (deferredSearchTerms[entity] || '').toLowerCase();
-             const entityFilters = activeFilters[entity] || [];
-             
-             const filteredData = rawData.filter(item => {
-                 const display = config.cardDisplay(item);
-                 const textMatch = !searchTerm || `${display.title} ${display.subtitle} ${display.details || ''}`.toLowerCase().includes(searchTerm);
-                 const filterMatch = entityFilters.length === 0 || (config.filterBy && entityFilters.includes(item[config.filterBy]));
-                 return textMatch && filterMatch;
-             });
-
-             const isFilterOpen = filterPopoverOpen === entity;
-             const filterOptions = isFilterOpen && config.filterBy 
-                ? [...new Set(rawData.map(i => i[config.filterBy!]).filter(Boolean))].sort() 
-                : [];
-
              return (
-               <div key={`${entity}-${index}`} className="flex-none w-[340px] flex flex-col bg-slate-200 rounded-3xl overflow-hidden snap-center h-full border border-slate-300 backdrop-blur-sm shadow-inner">
-                 {/* Column Header */}
-                 <div className="p-4 bg-gray-50/80 sticky top-0 z-10 backdrop-blur-md border-b border-gray-100">
-                   <div className="flex items-center justify-between mb-4">
-                     <h3 className="font-bold flex items-center gap-2 text-simas-dark uppercase text-xs tracking-wider pl-1">
-                        {entity !== activeTab && <i className="fas fa-link text-gray-400"></i>} {config.title}
-                     </h3>
-                     <span className="text-[10px] font-bold bg-white shadow-sm border border-gray-100 px-2.5 py-1 rounded-full text-gray-500">{filteredData.length}</span>
-                   </div>
-                   <div className="flex gap-2">
-                       <div className="relative group flex-grow">
-                           <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-colors group-hover:text-simas-cyan"></i>
-                           <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white shadow-sm text-xs focus:ring-2 focus:ring-simas-cyan/50 outline-none transition-all" value={searchTerms[entity] || ''} onChange={(e) => setSearchTerms(prev => ({ ...prev, [entity]: e.target.value }))} />
-                       </div>
-                       {config.filterBy && (
-                           <div className="relative" ref={el => { popoverRefs.current[entity] = el; }}>
-                               <button className={`w-9 h-full rounded-xl flex items-center justify-center transition-all shadow-sm border border-transparent ${isFilterOpen || entityFilters.length > 0 ? 'bg-simas-cyan text-white shadow-glow' : 'bg-white text-gray-400 hover:text-simas-cyan'}`} onClick={() => setFilterPopoverOpen(isFilterOpen ? null : entity)}>
-                                   <i className="fas fa-filter text-xs"></i>
-                               </button>
-                               {isFilterOpen && (
-                                   <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden animate-fade-in">
-                                       <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                                           <span className="text-xs font-bold text-gray-600">Filtrar por {config.filterBy.replace(/_/g, ' ')}</span>
-                                           {entityFilters.length > 0 && <button onClick={() => setActiveFilters(prev => ({...prev, [entity]: []}))} className="text-[10px] text-red-500 font-bold hover:underline">Limpar</button>}
-                                       </div>
-                                       <div className="max-h-[200px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                           {filterOptions.map(opt => (
-                                               <label key={opt} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors text-xs text-gray-600">
-                                                   <input type="checkbox" checked={entityFilters.includes(opt)} onChange={() => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))} className="rounded text-simas-cyan focus:ring-simas-cyan border-gray-300"/>
-                                                   <span className="truncate">{opt}</span>
-                                               </label>
-                                           ))}
-                                       </div>
-                                   </div>
-                               )}
-                           </div>
-                       )}
-                   </div>
-                 </div>
-                 
-                 {/* Cards List */}
-                 <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
-                   {loadingData && filteredData.length === 0 ? <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div> : filteredData.map(item => {
-                       const pkValue = String(item[config.pk]);
-                       const display = config.cardDisplay(item);
-                       const isSelected = selectedItems[entity] === pkValue;
-                       const isOcupada = item.STATUS_VAGA === 'Ocupada';
-                       const entityIsReadOnly = READ_ONLY_ENTITIES.includes(entity) && session.papel !== 'COORDENAÇÃO';
-                       
-                       let exerciseData = undefined;
-                       if (entity === 'VAGAS') {
-                           exerciseData = { label: item.NOME_LOTACAO_EXERCICIO || 'Sem exercício definido', onEdit: () => setExerciseVagaId(pkValue) };
-                       }
-
-                       return (
-                         <Card 
-                            key={pkValue} 
-                            title={display.title} 
-                            subtitle={display.subtitle} 
-                            details={display.details} 
-                            status={display.status} 
-                            selected={isSelected} 
-                            onSelect={() => handleCardSelect(entity, item)} 
-                            onEdit={entity === activeTab && !entityIsReadOnly ? () => handleEdit(item) : undefined}
-                            exerciseData={exerciseData}
-                            actions={
-                             <>
-                               {entity === 'PESSOA' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e: React.MouseEvent) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
-                               {entity === 'VAGAS' && !entityIsReadOnly && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e: React.MouseEvent) => handleLockVaga(e, pkValue, isOcupada)} />}
-                               {entity !== 'AUDITORIA' && !entityIsReadOnly && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e: React.MouseEvent) => handleDelete(e, item, entity)} />}
-                             </>
-                           }
-                         />
-                       );
-                     })}
-                 </div>
-               </div>
+               <EntityColumn
+                 key={`${entity}-${index}`}
+                 entity={entity}
+                 activeTab={activeTab}
+                 session={session}
+                 data={cardData[entity] || []}
+                 loading={loadingData}
+                 searchTerm={deferredSearchTerms[entity] || ''}
+                 filters={activeFilters[entity] || []}
+                 isFilterOpen={filterPopoverOpen === entity}
+                 selectedItemId={selectedItems[entity]}
+                 onSearchChange={(val) => setSearchTerms(prev => ({ ...prev, [entity]: val }))}
+                 onToggleFilter={() => setFilterPopoverOpen(filterPopoverOpen === entity ? null : entity)}
+                 onFilterChange={(opt) => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))}
+                 onClearFilters={() => setActiveFilters(prev => ({...prev, [entity]: []}))}
+                 onSelectCard={(item) => handleCardSelect(entity, item)}
+                 onEditCard={handleEdit}
+                 onDeleteCard={(item) => handleDelete(item, entity)}
+                 onLockVaga={handleLockVaga}
+                 onDossier={setDossierCpf}
+                 onExerciseEdit={(id) => setExerciseVagaId(id)}
+               />
              );
            })}
         </div>
@@ -600,7 +393,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('VAGAS').then((d: any) => setCardData(p => ({...p, 'VAGAS': d}))); }} />}
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('VAGAS', true).then((d: any) => setCardData(p => ({...p, 'VAGAS': d}))); }} />}
       {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
       {showReviewsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">

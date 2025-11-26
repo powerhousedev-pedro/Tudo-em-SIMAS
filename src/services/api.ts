@@ -12,47 +12,44 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
 
 const inflightRequests: Record<string, Promise<any> | undefined> = {};
 
-// Explicit map to ensure specific entities translate correctly to backend routes
+// Strict mapping to ensure Frontend entity names match Backend Routes/Models
 const ENDPOINT_MAP: Record<string, string> = {
     'LOTAÇÕES': 'lotacoes',
-    'LOTACOES': 'lotacoes',
     'FUNÇÃO': 'funcao',
-    'FUNCAO': 'funcao',
     'EXERCÍCIO': 'exercicio',
-    'EXERCICIO': 'exercicio',
     'CAPACITAÇÃO': 'capacitacao',
-    'CAPACITACAO': 'capacitacao',
-    'SOLICITAÇÃO DE PESQUISA': 'solicitacao-de-pesquisa',
-    'SOLICITACAODEPESQUISA': 'solicitacao-de-pesquisa',
+    'SOLICITAÇÃO DE PESQUISA': 'solicitacao-pesquisa',
     'NOMEAÇÃO': 'nomeacao',
-    'NOMEACAO': 'nomeacao',
     'CARGO COMISSIONADO': 'cargo-comissionado',
-    'CARGOCOMISSIONADO': 'cargo-comissionado',
-    'CONTRATO_HISTORICO': 'contrato_historico',
-    'CONTRATOHISTORICO': 'contrato_historico',
-    'ALOCACAO_HISTORICO': 'alocacao_historico',
-    'ALOCACAOHISTORICO': 'alocacao_historico',
+    'CONTRATO_HISTORICO': 'contrato-historico',
+    'ALOCACAO_HISTORICO': 'alocacao-historico',
+    'INATIVOS': 'inativos',
+    'VAGAS': 'vagas',
     'EDITAIS': 'editais',
-    'CARGOS': 'cargos'
+    'CARGOS': 'cargos',
+    'PESSOA': 'pessoa',
+    'SERVIDOR': 'servidor',
+    'CONTRATO': 'contrato',
+    'ALOCACAO': 'alocacao',
+    'ATENDIMENTO': 'atendimento',
+    'PROTOCOLO': 'protocolo',
+    'TURMAS': 'turmas',
+    'ENCONTRO': 'encontro',
+    'CHAMADA': 'chamada',
+    'VISITAS': 'visitas',
+    'PESQUISA': 'pesquisa',
+    'AUDITORIA': 'auditoria'
 };
 
 const normalizeEndpoint = (entityName: string) => {
     const upper = entityName.toUpperCase();
     if (ENDPOINT_MAP[upper]) return ENDPOINT_MAP[upper];
-
-    // Fallback: Aggressive normalization
+    
+    // Fallback for names not in map
     return entityName.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
-        .replace(/ /g, '-') // Space to dash
-        .replace(/ç/g, 'c')
-        .replace(/ã/g, 'a')
-        .replace(/õ/g, 'o')
-        .replace(/á/g, 'a')
-        .replace(/é/g, 'e')
-        .replace(/í/g, 'i')
-        .replace(/ó/g, 'o')
-        .replace(/ú/g, 'u')
-        .replace(/[^a-z0-9-]/g, ''); // Remove anything else
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/ /g, '-')
+        .replace(/[^a-z0-9-]/g, '');
 };
 
 // --- REAL API CLIENT ---
@@ -206,7 +203,6 @@ export const api = {
     
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     
-    // Use fetchEntity (cached) for lookups
     const promises: Promise<any>[] = [];
     
     if (acao.includes('CONTRATO')) {
@@ -258,9 +254,8 @@ export const api = {
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  // --- REPORTS LOGIC ---
+  // --- REPORTS ---
   getReportData: async (reportName: string): Promise<ReportData> => {
-    
     if (reportName === 'painelVagas') {
         const vagas = await api.fetchEntity('VAGAS');
         const quantitativo = vagas.map((v: any) => ({
@@ -271,20 +266,17 @@ export const api = {
         }));
         return { panorama: vagas, quantitativo: quantitativo, filtrosDisponiveis: {} as any };
     }
-
     if (reportName === 'dashboardPessoal') {
         const [contratos, servidores, alocacoes, vagas] = await Promise.all([
             api.fetchEntity('CONTRATO'), api.fetchEntity('SERVIDOR'), 
             api.fetchEntity('ALOCACAO'), api.fetchEntity('VAGAS')
         ]);
-        
         const vinculoCounts: any = { 'OSC': contratos.length };
         servidores.forEach((s: any) => {
             const v = s.VINCULO || 'Não especificado';
             vinculoCounts[v] = (vinculoCounts[v] || 0) + 1;
         });
         const graficoVinculo = Object.entries(vinculoCounts).map(([name, value]) => ({ name, value: Number(value) }));
-
         const lotacaoCounts: any = {};
         alocacoes.forEach((a: any) => {
             lotacaoCounts[a.NOME_LOTACAO] = (lotacaoCounts[a.NOME_LOTACAO] || 0) + 1;
@@ -294,26 +286,18 @@ export const api = {
             const lot = vagaMap.get(c.ID_VAGA) || 'Desconhecida';
             lotacaoCounts[lot] = (lotacaoCounts[lot] || 0) + 1;
         });
-        
-        const graficoLotacao = Object.entries(lotacaoCounts)
-            .sort((a:any, b:any) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([name, value]) => ({ name, value: Number(value) }));
-
+        const graficoLotacao = Object.entries(lotacaoCounts).sort((a:any, b:any) => b[1] - a[1]).slice(0, 10).map(([name, value]) => ({ name, value: Number(value) }));
         return {
             totais: { 'Contratados': contratos.length, 'Servidores': servidores.length, 'Total': contratos.length + servidores.length },
             graficos: { vinculo: graficoVinculo as any, lotacao: graficoLotacao as any }
         } as any;
     }
-
     if (reportName === 'analiseCustos') {
         const [contratos, vagas, cargos] = await Promise.all([
             api.fetchEntity('CONTRATO'), api.fetchEntity('VAGAS'), api.fetchEntity('CARGOS')
         ]);
-        
         const cargoSalarioMap = new Map(cargos.map((c:any) => [c.ID_CARGO, parseFloat(c.SALARIO || 0)]));
         const vagaMapID = new Map<string, { lotacao: string, cargoId: string }>(vagas.map((v:any) => [v.ID_VAGA, { lotacao: v.LOTACAO_NOME, cargoId: v.ID_CARGO }]));
-
         const custoPorLotacao: any = {};
         contratos.forEach((c: any) => {
             const v = vagaMapID.get(c.ID_VAGA);
@@ -322,20 +306,13 @@ export const api = {
                 custoPorLotacao[v.lotacao] = (custoPorLotacao[v.lotacao] || 0) + sal;
             }
         });
-
-        const topCustos = Object.entries(custoPorLotacao)
-            .sort((a:any, b:any) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([name, value]) => ({ name, value: Number(value) }));
-            
+        const topCustos = Object.entries(custoPorLotacao).sort((a:any, b:any) => b[1] - a[1]).slice(0, 10).map(([name, value]) => ({ name, value: Number(value) }));
         const linhasTabela = Object.entries(custoPorLotacao).map(([lot, val]) => [lot, new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(val))]);
-
         return {
             graficos: { custoPorLotacao: topCustos as any },
             tabela: { colunas: ['Lotação', 'Custo Mensal Estimado'], linhas: linhasTabela }
         } as any;
     }
-
     if (reportName === 'contratosAtivos') {
         const contratos = await api.fetchEntity('CONTRATO');
         const linhas = contratos.map((c: any) => [
@@ -343,7 +320,6 @@ export const api = {
         ]);
         return { colunas: ['Nome', 'CPF', 'Contrato', 'Função', 'Início'], linhas };
     }
-
     if (reportName === 'quadroLotacaoServidores') {
         const alocacoes = await api.fetchEntity('ALOCACAO');
         const linhas = alocacoes.map((a: any) => [
@@ -351,7 +327,6 @@ export const api = {
         ]);
         return { colunas: ['Lotação', 'Servidor', 'Matrícula', 'Função'], linhas };
     }
-
     if (reportName === 'perfilDemografico') {
         const pessoas = await api.fetchEntity('PESSOA');
         const counts: any = {};
@@ -368,7 +343,6 @@ export const api = {
             graficos: { escolaridade: grafEsc as any, bairro: grafBai as any }
         } as any;
     }
-
     if (reportName === 'adesaoFrequencia') {
         const chamadas = await api.fetchEntity('CHAMADA');
         const linhas = chamadas.map((c: any) => [
@@ -376,7 +350,6 @@ export const api = {
         ]);
         return { colunas: ['Turma', 'Participante', 'Presença', 'Data'], linhas };
     }
-
     if (reportName === 'atividadeUsuarios') {
         const logs = await api.fetchEntity('AUDITORIA');
         const linhas = logs.map((l: any) => [
@@ -384,7 +357,6 @@ export const api = {
         ]);
         return { colunas: ['Data/Hora', 'Usuário', 'Ação', 'Tabela', 'ID Registro'], linhas };
     }
-
     return {};
   }
 };
