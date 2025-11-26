@@ -2,12 +2,14 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ReportData, UserSession, QuantitativoItem } from '../types';
+import { ReportData, QuantitativoItem, UserSession } from '../types';
 import { Button } from './Button';
 import { REPORT_PERMISSIONS } from '../constants';
-import { generateReportPDF } from '../utils/pdfGenerator';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export const Reports: React.FC = () => {
+  // Mock session retrieval - replace with Context
   const getSession = (): UserSession => {
       const stored = localStorage.getItem('simas_user_session');
       if (stored) {
@@ -28,6 +30,7 @@ export const Reports: React.FC = () => {
       { id: 'atividadeUsuarios', label: 'Atividade de Usuários', category: 'Administrativo' },
   ];
 
+  // Filter reports based on role
   const allowedIds = REPORT_PERMISSIONS[session.papel] || [];
   const reportsList = allReports.filter(r => allowedIds.includes(r.id) || allowedIds.includes('TODAS'));
 
@@ -55,8 +58,73 @@ export const Reports: React.FC = () => {
 
   const handleExportPDF = () => {
     if (!data) return;
-    const reportLabel = reportsList.find(r => r.id === currentReport)?.label || 'Relatório';
-    generateReportPDF(currentReport, reportLabel, data, vagasView);
+
+    const doc = new jsPDF();
+    const reportTitle = reportsList.find(r => r.id === currentReport)?.label || 'Relatório';
+    const today = new Date().toLocaleDateString('pt-BR');
+
+    // Header
+    doc.setFillColor(19, 51, 90); // Simas Dark
+    doc.rect(0, 0, 210, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text(reportTitle, 14, 13);
+    doc.setFontSize(10);
+    doc.text(`Gerado em: ${today}`, 150, 13);
+
+    let currentY = 30;
+
+    // Totals Section (Simple Text)
+    if (data.totais) {
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(12);
+        doc.text("Resumo Geral:", 14, currentY);
+        currentY += 7;
+        
+        const keys = Object.keys(data.totais);
+        keys.forEach(key => {
+            doc.setFontSize(10);
+            doc.text(`${key}: ${data.totais![key]}`, 14, currentY);
+            currentY += 6;
+        });
+        currentY += 5;
+    }
+
+    // Special Handling for Painel Vagas
+    if (currentReport === 'painelVagas') {
+        if (vagasView === 'quantitativo' && data.quantitativo) {
+            autoTable(doc, {
+                startY: currentY,
+                head: [['Vinculação', 'Lotação', 'Cargo', 'Detalhes']],
+                body: data.quantitativo.map(item => [item.VINCULACAO, item.LOTACAO, item.CARGO, item.DETALHES]),
+                theme: 'grid',
+                headStyles: { fillColor: [42, 104, 143] }
+            });
+        } else if (data.panorama) {
+            autoTable(doc, {
+                startY: currentY,
+                head: [['Ocupante', 'Vinculação', 'Lotação', 'Cargo', 'Status']],
+                body: data.panorama.map(item => [item.OCUPANTE || 'Vaga Livre', item.VINCULACAO, item.LOTACAO_OFICIAL, item.NOME_CARGO, item.STATUS]),
+                theme: 'grid',
+                headStyles: { fillColor: [42, 104, 143] }
+            });
+        }
+    }
+    // Generic Table Handling
+    else if ((data.colunas && data.linhas) || data.tabela) {
+        const cols = data.colunas || data.tabela?.colunas || [];
+        const rows = data.linhas || data.tabela?.linhas || [];
+        
+        autoTable(doc, {
+            startY: currentY,
+            head: [cols],
+            body: rows,
+            theme: 'grid',
+            headStyles: { fillColor: [42, 104, 143] }
+        });
+    }
+
+    doc.save(`${reportTitle.replace(/\s+/g, '_')}_${today}.pdf`);
   };
 
   const renderQuantitativoGrouped = (items: QuantitativoItem[]) => {

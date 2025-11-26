@@ -28,10 +28,12 @@ const ENDPOINT_MAP: Record<string, string> = {
     'NOMEACAO': 'nomeacao',
     'CARGO COMISSIONADO': 'cargo-comissionado',
     'CARGOCOMISSIONADO': 'cargo-comissionado',
-    'CONTRATO_HISTORICO': 'contratohistorico',
-    'CONTRATOHISTORICO': 'contratohistorico',
-    'ALOCACAO_HISTORICO': 'alocacaohistorico',
-    'ALOCACAOHISTORICO': 'alocacaohistorico'
+    'CONTRATO_HISTORICO': 'contrato_historico',
+    'CONTRATOHISTORICO': 'contrato_historico',
+    'ALOCACAO_HISTORICO': 'alocacao_historico',
+    'ALOCACAOHISTORICO': 'alocacao_historico',
+    'EDITAIS': 'editais',
+    'CARGOS': 'cargos'
 };
 
 const normalizeEndpoint = (entityName: string) => {
@@ -42,6 +44,14 @@ const normalizeEndpoint = (entityName: string) => {
     return entityName.toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
         .replace(/ /g, '-') // Space to dash
+        .replace(/ç/g, 'c')
+        .replace(/ã/g, 'a')
+        .replace(/õ/g, 'o')
+        .replace(/á/g, 'a')
+        .replace(/é/g, 'e')
+        .replace(/í/g, 'i')
+        .replace(/ó/g, 'o')
+        .replace(/ú/g, 'u')
         .replace(/[^a-z0-9-]/g, ''); // Remove anything else
 };
 
