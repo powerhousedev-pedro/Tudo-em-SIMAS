@@ -48,9 +48,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
   }, []);
 
+  // --- COMPUTED VALUES (Moved up for use in Effects) ---
+
+  const isEntityAllowed = (entityName: string) => {
+      const allowed = PERMISSOES_POR_PAPEL[session.papel] || [];
+      return allowed.includes('TODAS') || allowed.includes(entityName);
+  };
+
+  const columnsToRender = useMemo(() => {
+    const columns: string[] = showMainList ? [activeTab] : [];
+    const modelFields = DATA_MODEL[activeTab] || [];
+    
+    modelFields.forEach(field => {
+        const linkedEntity = FK_MAPPING[field];
+        if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity) && linkedEntity !== activeTab) {
+             if (isEntityAllowed(linkedEntity)) {
+                 columns.push(linkedEntity);
+             }
+        }
+    });
+    return columns;
+  }, [activeTab, showMainList, session.papel]);
+
+  const tabs = useMemo(() => {
+      return Object.keys(ENTITY_CONFIGS).filter(k => 
+          k !== 'AUDITORIA' && k !== 'ATENDIMENTO' && isEntityAllowed(k)
+      );
+  }, [session.papel]);
+  
+  const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
+
+  const isReadOnly = useMemo(() => {
+      return READ_ONLY_ENTITIES.includes(activeTab) && session.papel !== 'COORDENAÇÃO';
+  }, [activeTab, session.papel]);
+
   // --- EFFECTS ---
 
-  // 1. Tab Change Reset
+  // 1. Tab Change Reset & Data Load
   useEffect(() => {
     const initialData: RecordData = {};
     const today = new Date().toISOString().split('T')[0];
@@ -68,8 +102,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     setDropdownSearch('');
     setActiveFilters({});
     
-    loadAllRequiredData();
+    // OPTIMIZATION: Trigger data load when columns change
   }, [activeTab]);
+
+  // Load data whenever the visible columns change
+  useEffect(() => {
+      loadRequiredData();
+  }, [columnsToRender]);
 
   // 2. Load Pending Reviews
   useEffect(() => {
@@ -87,20 +126,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [filterPopoverOpen]);
 
-  // --- DATA LOADING ---
+  // --- DATA LOADING (OPTIMIZED) ---
 
-  const loadAllRequiredData = async () => {
+  const loadRequiredData = async () => {
     setLoadingData(true);
-    const allEntities = Object.keys(ENTITY_CONFIGS);
+    
+    // Only fetch the entities we need for the current view
+    const entitiesToFetch = columnsToRender;
+    
+    // If editing, we might need dropdown data even if the column isn't visible
+    // (This can be optimized further to only load dropdowns on form focus, but this is a good middle ground)
+    const modelFields = DATA_MODEL[activeTab] || [];
+    modelFields.forEach(field => {
+        const linkedEntity = FK_MAPPING[field];
+        if (linkedEntity && !entitiesToFetch.includes(linkedEntity) && isEntityAllowed(linkedEntity)) {
+            entitiesToFetch.push(linkedEntity);
+        }
+    });
+
     try {
-      const results = await Promise.all(allEntities.map(async (entity) => {
+      const results = await Promise.all(entitiesToFetch.map(async (entity) => {
+           // Check if we already have data to avoid re-fetching
+           if (cardData[entity] && cardData[entity].length > 0) {
+               return { entity, data: cardData[entity] };
+           }
            try {
-             // Only fetch if allowed
-             if (isEntityAllowed(entity)) {
-                 const data = await api.fetchEntity(entity);
-                 return { entity, data };
-             }
-             return { entity, data: [] };
+             const data = await api.fetchEntity(entity);
+             return { entity, data };
            } catch (e) {
              return { entity, data: [] };
            }
@@ -115,40 +167,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       setLoadingData(false);
     }
   };
-
-  // --- COMPUTED VALUES ---
-
-  const isEntityAllowed = (entityName: string) => {
-      const allowed = PERMISSOES_POR_PAPEL[session.papel] || [];
-      return allowed.includes('TODAS') || allowed.includes(entityName);
-  };
-
-  const tabs = useMemo(() => {
-      return Object.keys(ENTITY_CONFIGS).filter(k => 
-          k !== 'AUDITORIA' && k !== 'ATENDIMENTO' && isEntityAllowed(k)
-      );
-  }, [session.papel]);
-  
-  const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
-
-  const columnsToRender = useMemo(() => {
-    const columns: string[] = showMainList ? [activeTab] : [];
-    const modelFields = DATA_MODEL[activeTab] || [];
-    
-    modelFields.forEach(field => {
-        const linkedEntity = FK_MAPPING[field];
-        if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity) && linkedEntity !== activeTab) {
-             if (isEntityAllowed(linkedEntity)) {
-                 columns.push(linkedEntity);
-             }
-        }
-    });
-    return columns;
-  }, [activeTab, showMainList, session.papel]);
-
-  const isReadOnly = useMemo(() => {
-      return READ_ONLY_ENTITIES.includes(activeTab) && session.papel !== 'COORDENAÇÃO';
-  }, [activeTab, session.papel]);
 
   // --- HANDLERS ---
 
@@ -247,9 +265,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       if (res.success) {
         showToast('success', isEditing ? 'Atualizado!' : 'Criado!');
-        // Refresh Data
+        
+        // Refresh Data only for modified tab and relevant tables
         const newData = await api.fetchEntity(activeTab);
         setCardData(prev => ({ ...prev, [activeTab]: newData }));
+        
         if (activeTab === 'CONTRATO') {
             const resData = await api.fetchEntity('RESERVAS');
             setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
@@ -578,7 +598,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
       {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('VAGAS').then((d: any) => setCardData(p => ({...p, 'VAGAS': d}))); }} />}
-      {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadAllRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
+      {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
       {showReviewsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">
               <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-slide-in">
