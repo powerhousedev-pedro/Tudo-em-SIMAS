@@ -90,7 +90,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-3 gap-2">
                 <span className="text-gray-500 font-medium">Nascimento:</span>
-                <span className="col-span-2 text-gray-900">{p.DATA_DE_NASCIMENTO || 'N/A'} ({validation.calculateAge(p.DATA_DE_NASCIMENTO) || '-'} anos)</span>
+                <span className="col-span-2 text-gray-900">{validation.formatDate(p.DATA_DE_NASCIMENTO)} ({validation.calculateAge(p.DATA_DE_NASCIMENTO) || '-'} anos)</span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <span className="text-gray-500 font-medium">Telefone:</span>
@@ -129,7 +129,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
                   <p><span className="font-semibold text-gray-600">Função:</span> {v.funcao || v.funcao_atual}</p>
                   <p><span className="font-semibold text-gray-600">Lotação:</span> {v.lotacao || v.alocacao_atual}</p>
                   <p><span className="font-semibold text-gray-600">Salário:</span> {v.salario ? validation.formatCurrency(v.salario) : 'N/A'}</p>
-                  <p><span className="font-semibold text-gray-600">Início:</span> {v.data_inicio || v.data_admissao}</p>
+                  <p><span className="font-semibold text-gray-600">Início:</span> {validation.formatDate(v.data_inicio || v.data_admissao)}</p>
                 </div>
               ))
             ) : (

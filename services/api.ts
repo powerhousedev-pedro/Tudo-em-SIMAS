@@ -121,6 +121,15 @@ export const api = {
     return request(`/${entityName.toLowerCase().replace(/ /g, '-')}/${pkValue}`, 'DELETE');
   },
 
+  // User Management
+  getUsers: async () => {
+      return request('/usuarios');
+  },
+
+  deleteUser: async (usuarioId: string) => {
+      return request(`/usuarios/${usuarioId}`, 'DELETE');
+  },
+
   toggleVagaBloqueada: async (idVaga: string) => {
     return request(`/vagas/${idVaga}/toggle-lock`, 'POST');
   },
