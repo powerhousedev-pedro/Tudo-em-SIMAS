@@ -39,13 +39,13 @@ const sanitizeData = (data: any) => {
 const getModel = (entity: string): any => {
     const map: {[key:string]: any} = {
         'pessoa': prisma.pessoa, 'servidor': prisma.servidor, 'contrato': prisma.contrato,
-        'vagas': prisma.vaga, 'lotações': prisma.lotacao, 'cargos': prisma.cargo,
-        'alocacao': prisma.alocacao, 'função': prisma.funcao, 'atendimento': prisma.atendimento,
-        'editais': prisma.edital, 'protocolo': prisma.protocolo, 'capacitação': prisma.capacitacao,
+        'vagas': prisma.vaga, 'lotacoes': prisma.lotacao, 'cargos': prisma.cargo,
+        'alocacao': prisma.alocacao, 'funcao': prisma.funcao, 'atendimento': prisma.atendimento,
+        'editais': prisma.edital, 'protocolo': prisma.protocolo, 'capacitacao': prisma.capacitacao,
         'turmas': prisma.turma, 'encontro': prisma.encontro, 'chamada': prisma.chamada,
-        'visitas': prisma.visita, 'solicitação-de-pesquisa': prisma.solicitacaoPesquisa,
-        'pesquisa': prisma.pesquisa, 'nomeação': prisma.nomeacao, 'cargo-comissionado': prisma.cargoComissionado,
-        'exercício': prisma.exercicio, 'reservas': prisma.reserva, 'contrato_historico': prisma.contratoHistorico,
+        'visitas': prisma.visita, 'solicitacao-de-pesquisa': prisma.solicitacaoPesquisa,
+        'pesquisa': prisma.pesquisa, 'nomeacao': prisma.nomeacao, 'cargo-comissionado': prisma.cargoComissionado,
+        'exercicio': prisma.exercicio, 'reservas': prisma.reserva, 'contrato_historico': prisma.contratoHistorico,
         'alocacao_historico': prisma.alocacaoHistorico, 'inativos': prisma.inativo, 'auditoria': prisma.auditoria,
         'usuarios': prisma.usuario
     };
@@ -56,12 +56,12 @@ const getPKField = (entity: string) => {
     const pkMap: any = {
         'pessoa': 'CPF', 'servidor': 'MATRICULA', 'contrato': 'ID_CONTRATO', 'vagas': 'ID_VAGA',
         'atendimento': 'ID_ATENDIMENTO', 'auditoria': 'ID_LOG', 'alocacao': 'ID_ALOCACAO',
-        'lotações': 'ID_LOTACAO', 'cargos': 'ID_CARGO', 'função': 'ID_FUNCAO', 'editais': 'ID_EDITAL',
-        'protocolo': 'ID_PROTOCOLO', 'capacitação': 'ID_CAPACITACAO', 'turmas': 'ID_TURMA',
+        'lotacoes': 'ID_LOTACAO', 'cargos': 'ID_CARGO', 'funcao': 'ID_FUNCAO', 'editais': 'ID_EDITAL',
+        'protocolo': 'ID_PROTOCOLO', 'capacitacao': 'ID_CAPACITACAO', 'turmas': 'ID_TURMA',
         'encontro': 'ID_ENCONTRO', 'chamada': 'ID_CHAMADA', 'visitas': 'ID_VISITA',
-        'solicitação-de-pesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
-        'nomeação': 'ID_NOMEACAO', 'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
-        'exercício': 'ID_EXERCICIO', 'reservas': 'ID_RESERVA', 
+        'solicitacao-de-pesquisa': 'ID_SOLICITACAO', 'pesquisa': 'ID_PESQUISA',
+        'nomeacao': 'ID_NOMEACAO', 'cargo-comissionado': 'ID_CARGO_COMISSIONADO',
+        'exercicio': 'ID_EXERCICIO', 'reservas': 'ID_RESERVA', 
         'contrato_historico': 'ID_CONTRATO', 
         'alocacao_historico': 'ID_ALOCACAO', 
         'inativos': 'ID_INATIVO',
@@ -243,7 +243,7 @@ app.get('/api/protocolo', authenticateToken, async (req, res) => {
 });
 
 // 6. GET NOMEAÇÃO (Optimized)
-app.get('/api/nomeação', authenticateToken, async (req, res) => {
+app.get('/api/nomeacao', authenticateToken, async (req, res) => {
     try {
         const nomeacoes = await prisma.nomeacao.findMany({
             include: {
@@ -261,7 +261,7 @@ app.get('/api/nomeação', authenticateToken, async (req, res) => {
 });
 
 // 7. GET EXERCICIO (Optimized)
-app.get('/api/exercício', authenticateToken, async (req, res) => {
+app.get('/api/exercicio', authenticateToken, async (req, res) => {
     try {
         const exercicios = await prisma.exercicio.findMany({
             include: {
@@ -361,7 +361,7 @@ app.get('/api/visitas', authenticateToken, async (req, res) => {
 });
 
 // 13. GET SOLICITAÇÃO DE PESQUISA (Optimized)
-app.get('/api/solicitação-de-pesquisa', authenticateToken, async (req, res) => {
+app.get('/api/solicitacao-de-pesquisa', authenticateToken, async (req, res) => {
     try {
         const solicitacoes = await prisma.solicitacaoPesquisa.findMany({
             include: {
@@ -567,12 +567,6 @@ app.delete('/api/usuarios/:usuarioId', authenticateToken, async (req: any, res) 
 
 // GENERIC CRUD (Fallback for non-optimized entities)
 app.get('/api/:entity', authenticateToken, async (req, res) => {
-    const optimizedEntities = [
-        'vagas', 'contrato', 'servidor', 'alocacao', 'protocolo', 'nomeação', 'exercício', 'atendimento', 'usuarios',
-        'turmas', 'encontro', 'chamada', 'visitas', 'solicitação-de-pesquisa', 'pesquisa'
-    ];
-    if (optimizedEntities.includes(req.params.entity)) return; // Already handled
-    
     const model = getModel(req.params.entity);
     if (!model) return res.status(404).json({ message: 'Not found' });
     try { const data = await model.findMany(); res.json(data); } catch (e) { res.status(500).json({ error: String(e) }); }
