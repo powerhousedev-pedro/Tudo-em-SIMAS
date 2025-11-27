@@ -58,7 +58,8 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
         payload.is_gerente = false;
       }
 
-      const res = await api.createRecord('USUARIOS', payload);
+      // Using correct Entity Name 'Usuario' as defined in tables.ts
+      const res = await api.createRecord('Usuario', payload);
       if (res.success) {
         alert('Usuário criado com sucesso!');
         setFormData({
