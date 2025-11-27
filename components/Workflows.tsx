@@ -79,13 +79,40 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
   const filteredRequests = useMemo(() => {
       return requests.filter(req => {
+          // 1. Role / Sector Filtering
+          let isVisibleForRole = false;
+          const type = req.TIPO_PEDIDO;
+          const struct = DROPDOWN_STRUCTURES['TIPO_PEDIDO'];
+
+          if (session.papel === 'COORDENAÇÃO') {
+              isVisibleForRole = true;
+          } else if (session.papel === 'GGT') {
+              // GGT sees Server actions and General
+              if (struct.SERVIDOR.includes(type) || struct.GERAL.includes(type)) isVisibleForRole = true;
+          } else if (session.papel === 'GPRGP') {
+              // GPRGP sees Contract actions, Specific GPRGP and General
+              if (struct.CONTRATADO.includes(type) || struct.GPRGP_ESPECIFICO.includes(type) || struct.GERAL.includes(type)) isVisibleForRole = true;
+          } else {
+              // GDEP and others see General
+              if (struct.GERAL.includes(type)) isVisibleForRole = true;
+          }
+
+          // Force visibility if the user is the creator (Responsavel)
+          if (req.RESPONSAVEL === session.usuario) {
+              isVisibleForRole = true;
+          }
+
+          if (!isVisibleForRole) return false;
+
+          // 2. Status Filtering
           if (filterStatus === 'ALL') return true;
           const isCompleted = req.STATUS_PEDIDO === 'Acatado' || req.STATUS_PEDIDO === 'Declinado';
           if (filterStatus === 'COMPLETED') return isCompleted;
           if (filterStatus === 'PENDING') return !isCompleted;
+          
           return true;
       });
-  }, [requests, filterStatus]);
+  }, [requests, filterStatus, session.papel, session.usuario]);
 
   // --- FORM LOGIC ---
 
