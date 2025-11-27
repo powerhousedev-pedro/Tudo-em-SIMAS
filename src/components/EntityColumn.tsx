@@ -1,5 +1,4 @@
-
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { ENTITY_CONFIGS, READ_ONLY_ENTITIES } from '../constants';
 import { Card } from './Card';
 import { Button } from './Button';
@@ -27,7 +26,8 @@ interface EntityColumnProps {
   onExerciseEdit: (idVaga: string) => void;
 }
 
-export const EntityColumn: React.FC<EntityColumnProps> = ({
+// Use React.memo to prevent re-renders if props haven't changed
+export const EntityColumn = React.memo<EntityColumnProps>(({
   entity,
   activeTab,
   session,
@@ -49,20 +49,42 @@ export const EntityColumn: React.FC<EntityColumnProps> = ({
   onExerciseEdit
 }) => {
   const config = ENTITY_CONFIGS[entity];
-  if (!config) return null;
-
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  const filteredData = data.filter(item => {
-      const display = config.cardDisplay(item);
-      const textMatch = !searchTerm || `${display.title} ${display.subtitle} ${display.details || ''}`.toLowerCase().includes(searchTerm);
-      const filterMatch = filters.length === 0 || (config.filterBy && filters.includes(item[config.filterBy]));
-      return textMatch && filterMatch;
-  });
+  // Memoize expensive filtering logic
+  // Isso previne que a lista seja recalculada se apenas o 'loading' ou props não relacionados mudarem
+  const filteredData = useMemo(() => {
+      if (!config || !data) return [];
+      
+      // Se não tem busca nem filtro, retorna o dado original rápido
+      if (!searchTerm && (!filters || filters.length === 0)) return data;
 
-  const filterOptions = isFilterOpen && config.filterBy 
-    ? [...new Set(data.map(i => i[config.filterBy!]).filter(Boolean))].sort() 
-    : [];
+      const lowerSearch = searchTerm.toLowerCase();
+      
+      return data.filter(item => {
+          const display = config.cardDisplay(item);
+          
+          // Busca textual otimizada
+          const textMatch = !lowerSearch || 
+            (display.title && display.title.toLowerCase().includes(lowerSearch)) ||
+            (display.subtitle && display.subtitle.toLowerCase().includes(lowerSearch)) ||
+            (display.details && display.details.toLowerCase().includes(lowerSearch));
+            
+          const filterMatch = !filters || filters.length === 0 || (config.filterBy && filters.includes(item[config.filterBy]));
+          
+          return textMatch && filterMatch;
+      });
+  }, [data, searchTerm, filters, config]);
+
+  // Memoize filter options based on raw data
+  const filterOptions = useMemo(() => {
+      if (!isFilterOpen || !config.filterBy || !data) return [];
+      return [...new Set(data.map(i => i[config.filterBy!]).filter(Boolean))].sort();
+  }, [isFilterOpen, config.filterBy, data]);
+
+  if (!config) return null;
+
+  const entityIsReadOnly = READ_ONLY_ENTITIES.includes(entity) && session.papel !== 'COORDENAÇÃO';
 
   return (
     <div className="flex-none w-[340px] flex flex-col bg-slate-200 rounded-3xl overflow-hidden snap-center h-full border border-slate-300 backdrop-blur-sm shadow-inner">
@@ -77,7 +99,13 @@ export const EntityColumn: React.FC<EntityColumnProps> = ({
         <div className="flex gap-2">
             <div className="relative group flex-grow">
                 <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs transition-colors group-hover:text-simas-cyan"></i>
-                <input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white shadow-sm text-xs focus:ring-2 focus:ring-simas-cyan/50 outline-none transition-all" value={searchTerm} onChange={(e) => onSearchChange(e.target.value)} />
+                <input 
+                    type="text" 
+                    placeholder="Buscar..." 
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white shadow-sm text-xs focus:ring-2 focus:ring-simas-cyan/50 outline-none transition-all" 
+                    value={searchTerm} 
+                    onChange={(e) => onSearchChange(e.target.value)} 
+                />
             </div>
             {config.filterBy && (
                 <div className="relative" ref={popoverRef}>
@@ -112,7 +140,6 @@ export const EntityColumn: React.FC<EntityColumnProps> = ({
             const display = config.cardDisplay(item);
             const isSelected = selectedItemId === pkValue;
             const isOcupada = item.STATUS_VAGA === 'Ocupada';
-            const entityIsReadOnly = READ_ONLY_ENTITIES.includes(entity) && session.papel !== 'COORDENAÇÃO';
             
             let exerciseData = undefined;
             if (entity === 'Vaga') {
@@ -143,4 +170,4 @@ export const EntityColumn: React.FC<EntityColumnProps> = ({
       </div>
     </div>
   );
-};
+});
