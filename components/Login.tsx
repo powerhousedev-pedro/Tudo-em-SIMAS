@@ -37,8 +37,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       } else {
         setError('Usuário ou senha inválidos.');
       }
-    } catch (err) {
-      setError('Falha na conexão com o servidor.');
+    } catch (err: any) {
+      // Use the message from the API if available (e.g., "Senha incorreta")
+      setError(err.message || 'Falha na conexão com o servidor.');
     } finally {
       setLoading(false);
     }
