@@ -1,3 +1,4 @@
+
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
@@ -64,13 +65,20 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Erro na API: ${response.statusText}`);
+        // Backend returns error in 'message' OR 'error' property
+        throw new Error(errorData.message || errorData.error || `Erro na API: ${response.statusText}`);
     }
     
     return await response.json();
   } catch (error: any) {
     if (error.name === 'AbortError') throw error;
-    console.error(`API Error (${method} ${endpoint}):`, error);
+    
+    // Only log strictly unknown errors to console to reduce noise
+    // 400-level errors are often functional (e.g. invalid password)
+    const isClientError = error.message && (error.message.includes('Senha incorreta') || error.message.includes('Usuário'));
+    if (!isClientError) {
+        console.error(`API Error (${method} ${endpoint}):`, error);
+    }
     throw error;
   }
 }
@@ -109,7 +117,8 @@ export const api = {
 
         return data;
     } catch (err) {
-        console.error(`Erro ao buscar ${entityName}:`, err);
+        // Use Warn instead of Error for fetches to avoid alarming console spam for non-critical failures (e.g. missing tables)
+        console.warn(`Falha ao buscar ${entityName}:`, err);
         return [];
     }
   },

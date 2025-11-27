@@ -80,6 +80,9 @@ const flattenRelation = (item: any, entityName: string) => {
     if (rServidor?.pessoa) ret.NOME_PESSOA = rServidor.pessoa.NOME; 
     if (rServidor && !rServidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
     
+    // If Contrato exists (relation), pull person name from it
+    if (rContrato?.pessoa) ret.NOME_PESSOA = rContrato.pessoa.NOME;
+
     if (rCargoCom) ret.NOME_CARGO_COMISSIONADO = rCargoCom.NOME;
     if (rCapacitacao) ret.NOME_CAPACITACAO = rCapacitacao.ATIVIDADE_DE_CAPACITACAO;
     if (rTurma) ret.NOME_TURMA = rTurma.NOME_TURMA;
@@ -341,7 +344,10 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
         else if (entityName === TABLES.CHAMADA) include = { [kPessoa]:true, [kTurma]:true };
         else if (entityName === TABLES.VISITA) include = { [kPessoa]: true };
         else if (entityName === TABLES.SOLICITACAO_PESQUISA) include = { [kPessoa]: true };
-        else if (entityName === TABLES.PROTOCOLO) include = { [kPessoa]: true };
+        else if (entityName === TABLES.PROTOCOLO) {
+             // Protocolo has no relations in prisma schema provided by user
+             include = undefined;
+        }
         else if (entityName === TABLES.VAGA) include = { [kLotacao]: true, [kCargo]: true, [kEdital]: true, [kContrato]: true, [kReserva]: true, [kExercicio]: { include: { [kLotacao]: true } } };
 
         // Build Where Clause for Search
@@ -351,8 +357,12 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
             where = {
                 OR: searchFields.map(f => ({ [f]: { contains: search, mode: 'insensitive' } }))
             };
-            if (entityName === TABLES.CONTRATO || entityName === TABLES.SERVIDOR || entityName === TABLES.ATENDIMENTO || entityName === TABLES.PROTOCOLO) {
+            if (entityName === TABLES.CONTRATO || entityName === TABLES.SERVIDOR || entityName === TABLES.ATENDIMENTO) {
                where.OR.push({ [kPessoa]: { NOME: { contains: search, mode: 'insensitive' } } });
+            }
+            if (entityName === TABLES.PROTOCOLO) {
+                // Remove Pessoa search for Protocolo as it has no relation
+                where.OR = where.OR.filter((condition: any) => !condition[kPessoa]);
             }
         }
 
@@ -414,12 +424,33 @@ app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     // Generic Create
     const model = getPrismaDelegate(entityName);
     const data = sanitizeData(req.body);
+
+    // Identify PK to capture ID after creation
+    // @ts-ignore
+    const meta = Prisma.dmmf.datamodel.models.find((m: any) => m.name === entityName);
+    const pkField = meta?.fields.find((f: any) => f.isId)?.name;
+
     try {
         const created = await model.create({ data });
+        
+        // Extract the actual ID from the created record
+        let affectedId = 'N/A';
+        if (pkField && created[pkField]) {
+            affectedId = String(created[pkField]);
+        }
+
         try {
              const auditDelegate = getPrismaDelegate(TABLES.AUDITORIA);
              await auditDelegate.create({
-                data: { ID_LOG: 'LOG' + Date.now(), DATA_HORA: new Date(), USUARIO: req.user.usuario, ACAO: 'CRIAR', TABELA_AFETADA: entityName, ID_REGISTRO_AFETADO: 'N/A', VALOR_NOVO: JSON.stringify(data) }
+                data: { 
+                    ID_LOG: 'LOG' + Date.now(), 
+                    DATA_HORA: new Date(), 
+                    USUARIO: req.user.usuario, 
+                    ACAO: 'CRIAR', 
+                    TABELA_AFETADA: entityName, 
+                    ID_REGISTRO_AFETADO: affectedId, 
+                    VALOR_NOVO: JSON.stringify(data) 
+                }
             });
         } catch(e) {} 
         res.json({ success: true, data: created });

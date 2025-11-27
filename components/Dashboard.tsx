@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
-import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES } from '../constants';
+import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, BOOLEAN_FIELD_CONFIG } from '../constants';
 import { api } from '../services/api';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -54,7 +55,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     
     // Pre-fill dates
     DATA_MODEL[activeTab]?.forEach(field => {
-        const isDateField = ['DATA_INICIO', 'DATA_DO_CONTRATO', 'DATA_MATRICULA', 'DATA_DA_NOMEACAO', 'DATA_VISITA', 'DATA_ATENDIMENTO'].includes(field);
+        const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
         initialData[field] = isDateField ? today : '';
     });
 
@@ -130,7 +131,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const today = new Date().toISOString().split('T')[0];
     
     DATA_MODEL[activeTab]?.forEach(field => {
-        const isDateField = ['DATA_INICIO', 'DATA_DO_CONTRATO', 'DATA_MATRICULA', 'DATA_DA_NOMEACAO', 'DATA_VISITA', 'DATA_ATENDIMENTO'].includes(field);
+        const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
         initialData[field] = isDateField ? today : '';
     });
     setFormData(initialData);
@@ -176,6 +177,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     } else {
          setFormData(prev => ({ ...prev, [name]: processedValue }));
     }
+  };
+
+  const handleToggleChange = (field: string, checked: boolean) => {
+      const config = BOOLEAN_FIELD_CONFIG[field];
+      let val: any = checked;
+      
+      if (config.type === 'string') {
+          val = checked ? 'Sim' : 'Não';
+      }
+      
+      setFormData(prev => ({ ...prev, [field]: val }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -293,6 +305,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         return null;
     }
 
+    // --- TOGGLE FIELDS RENDER ---
+    if (BOOLEAN_FIELD_CONFIG[field]) {
+        const boolConfig = BOOLEAN_FIELD_CONFIG[field];
+        // Determine current checked state
+        let isChecked = false;
+        const currentVal = formData[field];
+        
+        if (boolConfig.type === 'boolean') {
+            isChecked = !!currentVal;
+        } else {
+            isChecked = currentVal === 'Sim';
+        }
+
+        return (
+            <div key={field} className="relative group">
+                <label className="flex items-center justify-between w-full p-3.5 bg-gray-50 border border-gray-200 rounded-2xl cursor-pointer transition-all hover:border-simas-cyan/50 hover:bg-white">
+                    <div className="flex flex-col">
+                       <span className="text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest">{field.replace(/_/g, ' ')}</span>
+                       <span className="text-[10px] text-gray-400 font-medium mt-0.5">{isChecked ? 'Ativado/Sim' : 'Desativado/Não'}</span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={isChecked}
+                        onChange={(e) => handleToggleChange(field, e.target.checked)}
+                      />
+                      <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-simas-cyan"></div>
+                    </div>
+                </label>
+            </div>
+        );
+    }
+
     const options = getFilteredOptions(field);
     const inputCommonClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all duration-200 text-sm font-medium text-simas-dark";
 
@@ -312,7 +358,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     }
 
     const isReadOnly = (isPK && isEditing) || isCalculated;
-    const type = field.includes('DATA') ? 'date' : 'text';
+    const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
+    const type = isDateField ? 'date' : 'text';
 
     return (
       <div key={field} className="relative group">

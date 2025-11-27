@@ -1,4 +1,5 @@
 
+
 import { EntityConfig, DropdownOptions } from './types';
 import { validation } from './utils/validation';
 
@@ -447,6 +448,17 @@ export const DROPDOWN_STRUCTURES: any = {
   ]
 };
 
+// Configuration for boolean-like fields
+// type: 'boolean' = Native DB boolean (true/false)
+// type: 'string' = DB String ('Sim'/'Não')
+export const BOOLEAN_FIELD_CONFIG: { [key: string]: { type: 'boolean' | 'string' } } = {
+    'BLOQUEADA': { type: 'boolean' },
+    'AUTORIZO': { type: 'string' },
+    'ABANDONO': { type: 'string' },
+    'MATERIAL_PENDENTE': { type: 'string' },
+    'ATIVO': { type: 'string' }
+};
+
 export const DROPDOWN_OPTIONS: DropdownOptions = {
   'SEXO': ['M', 'F'],
   'ESCOLARIDADE': [
@@ -515,10 +527,6 @@ export const DROPDOWN_OPTIONS: DropdownOptions = {
   'FORMATO': ['À distância (EAD)', 'Híbrido', 'Presencial', 'Remoto'],
   'TIPO_CAPACITACAO': ['Aprimoramento (4h - 20h)', 'Atualização (40h - 100h)', 'Introdutória (20h - 40h)', 'Supervisão Técnica (min 24h)'],
   'PRESENCA': ['Presente', 'Ausente'],
-  'ABANDONO': ['Sim', 'Não'],
-  'MATERIAL_PENDENTE': ['Sim', 'Não'],
-  'AUTORIZO': ['Sim', 'Não'],
-  'ATIVO': ['Sim', 'Não'],
   'COGESTORA': ['CAMPO', 'CENTRAL', 'CIEDS', 'CONT-ATO', 'DOM PIXOTE', 'ECOS', 'INADH', 'NONE'],
   'TIPO_DE_CARGO': ['N/A', 'S/E', 'DAS10A', 'DAS10B', 'DAS10', 'DAS09', 'DAS08', 'DAS07', 'DAS06', 'DAI06', 'DAI05', 'DAI04'],
   'PERCURSO_FORMATIVO': ['Provimento de Serviços Socioassistenciais', 'Gestão do SUAS', 'Controle Social', 'Transversal'],
