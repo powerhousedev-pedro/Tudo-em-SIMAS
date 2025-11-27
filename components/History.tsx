@@ -2,10 +2,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../services/api';
 import { Button } from './Button';
-import { AppContextProps } from '../App';
 import { ENTITY_CONFIGS, DATA_MODEL } from '../constants';
 import { validation } from '../utils/validation';
-import { UserSession } from '../types';
+import { UserSession, AppContextProps } from '../types';
 
 interface HistoryProps extends AppContextProps {}
 
