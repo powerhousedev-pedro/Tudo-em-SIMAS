@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Button } from './Button';
 import { api } from '../services/api';
 import { UserSession } from '../types';
+import { Logo } from './Logo';
 
 interface LoginProps {
   onLogin: (session: UserSession) => void;
@@ -55,8 +56,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-8 animate-fade-in">
           
           <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-simas-cyan to-simas-blue shadow-lg shadow-simas-cyan/30 mb-6 transform -rotate-6">
-               <i className="fas fa-layer-group text-2xl text-white transform rotate-6"></i>
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-simas-cyan to-simas-blue shadow-lg shadow-simas-cyan/30 mb-6 transform -rotate-6 p-3">
+               <Logo className="w-full h-full text-white transform rotate-6" />
             </div>
             <h1 className="text-2xl font-black text-white tracking-tight mb-2">Tudo em SIMAS</h1>
             <p className="text-xs font-medium text-simas-cyan uppercase tracking-widest">Sistema de Monitoramento</p>
