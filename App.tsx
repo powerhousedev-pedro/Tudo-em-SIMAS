@@ -12,6 +12,7 @@ import { ActionExecutionModal } from './components/ActionExecutionModal';
 import { Button } from './components/Button';
 import { UserSession, AppRoute, AppContextProps } from './types';
 import { api } from './services/api';
+import { Logo } from './components/Logo';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
@@ -90,8 +91,8 @@ const App: React.FC = () => {
             
             {/* Logo Area */}
             <div className="flex items-center gap-4">
-              <div className="h-10 w-10 bg-white text-simas-dark flex items-center justify-center rounded-xl shadow-lg transform transition-transform hover:scale-105">
-                <i className="fas fa-layer-group text-lg"></i>
+              <div className="h-10 w-10 bg-white text-simas-dark flex items-center justify-center rounded-xl shadow-lg transform transition-transform hover:scale-105 p-2">
+                <Logo className="w-full h-full" />
               </div>
               <div className="flex flex-col">
                 <h1 className="text-xl font-extrabold tracking-tight leading-none text-white">Tudo em SIMAS</h1>
