@@ -513,12 +513,20 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) 
                 const exists = await targetDelegate.findUnique({ where: { [pkField]: log.ID_REGISTRO_AFETADO }});
                 if (!exists) throw new Error('O registro original já foi excluído.');
                 
-                await targetDelegate.delete({ where: { [pkField]: log.ID_REGISTRO_AFETADO } });
+                try {
+                    await targetDelegate.delete({ where: { [pkField]: log.ID_REGISTRO_AFETADO } });
+                } catch (err: any) {
+                    if (err.code === 'P2003') {
+                         throw new Error('Não é possível desfazer a criação: Este registro já está sendo utilizado por outros dados (ex: Contratos, Alocações). Remova as dependências primeiro.');
+                    }
+                    throw err;
+                }
             } 
             else if (log.ACAO === 'EDITAR') {
                 // Inverso de EDITAR é restaurar VALOR_ANTIGO
                 if (!log.VALOR_ANTIGO) throw new Error('Não há dados antigos para restaurar.');
-                const oldData = JSON.parse(log.VALOR_ANTIGO);
+                const rawOldData = JSON.parse(log.VALOR_ANTIGO);
+                const oldData = sanitizeData(rawOldData);
                 
                 const exists = await targetDelegate.findUnique({ where: { [pkField]: log.ID_REGISTRO_AFETADO }});
                 if (!exists) throw new Error('O registro foi excluído, não é possível reverter a edição.');
@@ -528,10 +536,21 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) 
             else if (log.ACAO === 'EXCLUIR') {
                 // Inverso de EXCLUIR é recriar (CRIAR) com VALOR_ANTIGO
                 if (!log.VALOR_ANTIGO) throw new Error('Não há dados para restaurar.');
-                const oldData = JSON.parse(log.VALOR_ANTIGO);
+                const rawOldData = JSON.parse(log.VALOR_ANTIGO);
+                const oldData = sanitizeData(rawOldData);
                 
-                // Tenta criar. Se PK já existir, vai dar erro no create e cair no catch
-                await targetDelegate.create({ data: oldData });
+                // Tenta criar.
+                try {
+                    await targetDelegate.create({ data: oldData });
+                } catch (err: any) {
+                    if (err.code === 'P2003') {
+                         throw new Error('Não é possível restaurar: Este registro depende de outro dado que não existe mais (ex: Lotação ou Pessoa que foi excluída).');
+                    }
+                    if (err.code === 'P2002') {
+                        throw new Error('Não é possível restaurar: Já existe um registro com o mesmo identificador.');
+                    }
+                    throw err;
+                }
             }
 
             // Se tudo deu certo, remove o log de auditoria
@@ -541,8 +560,6 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) 
         res.json({ success: true, message: 'Ação revertida com sucesso.' });
     } catch (e: any) {
         let msg = e.message;
-        if (e.code === 'P2003') msg = 'Impossível reverter: Violação de integridade (FK) ao tentar apagar.';
-        if (e.code === 'P2002') msg = 'Impossível reverter: Registro duplicado (PK ou Unique constraint).';
         res.status(400).json({ success: false, message: msg });
     }
 });
