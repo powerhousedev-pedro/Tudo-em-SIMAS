@@ -40,6 +40,10 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     
+    // UI State for specific actions
+    const [restoringId, setRestoringId] = useState<string | null>(null); // Controls Spinner
+    const [pendingRestoreId, setPendingRestoreId] = useState<string | null>(null); // Controls Modal
+    
     // Modal State
     const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
 
@@ -91,18 +95,29 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         }
     };
 
-    const handleRestore = async (idLog: string) => {
-        if (!window.confirm('Deseja realmente desfazer esta ação? O registro voltará ao estado anterior e este log será apagado.')) return;
+    // Abre o modal de confirmação
+    const initiateRestore = (idLog: string) => {
+        setPendingRestoreId(idLog);
+    };
+
+    // Executa a ação real após confirmação no modal
+    const executeRestore = async () => {
+        if (!pendingRestoreId) return;
+        
+        setRestoringId(pendingRestoreId);
         try {
-            const res = await api.restoreAuditLog(idLog);
+            const res = await api.restoreAuditLog(pendingRestoreId);
             if (res.success) {
                 showToast('success', res.message);
+                setPendingRestoreId(null); // Fecha o modal apenas no sucesso
                 loadData();
             } else {
                 showToast('error', res.message || 'Não foi possível restaurar.');
             }
         } catch (e: any) {
             showToast('error', e.message || 'Erro de conexão.');
+        } finally {
+            setRestoringId(null);
         }
     };
 
@@ -459,8 +474,8 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                     <td className="px-6 py-4 text-right">
                                                         {(item.ACAO === 'CRIAR' || item.ACAO === 'EDITAR' || item.ACAO === 'EXCLUIR') && (
                                                             <button 
-                                                                onClick={() => handleRestore(item.ID_LOG)}
-                                                                className="text-gray-300 hover:text-orange-500 hover:bg-orange-50 p-2 rounded-lg transition-all"
+                                                                onClick={() => initiateRestore(item.ID_LOG)}
+                                                                className="p-2 rounded-lg text-gray-300 hover:text-orange-500 hover:bg-orange-50 transition-all"
                                                                 title="Reverter Ação"
                                                             >
                                                                 <i className="fas fa-undo"></i>
@@ -478,8 +493,43 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 </div>
             </div>
 
-            {/* Modal de Auditoria */}
+            {/* Modal de Auditoria (Detalhes) */}
             {renderAuditModal()}
+
+            {/* Modal de Confirmação de Restauração */}
+            {pendingRestoreId && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in px-4">
+                    <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 border border-white/20 animate-slide-in">
+                        <div className="flex flex-col items-center text-center">
+                            <div className="w-16 h-16 bg-yellow-50 rounded-full flex items-center justify-center mb-4 border border-yellow-100">
+                                <i className="fas fa-exclamation-triangle text-2xl text-yellow-500"></i>
+                            </div>
+                            <h3 className="text-xl font-extrabold text-simas-dark mb-2">Confirmar Restauração</h3>
+                            <p className="text-sm text-gray-500 mb-6 px-4 leading-relaxed">
+                                Você está prestes a desfazer uma ação histórica. O registro voltará ao estado anterior e este log de auditoria será apagado permanentemente.
+                            </p>
+                            
+                            <div className="flex gap-3 w-full">
+                                <Button 
+                                    variant="secondary" 
+                                    onClick={() => setPendingRestoreId(null)}
+                                    className="flex-1 justify-center"
+                                    disabled={!!restoringId}
+                                >
+                                    Cancelar
+                                </Button>
+                                <Button 
+                                    onClick={executeRestore} 
+                                    isLoading={!!restoringId}
+                                    className="flex-1 justify-center"
+                                >
+                                    Confirmar Restauração
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

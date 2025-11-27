@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 // @ts-ignore
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { TABLES, TableName } from './tables';
@@ -43,7 +43,8 @@ const sanitizeData = (data: any) => {
         if (value === '') value = null;
         else if (typeof value === 'string') {
             if (key === 'ANO_ENTRADA' && !isNaN(parseInt(value))) value = parseInt(value);
-            else if ((key.includes('DATA') || key.includes('INICIO') || key.includes('TERMINO') || key.includes('PRAZO')) && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+            // Regex ajustada para ser mais permissiva com datas ISO completas
+            else if ((key.includes('DATA') || key.includes('INICIO') || key.includes('TERMINO') || key.includes('PRAZO') || key === 'NASCIMENTO') && /^\d{4}-\d{2}-\d{2}/.test(value)) {
                 value = new Date(value);
             }
         }
@@ -495,12 +496,43 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) 
         const log = await auditDelegate.findUnique({ where: { ID_LOG: id } });
         if (!log) return res.status(404).json({ success: false, message: 'Registro de auditoria não encontrado.' });
 
-        const entityName = log.TABELA_AFETADA;
-        if (!isValidTable(entityName)) return res.status(400).json({ message: 'Tabela inválida no log.' });
+        let entityName = log.TABELA_AFETADA;
+        
+        // Normalize table name if casing is wrong (legacy logs)
+        if (!isValidTable(entityName)) {
+            const validNames = Object.values(TABLES);
+            const found = validNames.find(t => t.toLowerCase() === entityName.toLowerCase());
+            if (found) {
+                entityName = found;
+            } else {
+                return res.status(400).json({ message: `Tabela inválida no log: '${entityName}'` });
+            }
+        }
 
         // @ts-ignore
         const meta = Prisma.dmmf.datamodel.models.find((m: any) => m.name === entityName);
         const pkField = meta?.fields.find((f: any) => f.isId)?.name;
+        
+        // --- NEW: Filter keys based on Schema (DMMF) ---
+        // Isso impede que campos calculados (ex: IDADE) ou relacionamentos aninhados (ex: contratos[]) 
+        // causem erro de 'Unknown argument' ao tentar restaurar.
+        const validFields: string[] = meta?.fields.map((f: any) => f.name) || [];
+
+        const cleanDataForRestore = (rawData: any) => {
+            if (!rawData) return {};
+            const parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+            const sanitized = sanitizeData(parsed);
+            
+            const clean: any = {};
+            for (const key in sanitized) {
+                // Apenas mantém se o campo existir na definição do banco de dados
+                if (validFields.includes(key)) {
+                    clean[key] = sanitized[key];
+                }
+            }
+            return clean;
+        };
+        // -----------------------------------------------
         
         if (!pkField) throw new Error('PK não identificada para a tabela ' + entityName);
 
@@ -525,8 +557,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) 
             else if (log.ACAO === 'EDITAR') {
                 // Inverso de EDITAR é restaurar VALOR_ANTIGO
                 if (!log.VALOR_ANTIGO) throw new Error('Não há dados antigos para restaurar.');
-                const rawOldData = JSON.parse(log.VALOR_ANTIGO);
-                const oldData = sanitizeData(rawOldData);
+                const oldData = cleanDataForRestore(log.VALOR_ANTIGO);
                 
                 const exists = await targetDelegate.findUnique({ where: { [pkField]: log.ID_REGISTRO_AFETADO }});
                 if (!exists) throw new Error('O registro foi excluído, não é possível reverter a edição.');
@@ -536,8 +567,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) 
             else if (log.ACAO === 'EXCLUIR') {
                 // Inverso de EXCLUIR é recriar (CRIAR) com VALOR_ANTIGO
                 if (!log.VALOR_ANTIGO) throw new Error('Não há dados para restaurar.');
-                const rawOldData = JSON.parse(log.VALOR_ANTIGO);
-                const oldData = sanitizeData(rawOldData);
+                const oldData = cleanDataForRestore(log.VALOR_ANTIGO);
                 
                 // Tenta criar.
                 try {
