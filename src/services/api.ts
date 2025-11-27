@@ -22,22 +22,31 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
   const config: RequestInit = { method, headers };
   if (body) config.body = JSON.stringify(body);
   
+  console.log(`%c[REQ] ${method} ${endpoint}`, 'color: #42b9eb; font-weight: bold;', body || '(no body)');
+
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    
     if (response.status === 401 || response.status === 403) {
+        console.warn(`[AUTH] ${response.status} on ${endpoint}`);
         if (method === 'GET' && response.status === 403) {
              localStorage.removeItem(TOKEN_KEY);
              window.location.href = '#/login';
              throw new Error('Sessão expirada');
         }
     }
+
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error(`%c[ERR] ${method} ${endpoint}`, 'color: #ef4444; font-weight: bold;', errorData);
         throw new Error(errorData.message || `Erro na API: ${response.statusText}`);
     }
-    return await response.json();
+    
+    const data = await response.json();
+    console.log(`%c[RES] ${method} ${endpoint}`, 'color: #10b981; font-weight: bold;', data);
+    return data;
   } catch (error) {
-    console.error(`API Error (${method} ${endpoint}):`, error);
+    console.error(`[API EXCEPTION] (${method} ${endpoint}):`, error);
     throw error;
   }
 }
@@ -57,10 +66,12 @@ export const api = {
     
     const now = Date.now();
     if (!forceRefresh && cache[endpoint] && (now - cache[endpoint].timestamp < CACHE_TTL)) {
+        console.log(`%c[CACHE] Hit for ${endpoint}`, 'color: #f59e0b');
         return Promise.resolve(cache[endpoint].data);
     }
 
     if (inflightRequests[endpoint] && !forceRefresh) {
+        console.log(`%c[DEDUP] Joining inflight request for ${endpoint}`, 'color: #f59e0b');
         return inflightRequests[endpoint] as Promise<any[]>;
     }
 
