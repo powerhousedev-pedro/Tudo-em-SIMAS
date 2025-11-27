@@ -2,9 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import { Button } from './Button';
-import { UserSession, RecordData } from '../types';
+import { UserSession, RecordData, AppContextProps } from '../types';
 import { ENTITY_CONFIGS, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, DATA_MODEL } from '../constants';
-import { AppContextProps } from '../App';
 import { businessLogic } from '../utils/businessLogic';
 import { Card } from './Card'; // Reusing Card for consistency, but we might style it differently
 
@@ -14,6 +13,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'PENDING' | 'COMPLETED'>('ALL');
+  const [columnSearchTerms, setColumnSearchTerms] = useState<Record<string, string>>({});
   
   // New Request Modal State
   const [showNewModal, setShowNewModal] = useState(false);
@@ -37,6 +37,13 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
   };
   const session = getSession();
 
+  // Date helper
+  const today = new Date().toISOString().split('T')[0];
+  const isFuture = (dateString: string) => {
+      if (!dateString) return false;
+      return dateString > today;
+  };
+
   useEffect(() => {
     loadRequests();
     loadLookups();
@@ -50,7 +57,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
       const data = await api.fetchEntity('ATENDIMENTO');
       
       // Sort by date descending
-      data.sort((a, b) => new Date(b.DATA_ENTRADA).getTime() - new Date(a.DATA_ENTRADA).getTime());
+      data.sort((a: any, b: any) => new Date(b.DATA_ENTRADA).getTime() - new Date(a.DATA_ENTRADA).getTime());
       
       setRequests(data);
     } catch (e) {
@@ -218,8 +225,15 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
   // --- RENDERERS ---
 
-  const renderKanbanColumn = (title: string, statusFilter: (req: any) => boolean, color: string) => {
-      const items = filteredRequests.filter(statusFilter);
+  const renderKanbanColumn = (title: string, statusFilter: (req: any) => boolean, color: string, colId: string) => {
+      const searchTerm = (columnSearchTerms[colId] || '').toLowerCase();
+      
+      const items = filteredRequests
+        .filter(statusFilter)
+        .filter(req => 
+             !searchTerm || 
+             `${req.TIPO_PEDIDO} ${req.NOME_PESSOA || ''} ${req.CPF || ''}`.toLowerCase().includes(searchTerm)
+        );
       
       return (
           <div className="flex-1 min-w-[300px] bg-gray-100/50 rounded-2xl p-4 flex flex-col h-full border border-gray-200/50">
@@ -228,47 +242,77 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                   <span className={`bg-${color}-100 text-${color}-800 text-xs font-bold px-2 py-1 rounded-full`}>{items.length}</span>
               </div>
               
+              <div className="mb-4 relative">
+                   <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                   <input 
+                       type="text"
+                       placeholder="Buscar nesta coluna..."
+                       className="w-full pl-8 pr-3 py-2 bg-white rounded-xl border border-gray-200 text-xs focus:ring-1 focus:ring-simas-cyan focus:border-simas-cyan outline-none transition-all shadow-sm"
+                       value={columnSearchTerms[colId] || ''}
+                       onChange={(e) => setColumnSearchTerms(prev => ({...prev, [colId]: e.target.value}))}
+                   />
+              </div>
+              
               <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
                   {items.length === 0 ? (
                       <div className="text-center py-10 text-gray-400 text-xs italic border-2 border-dashed border-gray-200 rounded-xl">
                           Nenhum item
                       </div>
                   ) : (
-                      items.map(req => (
-                          <div key={req.ID_ATENDIMENTO} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group relative">
-                              {/* Status Stripe */}
-                              <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-full bg-${color}-400`}></div>
-                              
-                              <div className="pl-3">
-                                  <div className="flex justify-between items-start mb-1">
-                                      <h4 className="font-bold text-simas-dark text-sm truncate pr-2" title={req.TIPO_PEDIDO}>{req.TIPO_PEDIDO}</h4>
-                                      <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{req.ID_ATENDIMENTO}</span>
-                                  </div>
-                                  
-                                  <p className="text-sm text-gray-600 mb-2 font-medium">{req.NOME_PESSOA || req.CPF}</p>
-                                  
-                                  <div className="flex items-center gap-2 text-xs text-gray-400 mb-3">
-                                      <i className="far fa-calendar"></i>
-                                      <span>{new Date(req.DATA_ENTRADA).toLocaleDateString()}</span>
-                                  </div>
+                      items.map(req => {
+                          const isFutureItem = isFuture(req.DATA_AGENDAMENTO);
+                          
+                          return (
+                            <div key={req.ID_ATENDIMENTO} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group relative">
+                                {/* Status Stripe */}
+                                <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-full bg-${color}-400`}></div>
+                                
+                                <div className="pl-3">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <h4 className="font-bold text-simas-dark text-sm truncate pr-2" title={req.TIPO_PEDIDO}>{req.TIPO_PEDIDO}</h4>
+                                        <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{req.ID_ATENDIMENTO}</span>
+                                    </div>
+                                    
+                                    <p className="text-sm text-gray-600 mb-2 font-medium">{req.NOME_PESSOA || req.CPF}</p>
+                                    
+                                    {isFutureItem ? (
+                                        <div className="mb-3">
+                                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-100">
+                                                <i className="far fa-clock"></i> 
+                                                Agendado: {new Date(req.DATA_AGENDAMENTO).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-xs text-gray-400 mb-3">
+                                            <i className="far fa-calendar"></i>
+                                            <span>Entrada: {new Date(req.DATA_ENTRADA).toLocaleDateString()}</span>
+                                        </div>
+                                    )}
 
-                                  <div className="flex justify-between items-center border-t border-gray-50 pt-2 mt-2">
-                                      <div className="flex items-center gap-1">
-                                          <div className="w-5 h-5 rounded-full bg-gray-200 text-[10px] flex items-center justify-center text-gray-600 font-bold">
-                                              {(req.RESPONSAVEL || '?').substring(0,1)}
-                                          </div>
-                                          <span className="text-[10px] text-gray-500 truncate max-w-[80px]">{req.RESPONSAVEL}</span>
-                                      </div>
-                                      
-                                      {req.STATUS_PEDIDO === 'Acatado' && req.STATUS_AGENDAMENTO === 'Pendente' && (
-                                          <span className="flex items-center gap-1 text-[10px] font-bold text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full animate-pulse">
-                                              <i className="fas fa-clock"></i> Agendado
-                                          </span>
-                                      )}
-                                  </div>
-                              </div>
-                          </div>
-                      ))
+                                    <div className="flex justify-between items-center border-t border-gray-50 pt-2 mt-2">
+                                        <div className="flex items-center gap-1">
+                                            <div className="w-5 h-5 rounded-full bg-gray-200 text-[10px] flex items-center justify-center text-gray-600 font-bold">
+                                                {(req.RESPONSAVEL || '?').substring(0,1)}
+                                            </div>
+                                            <span className="text-[10px] text-gray-500 truncate max-w-[80px]">{req.RESPONSAVEL}</span>
+                                        </div>
+                                        
+                                        {req.STATUS_PEDIDO === 'Acatado' && req.STATUS_AGENDAMENTO === 'Pendente' && !isFutureItem && (
+                                            <span className="flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full animate-pulse border border-green-100">
+                                                <i className="fas fa-play-circle"></i> Pronto p/ Executar
+                                            </span>
+                                        )}
+
+                                        {req.STATUS_PEDIDO === 'Aguardando' && (
+                                            <span className="flex items-center gap-1 text-[10px] font-bold text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded-full border border-yellow-100">
+                                                <i className="fas fa-hourglass-start"></i> Análise
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })
                   )}
               </div>
           </div>
@@ -296,10 +340,37 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
         {/* Kanban Content */}
         <div className="flex-1 overflow-x-auto p-6">
             <div className="flex gap-6 h-full min-w-[1000px]">
-                {renderKanbanColumn("Aguardando", r => r.STATUS_PEDIDO === 'Aguardando', 'yellow')}
-                {renderKanbanColumn("Em Execução / Agendado", r => r.STATUS_PEDIDO === 'Acatado' && r.STATUS_AGENDAMENTO !== 'Concluído', 'blue')}
-                {renderKanbanColumn("Concluído", r => r.STATUS_PEDIDO === 'Acatado' && r.STATUS_AGENDAMENTO === 'Concluído', 'green')}
-                {renderKanbanColumn("Declinado / Cancelado", r => r.STATUS_PEDIDO === 'Declinado', 'red')}
+                {/* COLUNA 1: Aguardando Decisão OU Agendado para Futuro */}
+                {renderKanbanColumn(
+                    "Aguardando / Agendado Futuro", 
+                    r => r.STATUS_PEDIDO === 'Aguardando' || (r.STATUS_PEDIDO === 'Acatado' && r.STATUS_AGENDAMENTO !== 'Concluído' && isFuture(r.DATA_AGENDAMENTO)), 
+                    'yellow', 
+                    'waiting'
+                )}
+                
+                {/* COLUNA 2: Acatado E Data Chegou (Pronto para Execução) */}
+                {renderKanbanColumn(
+                    "Pronto para Execução", 
+                    r => r.STATUS_PEDIDO === 'Acatado' && r.STATUS_AGENDAMENTO !== 'Concluído' && !isFuture(r.DATA_AGENDAMENTO), 
+                    'blue', 
+                    'executing'
+                )}
+                
+                {/* COLUNA 3: Concluídos */}
+                {renderKanbanColumn(
+                    "Concluído", 
+                    r => r.STATUS_PEDIDO === 'Acatado' && r.STATUS_AGENDAMENTO === 'Concluído', 
+                    'green', 
+                    'done'
+                )}
+                
+                {/* COLUNA 4: Declinados */}
+                {renderKanbanColumn(
+                    "Declinado / Cancelado", 
+                    r => r.STATUS_PEDIDO === 'Declinado', 
+                    'red', 
+                    'declined'
+                )}
             </div>
         </div>
 

@@ -4,12 +4,10 @@ import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRU
 import { api } from '../services/api';
 import { Button } from './Button';
 import { Card } from './Card';
-import { RecordData, UserSession } from '../types';
-import { AppContextProps } from '../App';
+import { RecordData, UserSession, AppContextProps } from '../types';
 import { validation } from '../utils/validation';
 import { businessLogic } from '../utils/businessLogic';
 import { DossierModal } from './DossierModal';
-import { ActionExecutionModal } from './ActionExecutionModal';
 import { ExerciseSelectionModal } from './ExerciseSelectionModal';
 
 interface DashboardProps extends AppContextProps {}
@@ -37,9 +35,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // Modal State
   const [dossierCpf, setDossierCpf] = useState<string | null>(null);
-  const [actionAtendimentoId, setActionAtendimentoId] = useState<string | null>(null);
-  const [pendingReviews, setPendingReviews] = useState<any[]>([]);
-  const [showReviewsModal, setShowReviewsModal] = useState(false);
   const [exerciseVagaId, setExerciseVagaId] = useState<string | null>(null);
 
   const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -73,12 +68,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     loadAllRequiredData();
   }, [activeTab]);
 
-  // 2. Load Pending Reviews
-  useEffect(() => {
-    api.getRevisoesPendentes().then(setPendingReviews).catch(console.error);
-  }, []);
-
-  // 3. Click Outside Handler
+  // 2. Click Outside Handler
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
         if (filterPopoverOpen && popoverRefs.current[filterPopoverOpen] && !popoverRefs.current[filterPopoverOpen]?.contains(event.target as Node)) {
@@ -386,10 +376,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
             <button onClick={() => setShowMainList(!showMainList)} className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-sm uppercase tracking-wide ${showMainList ? 'bg-simas-dark text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100 hover:border-gray-200 hover:text-simas-dark'}`}>
                 <i className={`fas ${showMainList ? 'fa-eye' : 'fa-eye-slash'}`}></i> Consultar
             </button>
-            <Button variant="secondary" onClick={() => setShowReviewsModal(true)} className="relative !rounded-full w-10 h-10 p-0 flex items-center justify-center border-none shadow-sm bg-white hover:text-simas-cyan text-gray-400 hover:shadow-md">
-                <i className="fas fa-bell"></i>
-                {pendingReviews.length > 0 && <span className="absolute -top-1 -right-1 bg-simas-cyan text-white text-[9px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm border-2 border-white">{pendingReviews.length}</span>}
-            </Button>
         </div>
       </div>
 
@@ -524,33 +510,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
       {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga').then(d => setCardData(p => ({...p, 'Vaga': d}))); }} />}
-      {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadAllRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
-      {showReviewsModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">
-              <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-slide-in">
-                  <div className="p-6 border-b flex justify-between items-center bg-gray-50">
-                      <h3 className="text-xl font-bold text-simas-dark tracking-tight">Revisões Pendentes</h3>
-                      <button onClick={() => setShowReviewsModal(false)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 transition-colors"><i className="fas fa-times"></i></button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-6 bg-white space-y-4">
-                      {pendingReviews.length === 0 ? <div className="text-center text-gray-400 py-10 flex flex-col items-center gap-4"><div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center"><i className="fas fa-check text-2xl text-green-500"></i></div> Tudo limpo!</div> : 
-                        pendingReviews.map(rev => (
-                            <div key={rev.ID_ATENDIMENTO} className="bg-white p-5 rounded-2xl border border-gray-100 flex justify-between items-center hover:shadow-lg hover:border-simas-cyan/30 transition-all group">
-                                <div className="flex items-start gap-4">
-                                    <div className="w-12 h-12 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors"><i className="fas fa-tasks text-lg"></i></div>
-                                    <div>
-                                        <h4 className="font-bold text-simas-dark text-lg leading-tight group-hover:text-simas-cyan transition-colors">{rev.TIPO_DE_ACAO} {rev.ENTIDADE_ALVO}</h4>
-                                        <p className="text-sm text-gray-500">Para: <span className="font-medium text-gray-700">{rev.NOME_PESSOA}</span></p>
-                                    </div>
-                                </div>
-                                <Button onClick={() => { setShowReviewsModal(false); setActionAtendimentoId(rev.ID_ATENDIMENTO); }} className="rounded-full px-6">Executar</Button>
-                            </div>
-                        ))
-                      }
-                  </div>
-              </div>
-          </div>
-      )}
     </div>
   );
 };

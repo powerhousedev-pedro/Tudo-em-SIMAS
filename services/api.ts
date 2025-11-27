@@ -168,7 +168,14 @@ export const api = {
     try {
         const data = await api.fetchEntity('Atendimento'); 
         if (!Array.isArray(data)) return [];
-        return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
+        
+        const today = new Date().toISOString().split('T')[0];
+        
+        return data.filter((a: any) => {
+            // Must be Pending AND Date must be today or in the past
+            return a.STATUS_AGENDAMENTO === 'Pendente' && 
+                   (a.DATA_AGENDAMENTO && a.DATA_AGENDAMENTO <= today);
+        });
     } catch (e) { return []; }
   },
 
