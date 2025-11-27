@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, PERMISSOES_POR_PAPEL, READ_ONLY_ENTITIES } from '../constants';
 import { api } from '../services/api';
 import { Button } from './Button';
@@ -15,7 +14,7 @@ import { EntityColumn } from './EntityColumn';
 interface DashboardProps extends AppContextProps {}
 
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
-  const [activeTab, setActiveTab] = useState('Pessoa'); // Corrected to 'Pessoa'
+  const [activeTab, setActiveTab] = useState('Pessoa');
   const [formData, setFormData] = useState<RecordData>({});
   const [isEditing, setIsEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -23,6 +22,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // Data State
   const [cardData, setCardData] = useState<{ [key: string]: any[] }>({});
   const [loadingData, setLoadingData] = useState<{ [key: string]: boolean }>({});
+  
+  // Refs to track state without causing re-renders
+  const fetchingRef = useRef<Set<string>>(new Set());
+  const loadedRef = useRef<Set<string>>(new Set());
   
   // Search & Filter State
   const [searchTerms, setSearchTerms] = useState<{ [key: string]: string }>({});
@@ -42,6 +45,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const [showReviewsModal, setShowReviewsModal] = useState(false);
   const [exerciseVagaId, setExerciseVagaId] = useState<string | null>(null);
 
+  const searchTimeouts = useRef<{ [key: string]: NodeJS.Timeout }>({});
+
   const session: UserSession = useMemo(() => {
       const stored = localStorage.getItem('simas_user_session');
       return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
@@ -49,10 +54,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // --- PERMISSIONS & COLUMNS ---
 
-  const isEntityAllowed = (entityName: string) => {
+  const isEntityAllowed = useCallback((entityName: string) => {
       const allowed = PERMISSOES_POR_PAPEL[session.papel] || [];
       return allowed.includes('TODAS') || allowed.includes(entityName);
-  };
+  }, [session.papel]);
 
   const columnsToRender = useMemo<string[]>(() => {
     const columns: string[] = showMainList ? [activeTab] : [];
@@ -64,40 +69,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         }
     });
     return columns;
-  }, [activeTab, showMainList, session.papel]);
+  }, [activeTab, showMainList, isEntityAllowed]);
 
   const isReadOnly = useMemo(() => READ_ONLY_ENTITIES.includes(activeTab) && session.papel !== 'COORDENAÇÃO', [activeTab, session.papel]);
 
   // --- DATA FETCHING ---
 
-  // Debounced Search Effect
-  useEffect(() => {
-      const timer = setTimeout(() => {
-          const entities = [...columnsToRender];
-          if (!entities.includes(activeTab)) entities.push(activeTab);
-
-          entities.forEach(entity => {
-              const term = searchTerms[entity] || '';
-              fetchEntityData(entity, term);
-          });
-      }, 400);
-
-      return () => clearTimeout(timer);
-  }, [searchTerms, columnsToRender, activeTab]);
-
-  const fetchEntityData = async (entity: string, term: string) => {
-      setLoadingData(prev => ({ ...prev, [entity]: true }));
+  const fetchEntityData = useCallback(async (entity: string, term: string, force = false) => {
+      // Prevent deduplication synchronous loop
+      if (fetchingRef.current.has(entity) && !force) return;
+      
+      fetchingRef.current.add(entity);
+      
+      // Update loading state only if not already loaded (to prevent spinner on background updates)
+      // or if searching (user expects feedback)
+      const shouldShowLoading = !loadedRef.current.has(entity) || !!term;
+      if (shouldShowLoading) {
+          setLoadingData(prev => ({ ...prev, [entity]: true }));
+      }
+      
       try {
-          const data = await api.fetchEntity(entity, false, term);
+          const data = await api.fetchEntity(entity, force, term);
           setCardData(prev => ({ ...prev, [entity]: data }));
-      } catch (e) {
-          console.error(e);
+          loadedRef.current.add(entity);
+      } catch (e: any) {
+          if (e.name !== 'AbortError') console.error(e);
       } finally {
           setLoadingData(prev => ({ ...prev, [entity]: false }));
+          fetchingRef.current.delete(entity);
       }
-  };
+  }, []);
 
-  // Initial Load on Tab Change
+  // --- EFFECTS ---
+
+  // 1. Tab Change - Reset Logic
   useEffect(() => {
     const initialData: RecordData = {};
     const today = new Date().toISOString().split('T')[0];
@@ -108,22 +113,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     setFormData(initialData);
     setIsEditing(false);
     setSelectedItems({});
+    
+    // Clear LOADED ref for the current tab to ensure fresh fetch when switching back
+    // But keep cache in API service
+    loadedRef.current.delete(activeTab);
+    
     api.getRevisoesPendentes().then(setPendingReviews).catch(console.error);
   }, [activeTab]);
 
+  // 2. Intelligent Column Loading
+  // Loop Fixed: Removed data dependencies. Relies on loadedRef to check status.
+  useEffect(() => {
+      columnsToRender.forEach(entity => {
+          const isLoaded = loadedRef.current.has(entity);
+          const isFetching = fetchingRef.current.has(entity);
+          
+          if (!isLoaded && !isFetching) {
+              fetchEntityData(entity, searchTerms[entity] || '');
+          }
+      });
+  }, [columnsToRender, fetchEntityData, searchTerms]); 
+
   // --- HANDLERS ---
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     const initialData: RecordData = {};
     DATA_MODEL[activeTab]?.forEach(field => { initialData[field] = ''; });
     setFormData(initialData);
-  };
+  }, [activeTab]);
 
-  const handleSearchChange = (entity: string, val: string) => {
+  const handleSearchChange = useCallback((entity: string, val: string) => {
       setSearchTerms(prev => ({ ...prev, [entity]: val }));
-  };
+      
+      if (searchTimeouts.current[entity]) clearTimeout(searchTimeouts.current[entity]);
+      
+      searchTimeouts.current[entity] = setTimeout(() => {
+          fetchEntityData(entity, val, true); // Force refresh on search
+      }, 400);
+  }, [fetchEntityData]);
 
-  const handleCardSelect = (entity: string, item: any) => {
+  const handleCardSelect = useCallback((entity: string, item: any) => {
     const config = ENTITY_CONFIGS[entity];
     const pkValue = String(item[config.pk]);
     setSelectedItems(prev => ({ ...prev, [entity]: pkValue }));
@@ -131,9 +160,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         const fkField = Object.keys(FK_MAPPING).find(key => FK_MAPPING[key] === entity);
         if (fkField) setFormData(prev => ({ ...prev, [fkField]: pkValue }));
     }
-  };
+  }, [activeTab]);
 
-  const handleEdit = (item: any) => {
+  const handleEdit = useCallback((item: any) => {
       const formatted = { ...item };
       if (formatted.SALARIO) formatted.SALARIO = validation.formatCurrency(formatted.SALARIO);
       if (formatted.TELEFONE) formatted.TELEFONE = validation.maskPhone(formatted.TELEFONE);
@@ -142,7 +171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       setIsEditing(true);
       const pkValue = String(item[ENTITY_CONFIGS[activeTab].pk]);
       setSelectedItems(prev => ({ ...prev, [activeTab]: pkValue }));
-  };
+  }, [activeTab]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,7 +199,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       if (res.success) {
         showToast('success', isEditing ? 'Atualizado!' : 'Criado!');
-        fetchEntityData(activeTab, searchTerms[activeTab] || '');
+        // Force refresh only the active tab to update UI
+        fetchEntityData(activeTab, searchTerms[activeTab] || '', true);
         resetForm();
         setIsEditing(false);
       } else {
@@ -183,20 +213,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     }
   };
 
-  const handleDelete = async (item: any, entityName?: string) => {
+  const handleDelete = useCallback(async (item: any, entityName: string) => {
     if (!window.confirm('Confirmar exclusão?')) return;
-    const target = entityName || activeTab;
-    const config = ENTITY_CONFIGS[target];
+    const config = ENTITY_CONFIGS[entityName];
     try {
-      const res = await api.deleteRecord(target, config.pk, item[config.pk]);
+      const res = await api.deleteRecord(entityName, config.pk, item[config.pk]);
       if (res.success) {
         showToast('info', 'Registro excluído.');
-        fetchEntityData(target, searchTerms[target] || '');
+        fetchEntityData(entityName, searchTerms[entityName] || '', true);
       } else { showToast('error', 'Erro ao excluir.'); }
     } catch(err) { showToast('error', 'Erro de conexão.'); }
-  };
+  }, [searchTerms, fetchEntityData, showToast]);
 
-  const filteredTabs = useMemo(() => Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && isEntityAllowed(k) && ENTITY_CONFIGS[k].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [dropdownSearch, session.papel]);
+  const handleLockVaga = useCallback((id: string, occ: boolean) => {
+      if(!occ) api.toggleVagaBloqueada(id).then(() => fetchEntityData('Vaga', searchTerms['Vaga']||'', true));
+  }, [fetchEntityData, searchTerms]);
+
+  const handleFilterChange = useCallback((entity: string, opt: string) => {
+      setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }));
+  }, []);
+
+  const handleClearFilters = useCallback((entity: string) => {
+      setActiveFilters(prev => ({...prev, [entity]: []}));
+  }, []);
+
+  const handleToggleFilter = useCallback((entity: string) => {
+      setFilterPopoverOpen(prev => prev === entity ? null : entity);
+  }, []);
+
+  const filteredTabs = useMemo(() => Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && isEntityAllowed(k) && ENTITY_CONFIGS[k].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [dropdownSearch, isEntityAllowed]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden relative bg-simas-cloud">
@@ -272,13 +317,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                  isFilterOpen={filterPopoverOpen === entity}
                  selectedItemId={selectedItems[entity]}
                  onSearchChange={(val) => handleSearchChange(entity, val)}
-                 onToggleFilter={() => setFilterPopoverOpen(filterPopoverOpen === entity ? null : entity)}
-                 onFilterChange={(opt) => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))}
-                 onClearFilters={() => setActiveFilters(prev => ({...prev, [entity]: []}))}
+                 onToggleFilter={() => handleToggleFilter(entity)}
+                 onFilterChange={(opt) => handleFilterChange(entity, opt)}
+                 onClearFilters={() => handleClearFilters(entity)}
                  onSelectCard={(item) => handleCardSelect(entity, item)}
                  onEditCard={handleEdit}
                  onDeleteCard={(item) => handleDelete(item, entity)}
-                 onLockVaga={(id, occ) => !occ && api.toggleVagaBloqueada(id).then(() => fetchEntityData('Vaga', searchTerms['Vaga']||''))}
+                 onLockVaga={handleLockVaga}
                  onDossier={setDossierCpf}
                  onExerciseEdit={setExerciseVagaId}
                />
@@ -288,8 +333,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); fetchEntityData('Vaga', ''); showToast('success', 'Atualizado!'); }} />}
-      {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); fetchEntityData(activeTab, ''); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); fetchEntityData('Vaga', '', true); showToast('success', 'Atualizado!'); }} />}
+      {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); fetchEntityData(activeTab, '', true); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
       {showReviewsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">
               <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-slide-in">

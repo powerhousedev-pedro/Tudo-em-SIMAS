@@ -1,17 +1,50 @@
-
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 import { ENTITY_CONFIGS } from '../constants';
 
 // CONFIGURATION
-const API_BASE_URL = 'http://localhost:3001/api';
+// Use relative path or env var in production
+const API_BASE_URL = 'https://tudoemsimas.powerhouseapp.de/api';
 const TOKEN_KEY = 'simas_auth_token';
 
-// --- CACHE ---
-let cache: Record<string, { data: any, timestamp: number }> = {};
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutos de cache
-const inflightRequests: Record<string, Promise<any> | undefined> = {};
+// --- CACHE & REQUEST MANAGEMENT ---
+interface CacheEntry {
+    data: any;
+    timestamp: number;
+}
 
-async function request(endpoint: string, method: string = 'GET', body?: any) {
+const cache: Map<string, CacheEntry> = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+
+// Tracks inflight promises to deduplicate exact same calls
+const inflightRequests: Map<string, Promise<any>> = new Map();
+
+// Tracks controllers to cancel stale requests (search typing)
+const activeControllers: Map<string, AbortController> = new Map();
+
+// MAPEAMENTO DE ENTIDADES (Frontend -> Database)
+const ENTITY_MAP: Record<string, string> = {
+    'LOTAÇÕES': 'Lotacao', 'LOTACAO': 'Lotacao',
+    'FUNÇÃO': 'Funcao', 'FUNCAO': 'Funcao',
+    'CARGOS': 'Cargo', 'CARGO': 'Cargo',
+    'VAGAS': 'Vaga', 'VAGA': 'Vaga',
+    'EXERCÍCIO': 'Exercicio', 'EXERCICIO': 'Exercicio',
+    'CAPACITAÇÃO': 'Capacitacao', 'CAPACITACAO': 'Capacitacao',
+    'TURMAS': 'Turma', 'TURMA': 'Turma',
+    'NOMEAÇÃO': 'Nomeacao', 'NOMEACAO': 'Nomeacao',
+    'SOLICITAÇÃO DE PESQUISA': 'SolicitacaoPesquisa', 'SOLICITACAO-DE-PESQUISA': 'SolicitacaoPesquisa',
+    'CARGO COMISSIONADO': 'CargoComissionado', 'CARGO-COMISSIONADO': 'CargoComissionado',
+    'VISITAS': 'Visita', 'VISITA': 'Visita',
+    'EDITAIS': 'Edital', 'EDITAL': 'Edital',
+    'INATIVOS': 'Inativo', 'INATIVO': 'Inativo',
+    'ALOCACAO_HISTORICO': 'AlocacaoHistorico',
+    'CONTRATO_HISTORICO': 'ContratoHistorico',
+    'PESSOA': 'Pessoa', 'SERVIDOR': 'Servidor', 'CONTRATO': 'Contrato',
+    'ALOCACAO': 'Alocacao', 'PROTOCOLO': 'Protocolo', 'CHAMADA': 'Chamada',
+    'ATENDIMENTO': 'Atendimento', 'ENCONTRO': 'Encontro', 'AUDITORIA': 'Auditoria',
+    'USUARIO': 'Usuario', 'RESERVA': 'Reserva', 'PESQUISA': 'Pesquisa'
+};
+
+async function request(endpoint: string, method: string = 'GET', body?: any, signal?: AbortSignal) {
   const token = localStorage.getItem(TOKEN_KEY);
   const headers: HeadersInit = { 
     'Content-Type': 'application/json',
@@ -22,7 +55,7 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const config: RequestInit = { method, headers };
+  const config: RequestInit = { method, headers, signal };
   if (body) {
     config.body = JSON.stringify(body);
   }
@@ -38,103 +71,128 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
         }
     }
 
+    if (response.status === 304) {
+        return null; // Should ideally use cache, but fetch handles 304 transparently mostly
+    }
+
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `Erro na API: ${response.statusText}`);
     }
     
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+        throw error; 
+    }
     console.error(`API Error (${method} ${endpoint}):`, error);
     throw error;
   }
 }
+
+// HELPERS DE ENDPOINT
+const getDbName = (entityName: string): string => ENTITY_MAP[entityName.toUpperCase()] || entityName;
+const getEndpoint = (entityName: string): string => `/${getDbName(entityName)}`;
 
 export const api = {
   login: async (usuario: string, senha: string) => {
     return request('/auth/login', 'POST', { usuario, senha });
   },
 
-  // Busca Genérica com Cache e Busca no Servidor
   fetchEntity: async (entityName: string, forceRefresh = false, searchTerm = ''): Promise<any[]> => {
-    // O backend espera PascalCase (ex: /Pessoa, /Vaga). Não usar toLowerCase().
+    const baseEndpoint = getEndpoint(entityName);
     const query = searchTerm ? `?search=${encodeURIComponent(searchTerm)}` : '';
-    const endpoint = `/${entityName}${query}`;
-    const cacheKey = endpoint;
+    const fullUrl = baseEndpoint + query;
+    const cacheKey = fullUrl;
 
+    // 1. Abort Stale Search Requests
+    if (searchTerm) {
+        if (activeControllers.has(baseEndpoint)) {
+            activeControllers.get(baseEndpoint)?.abort();
+        }
+        const controller = new AbortController();
+        activeControllers.set(baseEndpoint, controller);
+    }
+
+    // 2. Return Inflight Promise (Deduplication)
+    if (inflightRequests.has(cacheKey)) {
+        return inflightRequests.get(cacheKey)!.then(res => JSON.parse(JSON.stringify(res)));
+    }
+
+    // 3. Check Memory Cache
     const now = Date.now();
-    
-    // Se não for busca e não forçado, tenta cache
-    if (!searchTerm && !forceRefresh && cache[cacheKey] && (now - cache[cacheKey].timestamp < CACHE_TTL)) {
-        return Promise.resolve(cache[cacheKey].data);
+    const cached = cache.get(cacheKey);
+    if (!forceRefresh && !searchTerm && cached && (now - cached.timestamp < CACHE_TTL)) {
+        return Promise.resolve(JSON.parse(JSON.stringify(cached.data)));
     }
 
-    // Evita requisições duplicadas em voo
-    if (inflightRequests[cacheKey] && !forceRefresh) {
-        return inflightRequests[cacheKey] as Promise<any[]>;
-    }
+    const signal = searchTerm ? activeControllers.get(baseEndpoint)?.signal : undefined;
 
-    const promise = request(endpoint)
+    const promise = request(fullUrl, 'GET', undefined, signal)
         .then(data => {
             if (!searchTerm) {
-                cache[cacheKey] = { data, timestamp: Date.now() };
+                cache.set(cacheKey, { data, timestamp: Date.now() });
             }
             return data;
         })
+        .catch(err => {
+            if (err.name === 'AbortError') return [];
+            throw err;
+        })
         .finally(() => {
-            delete inflightRequests[cacheKey];
+            inflightRequests.delete(cacheKey);
+            if (activeControllers.get(baseEndpoint)?.signal === signal) {
+                activeControllers.delete(baseEndpoint);
+            }
         });
 
-    inflightRequests[cacheKey] = promise;
+    inflightRequests.set(cacheKey, promise);
+    
     return promise;
   },
 
   createRecord: async (entityName: string, data: RecordData) => {
-    const res = await request(`/${entityName}`, 'POST', data);
+    const endpoint = getEndpoint(entityName);
+    const res = await request(endpoint, 'POST', data);
     if (res.success) {
-        // Invalida cache desta entidade
-        Object.keys(cache).forEach(key => {
-            if (key.startsWith(`/${entityName}`)) delete cache[key];
-        });
+        const baseKey = getEndpoint(entityName);
+        for (const key of cache.keys()) {
+            if (key.startsWith(baseKey)) cache.delete(key);
+        }
     }
     return res;
   },
 
   updateRecord: async (entityName: string, pkField: string, pkValue: string, data: RecordData) => {
-    const res = await request(`/${entityName}/${pkValue}`, 'PUT', data);
+    const endpoint = getEndpoint(entityName);
+    const res = await request(`${endpoint}/${pkValue}`, 'PUT', data);
     if (res.success) {
-        Object.keys(cache).forEach(key => {
-            if (key.startsWith(`/${entityName}`)) delete cache[key];
-        });
+        const baseKey = getEndpoint(entityName);
+        for (const key of cache.keys()) {
+            if (key.startsWith(baseKey)) cache.delete(key);
+        }
     }
     return res;
   },
 
   deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
-    const res = await request(`/${entityName}/${pkValue}`, 'DELETE');
+    const endpoint = getEndpoint(entityName);
+    const res = await request(`${endpoint}/${pkValue}`, 'DELETE');
     if (res.success) {
-        Object.keys(cache).forEach(key => {
-            if (key.startsWith(`/${entityName}`)) delete cache[key];
-        });
+        const baseKey = getEndpoint(entityName);
+        for (const key of cache.keys()) {
+            if (key.startsWith(baseKey)) cache.delete(key);
+        }
     }
     return res;
   },
 
-  // Gerenciamento de Usuários
-  getUsers: async () => {
-      return request('/Usuario'); 
-  },
+  getUsers: async () => request('/Usuario'),
+  deleteUser: async (usuarioId: string) => request(`/Usuario/${usuarioId}`, 'DELETE'),
 
-  deleteUser: async (usuarioId: string) => {
-      return request(`/Usuario/${usuarioId}`, 'DELETE');
-  },
-
-  // Ações Específicas
   toggleVagaBloqueada: async (idVaga: string) => {
     const res = await request(`/Vaga/${idVaga}/toggle-lock`, 'POST');
-    Object.keys(cache).forEach(key => {
-        if (key.startsWith(`/Vaga`)) delete cache[key];
-    });
+    for (const key of cache.keys()) { if (key.startsWith('/Vaga')) cache.delete(key); }
     return res;
   },
 
@@ -144,35 +202,32 @@ export const api = {
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
       });
-      // Invalida caches relacionados
-      Object.keys(cache).forEach(key => {
-        if (key.startsWith(`/Vaga`) || key.startsWith(`/Exercicio`)) delete cache[key];
-      });
+      for (const key of cache.keys()) {
+        if (key.startsWith('/Vaga') || key.startsWith('/Exercicio')) cache.delete(key);
+      }
       return res;
   },
 
-  getDossiePessoal: async (cpf: string): Promise<DossierData> => {
-    return request(`/Pessoa/${cpf}/dossier`);
-  },
+  getDossiePessoal: async (cpf: string): Promise<DossierData> => request(`/Pessoa/${cpf}/dossier`),
 
   restoreAuditLog: async (idLog: string) => {
     const res = await request(`/Auditoria/${idLog}/restore`, 'POST');
-    cache = {}; // Limpa tudo por segurança após restauração crítica
+    cache.clear(); 
     return res;
   },
 
-  processDailyRoutines: async () => {
-      console.log('Syncing daily routines...');
-  },
+  processDailyRoutines: async () => console.log('Syncing daily routines...'),
 
   getRevisoesPendentes: async () => {
-    const data = await api.fetchEntity('Atendimento'); 
-    if (!Array.isArray(data)) return [];
-    return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
+    try {
+        const data = await api.fetchEntity('Atendimento'); 
+        if (!Array.isArray(data)) return [];
+        return data.filter((a: any) => a.STATUS_AGENDAMENTO === 'Pendente');
+    } catch (e) { return []; }
   },
 
   getActionContext: async (idAtendimento: string): Promise<ActionContext> => {
-    const atendimentos = await api.fetchEntity('Atendimento');
+    const atendimentos = await api.fetchEntity('Atendimento', true); 
     const atd = atendimentos.find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
     
     if (!atd) throw new Error("Atendimento não encontrado");
@@ -183,7 +238,6 @@ export const api = {
     const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
     const promises: Promise<any>[] = [];
 
-    // Carrega dependências usando nomes PascalCase corretos
     if (acao.includes('Contrato')) {
         promises.push(api.fetchEntity('Vaga').then(d => lookups['Vaga'] = d));
         promises.push(api.fetchEntity('Funcao').then(d => lookups['Funcao'] = d));
@@ -196,11 +250,7 @@ export const api = {
     
     await Promise.all(promises);
 
-    return {
-        atendimento: atd,
-        lookups,
-        fields
-    };
+    return { atendimento: atd, lookups, fields };
   },
 
   executeAction: async (idAtendimento: string, data: any) => {
@@ -221,7 +271,6 @@ export const api = {
           if (atd.TIPO_DE_ACAO === 'EDITAR' && data.ID_ALOCACAO) {
                await api.createRecord('Alocacao', data); 
           } else {
-               // Atualização Genérica
                const config: any = ENTITY_CONFIGS[atd.ENTIDADE_ALVO];
                if (config && data[config.pk]) {
                    await api.updateRecord(atd.ENTIDADE_ALVO, config.pk, data[config.pk], data);
@@ -230,12 +279,8 @@ export const api = {
       }
       
       await api.updateRecord('Atendimento', 'ID_ATENDIMENTO', idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
-      
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  // Relatórios delegados 100% ao backend
-  getReportData: async (reportName: string): Promise<ReportData> => {
-      return request(`/reports/${reportName}`);
-  }
+  getReportData: async (reportName: string): Promise<ReportData> => request(`/reports/${reportName}`)
 };
