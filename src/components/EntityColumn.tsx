@@ -115,7 +115,7 @@ export const EntityColumn: React.FC<EntityColumnProps> = ({
             const entityIsReadOnly = READ_ONLY_ENTITIES.includes(entity) && session.papel !== 'COORDENAÇÃO';
             
             let exerciseData = undefined;
-            if (entity === 'VAGAS') {
+            if (entity === 'Vaga') {
                 exerciseData = { label: item.NOME_LOTACAO_EXERCICIO || 'Sem exercício definido', onEdit: () => onExerciseEdit(pkValue) };
             }
 
@@ -132,9 +132,9 @@ export const EntityColumn: React.FC<EntityColumnProps> = ({
                 exerciseData={exerciseData}
                 actions={
                   <>
-                    {entity === 'PESSOA' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e: React.MouseEvent) => {e.stopPropagation(); onDossier(item.CPF);}} />}
-                    {entity === 'VAGAS' && !entityIsReadOnly && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e: React.MouseEvent) => {e.stopPropagation(); onLockVaga(pkValue, isOcupada);}} />}
-                    {entity !== 'AUDITORIA' && !entityIsReadOnly && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e: React.MouseEvent) => {e.stopPropagation(); onDeleteCard(item);}} />}
+                    {entity === 'Pessoa' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e: React.MouseEvent) => {e.stopPropagation(); onDossier(item.CPF);}} />}
+                    {entity === 'Vaga' && !entityIsReadOnly && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e: React.MouseEvent) => {e.stopPropagation(); onLockVaga(pkValue, isOcupada);}} />}
+                    {entity !== 'Auditoria' && !entityIsReadOnly && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e: React.MouseEvent) => {e.stopPropagation(); onDeleteCard(item);}} />}
                   </>
                 }
               />
