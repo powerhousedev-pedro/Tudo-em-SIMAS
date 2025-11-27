@@ -2,17 +2,15 @@
 import { EntityConfig, DropdownOptions } from './types';
 import { validation } from './utils/validation';
 
-// Helper para formatar datas
+// Helper to format Date
 const formatDate = (val: any) => {
   if (!val) return '';
   try {
-    return new Date(val).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    return new Date(val).toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // Force UTC parsing as per legacy
   } catch (e) {
     return val;
   }
 };
-
-export const READ_ONLY_ENTITIES = ['Vaga', 'Edital', 'Lotacao', 'Cargo', 'ContratoHistorico', 'AlocacaoHistorico', 'Inativo', 'Auditoria'];
 
 export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
   'GPRGP': ['painelVagas', 'contratosAtivos'],
@@ -28,7 +26,21 @@ export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
   ]
 };
 
-// Mapeamento de FK (Campo do Schema -> Nome da Tabela Exato)
+export const PERMISSOES_POR_PAPEL: { [role: string]: string[] } = {
+  'COORDENAÇÃO': ['TODAS'],
+  'GGT': ['Pessoa', 'Servidor', 'Alocacao', 'Nomeacao', 'CargoComissionado', 'Atendimento', 'Protocolo', 'Lotacao', 'Cargo', 'Funcao', 'Inativo', 'Auditoria'],
+  'GPRGP': ['Pessoa', 'Contrato', 'Vaga', 'Edital', 'Exercicio', 'Atendimento', 'Protocolo', 'Lotacao', 'Cargo', 'Funcao', 'ContratoHistorico', 'Auditoria'],
+  'GDEP': ['Pessoa', 'Capacitacao', 'Turma', 'Encontro', 'Chamada', 'Visita', 'SolicitacaoPesquisa', 'Pesquisa', 'Lotacao', 'Auditoria']
+};
+
+export const READ_ONLY_ENTITIES = [
+  'ContratoHistorico', 
+  'AlocacaoHistorico', 
+  'Inativo', 
+  'Auditoria'
+];
+
+// Keys MUST match server/src/tables.ts (PascalCase)
 export const FK_MAPPING: { [field: string]: string } = {
     'CPF': 'Pessoa',
     'MATRICULA': 'Servidor',
@@ -48,22 +60,15 @@ export const FK_MAPPING: { [field: string]: string } = {
     'ID_EXERCICIO': 'Exercicio'
 };
 
-export const PERMISSOES_POR_PAPEL: { [role: string]: string[] } = {
-  'COORDENAÇÃO': ['TODAS', 'USUARIOS_ADMIN'],
-  'GGT': ['Servidor', 'Nomeacao', 'Protocolo', 'CargoComissionado', 'Pessoa', 'Funcao', 'Lotacao', 'Cargo', 'Atendimento', 'Alocacao', 'Auditoria', 'Inativo', 'AlocacaoHistorico'],
-  'GPRGP': ['Contrato', 'Protocolo', 'Vaga', 'Edital', 'Pessoa', 'Funcao', 'Lotacao', 'Cargo', 'Atendimento', 'Exercicio', 'Auditoria', 'ContratoHistorico'],
-  'GDEP': ['Turma', 'Chamada', 'Capacitacao', 'Encontro', 'Visita', 'Pesquisa', 'SolicitacaoPesquisa', 'Pessoa', 'Funcao', 'Lotacao', 'Cargo', 'Auditoria']
-};
-
-// CONFIGURAÇÃO DAS ENTIDADES USANDO NOMES EXATOS DO BANCO
 export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
-  // --- GERAL (Base) ---
+  // --- COMPARTILHADO / GERAL ---
   'Pessoa': {
     title: 'Pessoas',
     pk: 'CPF',
-    manualPk: true,
+    manualPk: true, // CPF é inserido manualmente
     filterBy: 'BAIRRO',
     cardDisplay: (item) => {
+        // Legacy: Nome | CPF, Idade | Escolaridade, Formação (se houver) | Bairro
         const age = validation.calculateAge(item.DATA_DE_NASCIMENTO);
         const ageText = age !== null ? ` | ${age} anos` : '';
         const formacaoText = item.FORMACAO ? ` | ${item.FORMACAO}` : '';
@@ -75,12 +80,13 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     }
   },
   
-  // --- GPRGP ---
+  // --- GPRGP (Gestão de Pessoas e Contratos) ---
   'Contrato': {
     title: 'Contratos',
     pk: 'ID_CONTRATO',
     pkPrefix: 'CTT',
     cardDisplay: (item) => ({
+      // Legacy: ID, Nome Pessoa, Nome Funcao
       title: `Contrato: ${item.ID_CONTRATO}`,
       subtitle: item.NOME_PESSOA || item.CPF,
       details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${formatDate(item.DATA_DO_CONTRATO)}`,
@@ -90,8 +96,9 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Vagas',
     pk: 'ID_VAGA',
     pkPrefix: 'VAG',
-    filterBy: 'LOTACAO_NOME', // Campo enriquecido pelo backend
+    filterBy: 'LOTACAO_NOME',
     cardDisplay: (item) => {
+        // Legacy enriched: LOTACAO_NOME, EDITAL_NOME, CARGO_NOME, STATUS_VAGA, REVERVADA_PARA
         let details = `Edital: ${item.EDITAL_NOME || 'N/A'}`;
         if (item.STATUS_VAGA === 'Reservada') {
             details += `\nReservada para: ${item.RESERVADA_PARA_NOME || item.RESERVADA_PARA_CPF || '...'}`;
@@ -100,7 +107,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
             title: item.CARGO_NOME || 'Vaga',
             subtitle: item.LOTACAO_NOME || 'Lotação N/A',
             details: details,
-            status: item.STATUS_VAGA 
+            status: item.STATUS_VAGA // Disponível, Ocupada, Bloqueada, Reservada, Em Aviso Prévio
         };
     }
   },
@@ -126,13 +133,14 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       })
   },
 
-  // --- GGT ---
+  // --- GGT (Gestão de Gente e Trabalho - Servidores) ---
   'Servidor': {
     title: 'Servidores',
     pk: 'MATRICULA',
-    manualPk: true,
+    manualPk: true, // Matrícula é manual
     filterBy: 'VINCULO',
     cardDisplay: (item) => ({
+      // Legacy: Name, Matricula (enriched with Cargo/Pessoa in backend)
       title: item.NOME_PESSOA || 'Servidor',
       subtitle: `Matrícula: ${item.PREFIXO_MATRICULA ? item.PREFIXO_MATRICULA + '-' : ''}${item.MATRICULA}`,
       details: `${item.VINCULO}\nCargo Efetivo: ${item.NOME_CARGO || item.ID_CARGO}`
@@ -143,6 +151,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_ALOCACAO',
     pkPrefix: 'ALC',
     cardDisplay: (item) => ({
+        // Legacy: Pessoa, Lotacao, Funcao
         title: item.NOME_PESSOA,
         subtitle: item.NOME_LOTACAO,
         details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${formatDate(item.DATA_INICIO)}`
@@ -153,6 +162,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_NOMEACAO', 
     pkPrefix: 'NOM', 
     cardDisplay: (item) => ({
+        // Legacy: Servidor, Cargo Comissionado
         title: item.NOME_SERVIDOR,
         subtitle: item.NOME_CARGO_COMISSIONADO || item.ID_CARGO_COMISSIONADO,
         details: `Data Nomeação: ${formatDate(item.DATA_DA_NOMEACAO)}`
@@ -169,7 +179,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     }) 
   },
 
-  // --- GDEP ---
+  // --- GDEP (Gestão de Desenvolvimento - Capacitação e Pesquisa) ---
   'Capacitacao': { 
     title: 'Capacitações', 
     pk: 'ID_CAPACITACAO', 
@@ -185,6 +195,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_TURMA', 
     pkPrefix: 'TUR', 
     cardDisplay: (item) => ({
+        // Legacy: Nome Turma, Nome Capacitacao
         title: item.NOME_TURMA,
         subtitle: item.NOME_CAPACITACAO || `Capacitação ID: ${item.ID_CAPACITACAO}`,
         details: `ID Turma: ${item.ID_TURMA}`
@@ -205,6 +216,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_CHAMADA', 
     pkPrefix: 'CHM', 
     cardDisplay: (item) => ({
+        // Legacy: Pessoa, Turma, Data
         title: item.NOME_PESSOA || item.CPF,
         subtitle: item.NOME_TURMA || item.ID_TURMA,
         status: item.PRESENCA,
@@ -236,13 +248,14 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_PESQUISA', 
     pkPrefix: 'PSQ', 
     cardDisplay: (item) => ({
+        // Legacy: Objeto Estudo (from Solicitacao), Dates
         title: item.OBJETO_ESTUDO || `Solicitação: ${item.ID_SOLICITACAO}`,
         subtitle: `Fim Previsto: ${formatDate(item.PREV_DATA_FIM)}`,
         details: item.MATERIAL_PENDENTE === 'Sim' ? 'Pendência de Material' : 'Material Regular'
     }) 
   },
 
-  // --- TABELAS DE APOIO ---
+  // --- Tabelas de Apoio / Cross-Function ---
   'Atendimento': {
     title: 'Atendimentos',
     pk: 'ID_ATENDIMENTO',
@@ -259,6 +272,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'ID_PROTOCOLO',
       pkPrefix: 'PRT',
       cardDisplay: (item) => ({
+          // Legacy: Pessoa, Detalhe Vinculo
           title: item.TIPO_DE_PROTOCOLO,
           subtitle: item.NOME_PESSOA || item.CPF,
           details: `${item.DETALHE_VINCULO || 'Vínculo N/A'}\nInício: ${formatDate(item.INICIO_PRAZO)}`
@@ -296,10 +310,10 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       })
   },
 
-  // --- HISTÓRICO E ARQUIVO ---
+  // --- HISTORICO E ARQUIVO (Apenas Consulta) ---
   'ContratoHistorico': {
       title: 'Histórico de Contratos',
-      pk: 'ID_HISTORICO_CONTRATO',
+      pk: 'ID_CONTRATO',
       cardDisplay: (item) => ({ 
           title: `Contrato Antigo: ${item.ID_CONTRATO}`, 
           subtitle: item.NOME_PESSOA || item.CPF,
@@ -308,7 +322,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   },
   'AlocacaoHistorico': {
       title: 'Histórico de Alocações',
-      pk: 'ID_HISTORICO_ALOCACAO',
+      pk: 'ID_ALOCACAO',
       cardDisplay: (item) => ({ 
           title: `Alocação Antiga: ${item.ID_ALOCACAO}`, 
           subtitle: `Matrícula: ${item.MATRICULA}`,
@@ -317,10 +331,10 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   },
   'Inativo': {
       title: 'Servidores Inativos',
-      pk: 'ID_INATIVO',
+      pk: 'MATRICULA',
       cardDisplay: (item) => ({ 
-          title: item.NOME || `Matrícula Original: ${item.MATRICULA_ORIGINAL}`, 
-          subtitle: item.CARGO || item.ID_CARGO || 'Cargo N/A',
+          title: item.NOME || `Matrícula: ${item.MATRICULA}`, 
+          subtitle: item.CARGO || 'Cargo N/A',
           details: `Inativado em: ${formatDate(item.DATA_INATIVACAO)}\nMotivo: ${item.MOTIVO_INATIVACAO}`
       })
   },
@@ -328,14 +342,13 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       title: 'Auditoria',
       pk: 'ID_LOG',
       cardDisplay: (item) => ({
-          title: `${item.ACAO} - ${item.TABELA_AFETADA}`,
-          subtitle: `Por: ${item.USUARIO}`,
-          details: `Em: ${new Date(item.DATA_HORA).toLocaleString()}`
+          title: item.ACAO,
+          subtitle: item.TABELA_AFETADA,
+          details: `Usuário: ${item.USUARIO}`
       })
   }
 };
 
-// DEFINIÇÃO DOS CAMPOS USANDO NOMES EXATOS DO BANCO
 export const DATA_MODEL: { [key: string]: string[] } = {
   "Pessoa": ["CPF", "NOME", "SEXO", "DATA_DE_NASCIMENTO", "EMAIL", "TELEFONE", "ESCOLARIDADE", "FORMACAO", "BAIRRO"],
   "Servidor": ["MATRICULA", "PREFIXO_MATRICULA", "CPF", "ID_CARGO", "DATA_MATRICULA", "VINCULO"],
@@ -343,12 +356,12 @@ export const DATA_MODEL: { [key: string]: string[] } = {
   "Vaga": ["ID_VAGA", "ID_LOTACAO", "ID_EDITAL", "ID_CARGO", "BLOQUEADA"],
   "Lotacao": ["ID_LOTACAO", "LOTACAO", "VINCULACAO", "TIPO_DA_LOTACAO", "BAIRRO", "COMPLEXIDADE", "UNIDADE"],
   "Cargo": ["ID_CARGO", "NOME_CARGO", "ESCOLARIDADE_CARGO", "SALARIO"],
-  "Funcao": ["ID_FUNCAO", "FUNCAO", "CBO"],
-  "Edital": ["ID_EDITAL", "PROCESSO", "EDITAL", "NUMERO", "COGESTORA", "INICIO", "TERMINO"],
   "Alocacao": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "ID_FUNCAO", "DATA_INICIO"],
-  "Exercicio": ["ID_EXERCICIO", "ID_VAGA", "ID_LOTACAO"],
-  "Nomeacao": ["ID_NOMEACAO", "MATRICULA", "ID_CARGO_COMISSIONADO", "DATA_DA_NOMEACAO", "PAGINA_DO", "STATUS"],
-  "CargoComissionado": ["ID_CARGO_COMISSIONADO", "NOME", "UNIDADE", "TIPO_DE_CARGO"],
+  "Funcao": ["ID_FUNCAO", "FUNCAO", "CBO"],
+  "Atendimento": ["ID_ATENDIMENTO", "REMETENTE", "CPF", "RESPONSAVEL", "DATA_ATENDIMENTO", "TIPO_PEDIDO", "DESCRICAO", "STATUS_PEDIDO", "JUSTIFICATIVA", "DATA_AGENDAMENTO"],
+  "Edital": ["ID_EDITAL", "PROCESSO", "EDITAL", "NUMERO", "COGESTORA", "INICIO", "TERMINO"],
+  "Protocolo": ["ID_PROTOCOLO", "CPF", "TIPO_DE_PROTOCOLO", "INICIO_PRAZO", "TERMINO_PRAZO", "ID_CONTRATO", "MATRICULA"],
+  // GDEP
   "Capacitacao": ["ID_CAPACITACAO", "ATIVIDADE_DE_CAPACITACAO", "PERCURSO_FORMATIVO", "TIPO_CAPACITACAO", "FORMATO", "MODALIDADE", "TEMATICA_CENTRAL"],
   "Turma": ["ID_TURMA", "NOME_TURMA", "ID_CAPACITACAO"],
   "Encontro": ["ID_ENCONTRO", "ID_TURMA", "DATA_DE_ENCONTRO"],
@@ -356,12 +369,15 @@ export const DATA_MODEL: { [key: string]: string[] } = {
   "Visita": ["ID_VISITA", "CPF", "DATA_VISITA", "LOCAL", "CATEGORIA", "ZONA", "SETOR", "MODALIDADE_VISITA", "TIPO_DE_GRADUACAO"],
   "SolicitacaoPesquisa": ["ID_SOLICITACAO", "OBJETO_DE_ESTUDO", "CPF", "ANO_ENTRADA", "AUTORIZO", "DATA_DEF_INDEF", "DATA_INICIO"],
   "Pesquisa": ["ID_PESQUISA", "ID_SOLICITACAO", "PREV_DATA_FIM", "DATA_FIM", "ABANDONO", "MATERIAL_PENDENTE"],
-  "Atendimento": ["ID_ATENDIMENTO", "REMETENTE", "CPF", "RESPONSAVEL", "DATA_ENTRADA", "DATA_ATENDIMENTO", "TIPO_PEDIDO", "DESCRICAO", "STATUS_PEDIDO", "JUSTIFICATIVA", "DATA_AGENDAMENTO", "STATUS_AGENDAMENTO"],
-  "Protocolo": ["ID_PROTOCOLO", "CPF", "TIPO_DE_PROTOCOLO", "INICIO_PRAZO", "TERMINO_PRAZO", "ID_CONTRATO", "MATRICULA"],
-  "ContratoHistorico": ["ID_HISTORICO_CONTRATO", "ID_CONTRATO", "ID_VAGA", "CPF", "DATA_DO_CONTRATO", "ID_FUNCAO", "DATA_ARQUIVAMENTO", "MOTIVO_ARQUIVAMENTO"],
-  "AlocacaoHistorico": ["ID_HISTORICO_ALOCACAO", "ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "ID_FUNCAO", "DATA_INICIO", "DATA_ARQUIVAMENTO"],
-  "Inativo": ["ID_INATIVO", "MATRICULA_ORIGINAL", "CPF", "ID_CARGO", "DATA_MATRICULA", "VINCULO_ANTERIOR", "PREFIXO_ANTERIOR", "DATA_INATIVACAO", "MOTIVO_INATIVACAO"],
-  "Auditoria": ["ID_LOG", "DATA_HORA", "USUARIO", "ACAO", "TABELA_AFETADA", "ID_REGISTRO_AFETADO", "CAMPO_AFETADO", "VALOR_ANTIGO", "VALOR_NOVO"]
+  // GGT
+  "Nomeacao": ["ID_NOMEACAO", "MATRICULA", "ID_CARGO_COMISSIONADO", "DATA_DA_NOMEACAO", "PAGINA_DO", "STATUS"],
+  "CargoComissionado": ["ID_CARGO_COMISSIONADO", "NOME", "UNIDADE", "TIPO_DE_CARGO"],
+  "Exercicio": ["ID_EXERCICIO", "ID_VAGA", "ID_LOTACAO"],
+  
+  // HISTORICO
+  "ContratoHistorico": ["ID_CONTRATO", "CPF", "DATA_DO_CONTRATO", "DATA_ARQUIVAMENTO", "MOTIVO_ARQUIVAMENTO", "ID_VAGA", "ID_FUNCAO"],
+  "AlocacaoHistorico": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "DATA_INICIO", "DATA_FIM", "MOTIVO_MUDANCA"],
+  "Inativo": ["MATRICULA", "CPF", "NOME", "CARGO", "DATA_INATIVACAO", "MOTIVO", "PROCESSO", "DATA_PUBLICACAO"]
 };
 
 export const ENTITY_RELATIONSHIPS: { [key: string]: { entity: string; pk: string }[] } = {

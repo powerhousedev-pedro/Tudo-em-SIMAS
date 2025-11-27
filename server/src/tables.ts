@@ -1,0 +1,32 @@
+
+export const TABLES = {
+  ALOCACAO: 'Alocacao',
+  ALOCACAO_HISTORICO: 'AlocacaoHistorico',
+  ATENDIMENTO: 'Atendimento',
+  AUDITORIA: 'Auditoria',
+  CAPACITACAO: 'Capacitacao',
+  CARGO: 'Cargo',
+  CARGO_COMISSIONADO: 'CargoComissionado',
+  CHAMADA: 'Chamada',
+  CONTRATO: 'Contrato',
+  CONTRATO_HISTORICO: 'ContratoHistorico',
+  EDITAL: 'Edital',
+  ENCONTRO: 'Encontro',
+  EXERCICIO: 'Exercicio',
+  FUNCAO: 'Funcao',
+  INATIVO: 'Inativo',
+  LOTACAO: 'Lotacao',
+  NOMEACAO: 'Nomeacao',
+  PESQUISA: 'Pesquisa',
+  PESSOA: 'Pessoa',
+  PROTOCOLO: 'Protocolo',
+  RESERVA: 'Reserva',
+  SERVIDOR: 'Servidor',
+  SOLICITACAO_PESQUISA: 'SolicitacaoPesquisa',
+  TURMA: 'Turma',
+  USUARIO: 'Usuario',
+  VAGA: 'Vaga',
+  VISITA: 'Visita',
+} as const;
+
+export type TableName = typeof TABLES[keyof typeof TABLES];

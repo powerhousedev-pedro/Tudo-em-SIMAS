@@ -21,6 +21,7 @@ export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ 
   useEffect(() => {
     const load = async () => {
       try {
+        // Corrected to 'Lotacao' (PascalCase)
         const data = await api.fetchEntity('Lotacao');
         setLotacoes(data);
       } catch (e) {
