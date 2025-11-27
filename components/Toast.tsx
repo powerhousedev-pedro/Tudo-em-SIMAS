@@ -13,7 +13,7 @@ interface ToastProps {
 
 export const ToastContainer: React.FC<ToastProps> = ({ toasts, removeToast }) => {
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-3 pointer-events-none">
+    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-3 pointer-events-none">
       {toasts.map(toast => (
         <Toast key={toast.id} {...toast} onClose={() => removeToast(toast.id)} />
       ))}
@@ -42,7 +42,7 @@ const Toast: React.FC<ToastMessage & { onClose: () => void }> = ({ type, message
   };
 
   return (
-    <div className={`${styles[type]} shadow-lg rounded-r-lg p-4 min-w-[300px] flex items-center gap-3 animate-slide-in pointer-events-auto transform transition-all`}>
+    <div className={`${styles[type]} shadow-2xl rounded-r-lg p-4 min-w-[300px] flex items-center gap-3 animate-slide-in pointer-events-auto transform transition-all border border-gray-100`}>
       <i className={`${icons[type]} text-xl`}></i>
       <p className="text-sm font-medium">{message}</p>
       <button onClick={onClose} className="ml-auto text-gray-400 hover:text-gray-600">
