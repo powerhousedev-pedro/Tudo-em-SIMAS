@@ -14,6 +14,7 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+const SALT_ROUNDS = 12; // Aumentado para maior segurança contra Rainbow Tables
 
 app.use(cors());
 app.use(express.json() as any);
@@ -384,6 +385,11 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
         // Flatten/Enrich on Server
         const enriched = data.map((item: any) => flattenRelation(item, entityName));
 
+        // SECURITY: Remove password hashes from response
+        if (entityName === TABLES.USUARIO) {
+            enriched.forEach((u: any) => delete u.senha);
+        }
+
         res.json(enriched);
     } catch (e) { res.status(500).json({ error: String(e) }); }
 });
@@ -392,6 +398,12 @@ app.post('/api/:entity', authenticateToken, async (req: any, res) => {
     const entityName = req.params.entity;
     
     if (!isValidTable(entityName)) return res.status(400).json({ message: 'Tabela inválida' });
+
+    // --- SECURITY: HASH PASSWORD FOR USERS ---
+    if (entityName === TABLES.USUARIO && req.body.senha) {
+        req.body.senha = await bcrypt.hash(req.body.senha, SALT_ROUNDS);
+    }
+    // -----------------------------------------
 
     // Special Handlers
     if (entityName === TABLES.CONTRATO) {
@@ -466,6 +478,12 @@ app.put('/api/:entity/:id', authenticateToken, async (req: any, res) => {
     const meta = Prisma.dmmf.datamodel.models.find(m => m.name === entityName);
     const pkField = meta?.fields.find((f: any) => f.isId)?.name;
     if (!pkField) return res.status(400).json({message: 'Cannot update: PK not found'});
+
+    // --- SECURITY: HASH PASSWORD FOR USERS IF CHANGED ---
+    if (entityName === TABLES.USUARIO && req.body.senha) {
+        req.body.senha = await bcrypt.hash(req.body.senha, SALT_ROUNDS);
+    }
+    // ----------------------------------------------------
 
     const data = sanitizeData(req.body);
     try {
