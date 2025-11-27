@@ -2,14 +2,12 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ReportData, QuantitativoItem, UserSession } from '../types';
+import { ReportData, UserSession, QuantitativoItem } from '../types';
 import { Button } from './Button';
 import { REPORT_PERMISSIONS } from '../constants';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { generateReportPDF } from '../utils/pdfGenerator';
 
 export const Reports: React.FC = () => {
-  // Mock session retrieval - replace with Context
   const getSession = (): UserSession => {
       const stored = localStorage.getItem('simas_user_session');
       if (stored) {
@@ -30,7 +28,6 @@ export const Reports: React.FC = () => {
       { id: 'atividadeUsuarios', label: 'Atividade de Usuários', category: 'Administrativo' },
   ];
 
-  // Filter reports based on role
   const allowedIds = REPORT_PERMISSIONS[session.papel] || [];
   const reportsList = allReports.filter(r => allowedIds.includes(r.id) || allowedIds.includes('TODAS'));
 
@@ -58,73 +55,8 @@ export const Reports: React.FC = () => {
 
   const handleExportPDF = () => {
     if (!data) return;
-
-    const doc = new jsPDF();
-    const reportTitle = reportsList.find(r => r.id === currentReport)?.label || 'Relatório';
-    const today = new Date().toLocaleDateString('pt-BR');
-
-    // Header
-    doc.setFillColor(19, 51, 90); // Simas Dark
-    doc.rect(0, 0, 210, 20, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
-    doc.text(reportTitle, 14, 13);
-    doc.setFontSize(10);
-    doc.text(`Gerado em: ${today}`, 150, 13);
-
-    let currentY = 30;
-
-    // Totals Section (Simple Text)
-    if (data.totais) {
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(12);
-        doc.text("Resumo Geral:", 14, currentY);
-        currentY += 7;
-        
-        const keys = Object.keys(data.totais);
-        keys.forEach(key => {
-            doc.setFontSize(10);
-            doc.text(`${key}: ${data.totais![key]}`, 14, currentY);
-            currentY += 6;
-        });
-        currentY += 5;
-    }
-
-    // Special Handling for Painel Vagas
-    if (currentReport === 'painelVagas') {
-        if (vagasView === 'quantitativo' && data.quantitativo) {
-            autoTable(doc, {
-                startY: currentY,
-                head: [['Vinculação', 'Lotação', 'Cargo', 'Detalhes']],
-                body: data.quantitativo.map(item => [item.VINCULACAO, item.LOTACAO, item.CARGO, item.DETALHES]),
-                theme: 'grid',
-                headStyles: { fillColor: [42, 104, 143] }
-            });
-        } else if (data.panorama) {
-            autoTable(doc, {
-                startY: currentY,
-                head: [['Ocupante', 'Vinculação', 'Lotação', 'Cargo', 'Status']],
-                body: data.panorama.map(item => [item.OCUPANTE || 'Vaga Livre', item.VINCULACAO, item.LOTACAO_OFICIAL, item.NOME_CARGO, item.STATUS]),
-                theme: 'grid',
-                headStyles: { fillColor: [42, 104, 143] }
-            });
-        }
-    }
-    // Generic Table Handling
-    else if ((data.colunas && data.linhas) || data.tabela) {
-        const cols = data.colunas || data.tabela?.colunas || [];
-        const rows = data.linhas || data.tabela?.linhas || [];
-        
-        autoTable(doc, {
-            startY: currentY,
-            head: [cols],
-            body: rows,
-            theme: 'grid',
-            headStyles: { fillColor: [42, 104, 143] }
-        });
-    }
-
-    doc.save(`${reportTitle.replace(/\s+/g, '_')}_${today}.pdf`);
+    const reportLabel = reportsList.find(r => r.id === currentReport)?.label || 'Relatório';
+    generateReportPDF(currentReport, reportLabel, data, vagasView);
   };
 
   const renderQuantitativoGrouped = (items: QuantitativoItem[]) => {
@@ -204,20 +136,20 @@ export const Reports: React.FC = () => {
                               <tbody className="divide-y divide-gray-100">
                                   {data.panorama.map((row: any, i: number) => (
                                       <tr key={i} className="hover:bg-gray-50/50">
-                                          <td className="px-6 py-3 font-bold">{row.OCUPANTE}</td>
-                                          <td className="px-6 py-3">{row.VINCULACAO}</td>
-                                          <td className="px-6 py-3">{row.LOTACAO_OFICIAL}</td>
-                                          <td className="px-6 py-3">{row.NOME_CARGO}</td>
+                                          <td className="px-6 py-3 font-bold">{row.OCUPANTE as React.ReactNode}</td>
+                                          <td className="px-6 py-3">{row.VINCULACAO as React.ReactNode}</td>
+                                          <td className="px-6 py-3">{row.LOTACAO_OFICIAL as React.ReactNode}</td>
+                                          <td className="px-6 py-3">{row.NOME_CARGO as React.ReactNode}</td>
                                           <td className="px-6 py-3">
                                               <span className={`px-2 py-1 rounded-full text-xs font-bold ${
                                                   row.STATUS === 'Disponível' ? 'bg-green-100 text-green-800' : 
                                                   row.STATUS === 'Ocupada' ? 'bg-gray-100 text-gray-800' : 
                                                   row.STATUS === 'Em Aviso Prévio' ? 'bg-yellow-100 text-yellow-800' :
                                                   'bg-blue-100 text-blue-800'}`}>
-                                                  {row.STATUS}
+                                                  {row.STATUS as React.ReactNode}
                                               </span>
                                           </td>
-                                          <td className="px-6 py-3">{row.RESERVADA_PARA || '-'}</td>
+                                          <td className="px-6 py-3">{(row.RESERVADA_PARA || '-') as React.ReactNode}</td>
                                       </tr>
                                   ))}
                               </tbody>
@@ -235,24 +167,29 @@ export const Reports: React.FC = () => {
                       {Object.entries(data.totais).map(([key, val]) => (
                           <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
                               <h3 className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">{key}</h3>
-                              <p className="text-4xl font-extrabold text-simas-dark">{val}</p>
+                              <p className="text-4xl font-extrabold text-simas-dark">{val as React.ReactNode}</p>
                           </div>
                       ))}
                   </div>
               )}
 
               {data.graficos && (
-                  <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[400px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={data.graficos}>
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis dataKey="name" />
-                              <YAxis />
-                              <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}} />
-                              <Legend />
-                              <Bar dataKey="value" fill="#2a688f" radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                      </ResponsiveContainer>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {Object.entries(data.graficos).map(([key, chartData]) => (
+                          <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[400px]">
+                              <h4 className="text-sm font-bold text-gray-500 mb-4 uppercase">{key === 'vinculo' ? 'Por Vínculo' : (key === 'lotacao' ? 'Por Lotação' : key.replace(/([A-Z])/g, ' $1').trim())}</h4>
+                              <ResponsiveContainer width="100%" height="100%">
+                                  <BarChart data={chartData}>
+                                      <CartesianGrid strokeDasharray="3 3" />
+                                      <XAxis dataKey="name" />
+                                      <YAxis />
+                                      <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}} />
+                                      <Legend />
+                                      <Bar dataKey="value" fill="#2a688f" radius={[4, 4, 0, 0]} />
+                                  </BarChart>
+                              </ResponsiveContainer>
+                          </div>
+                      ))}
                   </div>
               )}
 
@@ -271,10 +208,10 @@ export const Reports: React.FC = () => {
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
-                                  {(data.linhas || data.tabela?.linhas || []).map((row, i) => (
+                                  {(data.linhas || data.tabela?.linhas || []).map((row: any[], i: number) => (
                                       <tr key={i} className="hover:bg-gray-50/50">
-                                          {row.map((cell, j) => (
-                                              <td key={j} className="px-6 py-3">{cell}</td>
+                                          {row.map((cell: any, j: number) => (
+                                              <td key={j} className="px-6 py-3">{cell as React.ReactNode}</td>
                                           ))}
                                       </tr>
                                   ))}

@@ -6,6 +6,10 @@ export interface UserSession {
   isGerente: boolean;
 }
 
+export interface AppContextProps {
+  showToast: (type: 'success' | 'error' | 'info', message: string) => void;
+}
+
 export interface EntityConfig {
   title: string;
   pk: string;
@@ -52,7 +56,7 @@ export interface QuantitativoItem {
 
 export interface ReportData {
   totais?: RecordData;
-  graficos?: { name: string; value: number }[];
+  graficos?: Record<string, { name: string; value: number }[]>;
   colunas?: string[];
   linhas?: any[][];
   tabela?: { colunas: string[], linhas: any[][] };
