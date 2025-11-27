@@ -26,6 +26,21 @@ export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
   ]
 };
 
+export const PERMISSOES_POR_PAPEL: { [role: string]: string[] } = {
+  'COORDENAÇÃO': ['TODAS'],
+  'GGT': ['Pessoa', 'Servidor', 'Alocacao', 'Nomeacao', 'CargoComissionado', 'Atendimento', 'Protocolo', 'Lotacao', 'Cargo', 'Funcao', 'Inativo', 'Auditoria'],
+  'GPRGP': ['Pessoa', 'Contrato', 'Vaga', 'Edital', 'Exercicio', 'Atendimento', 'Protocolo', 'Lotacao', 'Cargo', 'Funcao', 'ContratoHistorico', 'Auditoria'],
+  'GDEP': ['Pessoa', 'Capacitacao', 'Turma', 'Encontro', 'Chamada', 'Visita', 'SolicitacaoPesquisa', 'Pesquisa', 'Lotacao', 'Auditoria']
+};
+
+export const READ_ONLY_ENTITIES = [
+  'ContratoHistorico', 
+  'AlocacaoHistorico', 
+  'Inativo', 
+  'Auditoria'
+];
+
+// Keys MUST match server/src/tables.ts (PascalCase)
 export const FK_MAPPING: { [field: string]: string } = {
     'CPF': 'Pessoa',
     'MATRICULA': 'Servidor',
@@ -52,9 +67,10 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'CPF',
     manualPk: true, // CPF é inserido manualmente
     filterBy: 'BAIRRO',
-    cardDisplay: (item) => {
-        // Backend now provides IDADE pre-calculated
-        const ageText = item.IDADE !== undefined ? ` | ${item.IDADE} anos` : '';
+    cardDisplay: (item: any) => {
+        // Legacy: Nome | CPF, Idade | Escolaridade, Formação (se houver) | Bairro
+        const age = validation.calculateAge(item.DATA_DE_NASCIMENTO);
+        const ageText = age !== null ? ` | ${age} anos` : '';
         const formacaoText = item.FORMACAO ? ` | ${item.FORMACAO}` : '';
         return {
             title: item.NOME,
@@ -69,7 +85,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Contratos',
     pk: 'ID_CONTRATO',
     pkPrefix: 'CTT',
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
       // Legacy: ID, Nome Pessoa, Nome Funcao
       title: `Contrato: ${item.ID_CONTRATO}`,
       subtitle: item.NOME_PESSOA || item.CPF,
@@ -81,7 +97,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_VAGA',
     pkPrefix: 'VAG',
     filterBy: 'LOTACAO_NOME',
-    cardDisplay: (item) => {
+    cardDisplay: (item: any) => {
         // Legacy enriched: LOTACAO_NOME, EDITAL_NOME, CARGO_NOME, STATUS_VAGA, REVERVADA_PARA
         let details = `Edital: ${item.EDITAL_NOME || 'N/A'}`;
         if (item.STATUS_VAGA === 'Reservada') {
@@ -100,7 +116,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'ID_EDITAL',
       pkPrefix: 'EDT',
       filterBy: 'COGESTORA',
-      cardDisplay: (item) => ({
+      cardDisplay: (item: any) => ({
           title: item.EDITAL,
           subtitle: `Proc: ${item.PROCESSO}`,
           details: `Vigência: ${formatDate(item.INICIO)} - ${formatDate(item.TERMINO)}\nCogestora: ${item.COGESTORA || 'N/A'}`
@@ -110,7 +126,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       title: 'Exercícios', 
       pk: 'ID_EXERCICIO',
       pkPrefix: 'EXE',
-      cardDisplay: (item) => ({
+      cardDisplay: (item: any) => ({
         title: item.NOME_CARGO_VAGA || 'Cargo da Vaga',
         subtitle: `Vaga ID: ${item.ID_VAGA}`,
         details: `Lotação de Exercício: ${item.NOME_LOTACAO_EXERCICIO || item.ID_LOTACAO}`
@@ -123,7 +139,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'MATRICULA',
     manualPk: true, // Matrícula é manual
     filterBy: 'VINCULO',
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
       // Legacy: Name, Matricula (enriched with Cargo/Pessoa in backend)
       title: item.NOME_PESSOA || 'Servidor',
       subtitle: `Matrícula: ${item.PREFIXO_MATRICULA ? item.PREFIXO_MATRICULA + '-' : ''}${item.MATRICULA}`,
@@ -134,7 +150,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Alocações',
     pk: 'ID_ALOCACAO',
     pkPrefix: 'ALC',
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         // Legacy: Pessoa, Lotacao, Funcao
         title: item.NOME_PESSOA,
         subtitle: item.NOME_LOTACAO,
@@ -145,7 +161,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Nomeações', 
     pk: 'ID_NOMEACAO', 
     pkPrefix: 'NOM', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         // Legacy: Servidor, Cargo Comissionado
         title: item.NOME_SERVIDOR,
         subtitle: item.NOME_CARGO_COMISSIONADO || item.ID_CARGO_COMISSIONADO,
@@ -156,7 +172,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Cargos Comissionados', 
     pk: 'ID_CARGO_COMISSIONADO', 
     pkPrefix: 'CCM', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         title: item.NOME,
         subtitle: item.UNIDADE,
         details: `Tipo: ${item.TIPO_DE_CARGO}`
@@ -168,7 +184,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Capacitações', 
     pk: 'ID_CAPACITACAO', 
     pkPrefix: 'CAP', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         title: item.ATIVIDADE_DE_CAPACITACAO,
         subtitle: item.MODALIDADE,
         details: `${item.FORMATO} | ${item.TIPO_CAPACITACAO}`
@@ -178,7 +194,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Turmas', 
     pk: 'ID_TURMA', 
     pkPrefix: 'TUR', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         // Legacy: Nome Turma, Nome Capacitacao
         title: item.NOME_TURMA,
         subtitle: item.NOME_CAPACITACAO || `Capacitação ID: ${item.ID_CAPACITACAO}`,
@@ -189,7 +205,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Encontros', 
     pk: 'ID_ENCONTRO', 
     pkPrefix: 'ENC', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         title: item.NOME_TURMA || `Turma ID: ${item.ID_TURMA}`,
         subtitle: `Encontro: ${formatDate(item.DATA_DE_ENCONTRO)}`,
         details: `ID Encontro: ${item.ID_ENCONTRO}`
@@ -199,7 +215,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Chamadas (Presença)', 
     pk: 'ID_CHAMADA', 
     pkPrefix: 'CHM', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         // Legacy: Pessoa, Turma, Data
         title: item.NOME_PESSOA || item.CPF,
         subtitle: item.NOME_TURMA || item.ID_TURMA,
@@ -211,7 +227,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Visitas Técnicas', 
     pk: 'ID_VISITA', 
     pkPrefix: 'VIS', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         title: item.LOCAL,
         subtitle: item.NOME_PESSOA || item.CPF,
         details: `${formatDate(item.DATA_VISITA)}\n${item.MODALIDADE_VISITA}`
@@ -221,7 +237,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Solic. Pesquisa', 
     pk: 'ID_SOLICITACAO', 
     pkPrefix: 'SOL', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         title: item.OBJETO_DE_ESTUDO,
         subtitle: item.NOME_PESSOA || item.CPF,
         details: `Ano: ${item.ANO_ENTRADA} | Autorizado: ${item.AUTORIZO}`
@@ -231,7 +247,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Pesquisas (Andamento)', 
     pk: 'ID_PESQUISA', 
     pkPrefix: 'PSQ', 
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
         // Legacy: Objeto Estudo (from Solicitacao), Dates
         title: item.OBJETO_ESTUDO || `Solicitação: ${item.ID_SOLICITACAO}`,
         subtitle: `Fim Previsto: ${formatDate(item.PREV_DATA_FIM)}`,
@@ -244,7 +260,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Atendimentos',
     pk: 'ID_ATENDIMENTO',
     pkPrefix: 'ATD',
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
       title: item.TIPO_PEDIDO,
       subtitle: item.NOME_PESSOA || item.CPF,
       status: item.STATUS_PEDIDO,
@@ -255,7 +271,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       title: 'Protocolos',
       pk: 'ID_PROTOCOLO',
       pkPrefix: 'PRT',
-      cardDisplay: (item) => ({
+      cardDisplay: (item: any) => ({
           // Legacy: Pessoa, Detalhe Vinculo
           title: item.TIPO_DE_PROTOCOLO,
           subtitle: item.NOME_PESSOA || item.CPF,
@@ -267,7 +283,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_LOTACAO',
     pkPrefix: 'LOT',
     filterBy: 'COMPLEXIDADE',
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
       title: item.LOTACAO,
       subtitle: `Unidade: ${item.UNIDADE}`,
       details: `Bairro: ${item.BAIRRO || 'N/A'}\nComplexidade: ${item.COMPLEXIDADE || 'N/A'}`
@@ -278,7 +294,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_CARGO',
     pkPrefix: 'CRG',
     filterBy: 'ESCOLARIDADE_CARGO',
-    cardDisplay: (item) => ({
+    cardDisplay: (item: any) => ({
       title: item.NOME_CARGO,
       subtitle: item.ESCOLARIDADE_CARGO,
       details: item.SALARIO ? `Salário: ${validation.formatCurrency(item.SALARIO)}` : 'Salário não informado'
@@ -288,7 +304,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       title: 'Funções',
       pk: 'ID_FUNCAO',
       pkPrefix: 'FUN',
-      cardDisplay: (item) => ({
+      cardDisplay: (item: any) => ({
           title: item.FUNCAO,
           subtitle: item.CBO ? `CBO: ${item.CBO}` : 'Sem CBO'
       })
@@ -298,7 +314,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   'ContratoHistorico': {
       title: 'Histórico de Contratos',
       pk: 'ID_CONTRATO',
-      cardDisplay: (item) => ({ 
+      cardDisplay: (item: any) => ({ 
           title: `Contrato Antigo: ${item.ID_CONTRATO}`, 
           subtitle: item.NOME_PESSOA || item.CPF,
           details: `Arquivado em: ${formatDate(item.DATA_ARQUIVAMENTO)}\nMotivo: ${item.MOTIVO_ARQUIVAMENTO || 'N/A'}`
@@ -307,7 +323,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   'AlocacaoHistorico': {
       title: 'Histórico de Alocações',
       pk: 'ID_ALOCACAO',
-      cardDisplay: (item) => ({ 
+      cardDisplay: (item: any) => ({ 
           title: `Alocação Antiga: ${item.ID_ALOCACAO}`, 
           subtitle: `Matrícula: ${item.MATRICULA}`,
           details: `Arquivado em: ${formatDate(item.DATA_ARQUIVAMENTO)}`
@@ -316,7 +332,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   'Inativo': {
       title: 'Servidores Inativos',
       pk: 'MATRICULA',
-      cardDisplay: (item) => ({ 
+      cardDisplay: (item: any) => ({ 
           title: item.NOME || `Matrícula: ${item.MATRICULA}`, 
           subtitle: item.CARGO || 'Cargo N/A',
           details: `Inativado em: ${formatDate(item.DATA_INATIVACAO)}\nMotivo: ${item.MOTIVO_INATIVACAO}`
@@ -325,7 +341,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   'Auditoria': {
       title: 'Auditoria',
       pk: 'ID_LOG',
-      cardDisplay: (item) => ({
+      cardDisplay: (item: any) => ({
           title: item.ACAO,
           subtitle: item.TABELA_AFETADA,
           details: `Usuário: ${item.USUARIO}`
