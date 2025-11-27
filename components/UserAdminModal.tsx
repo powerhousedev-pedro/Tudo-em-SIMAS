@@ -14,7 +14,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
     usuario: '',
     senha: '',
     papel: session.papel !== 'COORDENAÇÃO' ? session.papel : '',
-    is_gerente: false
+    isGerente: false
   });
   const [loading, setLoading] = useState(false);
   const [usersList, setUsersList] = useState<any[]>([]);
@@ -44,7 +44,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
     
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'is_gerente' ? checked : value
+      [name]: name === 'isGerente' ? checked : value
     }));
   };
 
@@ -55,7 +55,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
       const payload = { ...formData };
       if (!isCoord) {
         payload.papel = session.papel;
-        payload.is_gerente = false;
+        payload.isGerente = false;
       }
 
       // Using correct Entity Name 'Usuario' as defined in tables.ts
@@ -66,7 +66,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
             usuario: '',
             senha: '',
             papel: session.papel !== 'COORDENAÇÃO' ? session.papel : '',
-            is_gerente: false
+            isGerente: false
         });
         loadUsers(); // Refresh list
       } else {
@@ -166,9 +166,9 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                     <div className="relative">
                       <input
                         type="checkbox"
-                        name="is_gerente"
+                        name="isGerente"
                         className="sr-only peer"
-                        checked={formData.is_gerente}
+                        checked={formData.isGerente}
                         onChange={handleChange}
                       />
                       <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-simas-cyan"></div>
