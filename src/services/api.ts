@@ -51,6 +51,129 @@ async function request(endpoint: string, method: string = 'GET', body?: any) {
   }
 }
 
+// Helper to enrich data on client-side to match Legacy behavior
+const enrichEntityData = async (entityName: string, data: any[]) => {
+    // Helper to create maps for quick lookups
+    const createMap = (items: any[], key: string, valueField: string) => 
+        new Map(items.map((i: any) => [String(i[key]), i[valueField]]));
+
+    if (entityName === 'Contrato') {
+        const [pessoas, funcoes] = await Promise.all([api.fetchEntity('Pessoa'), api.fetchEntity('Funcao')]);
+        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
+        const funcaoMap = createMap(funcoes, 'ID_FUNCAO', 'FUNCAO');
+        return data.map(c => ({ ...c, NOME_PESSOA: pessoaMap.get(c.CPF) || c.CPF, NOME_FUNCAO: funcaoMap.get(c.ID_FUNCAO) || 'N/A' }));
+    }
+    
+    if (entityName === 'Servidor') {
+       const [pessoas, cargos] = await Promise.all([api.fetchEntity('Pessoa'), api.fetchEntity('Cargo')]);
+       const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
+       const cargoMap = createMap(cargos, 'ID_CARGO', 'NOME_CARGO');
+       return data.map(s => ({ ...s, NOME_PESSOA: pessoaMap.get(s.CPF) || s.CPF, NOME_CARGO: cargoMap.get(s.ID_CARGO) || s.ID_CARGO }));
+    }
+
+    if (entityName === 'Alocacao') {
+        const [servidores, lotacoes, funcoes, pessoas] = await Promise.all([
+            api.fetchEntity('Servidor'), api.fetchEntity('Lotacao'), api.fetchEntity('Funcao'), api.fetchEntity('Pessoa')
+        ]);
+        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
+        const servidorCpfMap = createMap(servidores, 'MATRICULA', 'CPF');
+        const lotacaoMap = createMap(lotacoes, 'ID_LOTACAO', 'LOTACAO');
+        const funcaoMap = createMap(funcoes, 'ID_FUNCAO', 'FUNCAO');
+
+        return data.map(a => ({
+            ...a,
+            NOME_PESSOA: pessoaMap.get(servidorCpfMap.get(a.MATRICULA)) || `Mat: ${a.MATRICULA}`,
+            NOME_LOTACAO: lotacaoMap.get(a.ID_LOTACAO) || a.ID_LOTACAO,
+            NOME_FUNCAO: funcaoMap.get(a.ID_FUNCAO) || 'N/A'
+        }));
+    }
+
+    if (entityName === 'Protocolo') {
+        const pessoas = await api.fetchEntity('Pessoa');
+        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
+        return data.map(p => ({
+            ...p,
+            NOME_PESSOA: pessoaMap.get(p.CPF) || p.CPF,
+            DETALHE_VINCULO: p.ID_CONTRATO ? `Contrato: ${p.ID_CONTRATO}` : (p.MATRICULA ? `Matrícula: ${p.MATRICULA}` : 'N/A')
+        }));
+    }
+
+    if (entityName === 'Nomeacao') {
+        const [servidores, pessoas, cargosCom] = await Promise.all([
+            api.fetchEntity('Servidor'), api.fetchEntity('Pessoa'), api.fetchEntity('CargoComissionado')
+        ]);
+        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
+        const servidorCpfMap = createMap(servidores, 'MATRICULA', 'CPF');
+        const cargoMap = createMap(cargosCom, 'ID_CARGO_COMISSIONADO', 'NOME');
+
+        return data.map(n => ({
+            ...n,
+            NOME_SERVIDOR: pessoaMap.get(servidorCpfMap.get(n.MATRICULA)) || n.MATRICULA,
+            NOME_CARGO_COMISSIONADO: cargoMap.get(n.ID_CARGO_COMISSIONADO) || n.ID_CARGO_COMISSIONADO
+        }));
+    }
+
+    if (entityName === 'Turma') {
+        const capacitacoes = await api.fetchEntity('Capacitacao');
+        const capMap = createMap(capacitacoes, 'ID_CAPACITACAO', 'ATIVIDADE_DE_CAPACITACAO');
+        return data.map(t => ({ ...t, NOME_CAPACITACAO: capMap.get(t.ID_CAPACITACAO) || t.ID_CAPACITACAO }));
+    }
+
+    if (entityName === 'Chamada' || entityName === 'Visita' || entityName === 'SolicitacaoPesquisa' || entityName === 'Atendimento') {
+        const [pessoas, turmas] = await Promise.all([api.fetchEntity('Pessoa'), entityName === 'Chamada' ? api.fetchEntity('Turma') : []]);
+        const pessoaMap = createMap(pessoas, 'CPF', 'NOME');
+        const turmaMap = entityName === 'Chamada' ? createMap(turmas, 'ID_TURMA', 'NOME_TURMA') : new Map();
+        
+        return data.map(item => ({
+            ...item,
+            NOME_PESSOA: pessoaMap.get(item.CPF) || item.CPF,
+            ...(entityName === 'Chamada' ? { NOME_TURMA: turmaMap.get(item.ID_TURMA) || item.ID_TURMA } : {})
+        }));
+    }
+
+    if (entityName === 'Encontro') {
+        const turmas = await api.fetchEntity('Turma');
+        const turmaMap = createMap(turmas, 'ID_TURMA', 'NOME_TURMA');
+        return data.map(e => ({ ...e, NOME_TURMA: turmaMap.get(e.ID_TURMA) || e.ID_TURMA }));
+    }
+
+    if (entityName === 'Vaga' || entityName === 'Exercicio') {
+        const [lotacoes, cargos, editais, exercicios] = await Promise.all([
+            api.fetchEntity('Lotacao'), api.fetchEntity('Cargo'), api.fetchEntity('Edital'), api.fetchEntity('Exercicio')
+        ]);
+        const lotacaoMap = createMap(lotacoes, 'ID_LOTACAO', 'LOTACAO');
+        const cargoMap = createMap(cargos, 'ID_CARGO', 'NOME_CARGO');
+        const editalMap = createMap(editais, 'ID_EDITAL', 'EDITAL');
+        
+        const exercicioMap = new Map();
+        exercicios.forEach((ex: any) => {
+            exercicioMap.set(String(ex.ID_VAGA), lotacaoMap.get(ex.ID_LOTACAO));
+        });
+
+        if (entityName === 'Exercicio') {
+            // Internal fetch needed for Vaga -> Cargo mapping
+            const vagasRaw = await request('/Vaga'); 
+            const vagaCargoMap = new Map(vagasRaw.map((v:any) => [v.ID_VAGA, v.ID_CARGO]));
+            
+            return data.map(e => ({
+                ...e,
+                NOME_LOTACAO_EXERCICIO: lotacaoMap.get(e.ID_LOTACAO) || 'N/A',
+                NOME_CARGO_VAGA: cargoMap.get(String(vagaCargoMap.get(e.ID_VAGA))) || 'N/A'
+            }));
+        }
+
+        return data.map(v => ({
+            ...v,
+            LOTACAO_NOME: lotacaoMap.get(v.ID_LOTACAO) || 'N/A',
+            CARGO_NOME: cargoMap.get(v.ID_CARGO) || 'N/A',
+            EDITAL_NOME: editalMap.get(v.ID_EDITAL) || 'N/A',
+            NOME_LOTACAO_EXERCICIO: exercicioMap.get(v.ID_VAGA) || null
+        }));
+    }
+
+    return data;
+};
+
 export const api = {
   login: async (usuario: string, senha: string) => {
     return request('/auth/login', 'POST', { usuario, senha });
@@ -76,6 +199,7 @@ export const api = {
     }
 
     const promise = request(endpoint)
+        .then(data => enrichEntityData(entityName, data))
         .then(data => {
             cache[endpoint] = { data, timestamp: Date.now() };
             return data;

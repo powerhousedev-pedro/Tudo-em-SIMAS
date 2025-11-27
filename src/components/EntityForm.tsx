@@ -69,8 +69,8 @@ export const EntityForm: React.FC<EntityFormProps> = ({
 
     // Logic to hide specific fields
     if ((isPK && !isEditing && !config.manualPk) || 
-        (activeTab === 'CARGOS' && field === 'SALARIO' && session.papel === 'GGT') ||
-        (activeTab === 'PROTOCOLO' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
+        (activeTab === 'Cargo' && field === 'SALARIO' && session.papel === 'GGT') ||
+        (activeTab === 'Protocolo' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
         return null;
     }
 
