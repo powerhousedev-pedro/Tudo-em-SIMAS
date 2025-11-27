@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -68,12 +69,13 @@ const flattenRelation = (item: any, entityName: string) => {
     const rContrato = item[getClientKey(TABLES.CONTRATO)];
     const rReserva = item[getClientKey(TABLES.RESERVA)];
 
-    // Standardization of Flattened Names for Frontend
+    // 1. General Flattening (NOME_PESSOA, NOME_LOTACAO, etc)
     if (rPessoa) ret.NOME_PESSOA = rPessoa.NOME;
     if (rFuncao) ret.NOME_FUNCAO = rFuncao.FUNCAO;
     if (rCargo) ret.NOME_CARGO = rCargo.NOME_CARGO;
     if (rLotacao) ret.NOME_LOTACAO = rLotacao.LOTACAO;
     
+    // If Servidor exists (relation), pull person name from it
     if (rServidor?.pessoa) ret.NOME_PESSOA = rServidor.pessoa.NOME; 
     if (rServidor && !rServidor.pessoa) ret.NOME_SERVIDOR = item.MATRICULA;
     
@@ -82,7 +84,27 @@ const flattenRelation = (item: any, entityName: string) => {
     if (rTurma) ret.NOME_TURMA = rTurma.NOME_TURMA;
     if (rEdital) ret.EDITAL_NOME = rEdital.EDITAL;
 
-    // Specific Logic
+    // 2. Fallback for Entities that reference Person directly via CPF but might not have been caught above
+    if (!ret.NOME_PESSOA && item.CPF) {
+        // If the relation was fetched but is null, name is CPF (or we rely on what was fetched)
+        // If rPessoa was undefined, it means we didn't include it.
+        if (rPessoa) ret.NOME_PESSOA = rPessoa.NOME || item.CPF;
+    }
+
+    // 3. Entity Specific Logic
+
+    // --- ENRICHMENT: AGE CALCULATION ---
+    if (entityName === TABLES.PESSOA && item.DATA_DE_NASCIMENTO) {
+        const birthDate = new Date(item.DATA_DE_NASCIMENTO);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+        }
+        ret.IDADE = age;
+    }
+
     if (entityName === TABLES.VAGA) {
         ret.LOTACAO_NOME = rLotacao?.LOTACAO || 'N/A';
         ret.CARGO_NOME = rCargo?.NOME_CARGO || 'N/A';
@@ -100,8 +122,23 @@ const flattenRelation = (item: any, entityName: string) => {
     }
 
     if (entityName === TABLES.EXERCICIO) {
-        ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO; // Nested relation
-        ret.NOME_LOTACAO_EXERCICIO = rLotacao?.LOTACAO;
+        ret.NOME_CARGO_VAGA = item.vaga?.cargo?.NOME_CARGO || 'N/A'; // Nested relation
+        ret.NOME_LOTACAO_EXERCICIO = rLotacao?.LOTACAO || 'N/A';
+    }
+
+    if (entityName === TABLES.PROTOCOLO) {
+        if (item.ID_CONTRATO) ret.DETALHE_VINCULO = `Contrato: ${item.ID_CONTRATO}`;
+        else if (item.MATRICULA) ret.DETALHE_VINCULO = `Matrícula: ${item.MATRICULA}`;
+        else ret.DETALHE_VINCULO = 'N/A';
+    }
+
+    if (entityName === TABLES.ALOCACAO) {
+        // Ensure NOME_PESSOA is set if it came via Servidor relation
+        if (rServidor?.pessoa) ret.NOME_PESSOA = rServidor.pessoa.NOME;
+    }
+
+    if (entityName === TABLES.NOMEACAO) {
+        if (rServidor?.pessoa) ret.NOME_SERVIDOR = rServidor.pessoa.NOME;
     }
 
     return ret;
@@ -296,11 +333,14 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
         else if (entityName === TABLES.SERVIDOR) include = { [kPessoa]: true, [kCargo]: true };
         else if (entityName === TABLES.ALOCACAO) include = { [kServidor]:{include:{[kPessoa]:true}}, [kLotacao]:true, [kFuncao]:true };
         else if (entityName === TABLES.NOMEACAO) include = { [kServidor]:{include:{[kPessoa]:true}}, [kCargoCom]:true };
-        else if (entityName === TABLES.EXERCICIO) include = { vaga:{include:{[kCargo]:true}}, [kLotacao]:true }; // 'vaga' is nested
+        else if (entityName === TABLES.EXERCICIO) include = { vaga:{include:{[kCargo]:true}}, [kLotacao]:true }; 
         else if (entityName === TABLES.ATENDIMENTO) include = { [kPessoa]: true };
         else if (entityName === TABLES.TURMA) include = { [kCapacitacao]:true };
         else if (entityName === TABLES.ENCONTRO) include = { [kTurma]:true };
         else if (entityName === TABLES.CHAMADA) include = { [kPessoa]:true, [kTurma]:true };
+        else if (entityName === TABLES.VISITA) include = { [kPessoa]: true };
+        else if (entityName === TABLES.SOLICITACAO_PESQUISA) include = { [kPessoa]: true };
+        else if (entityName === TABLES.PROTOCOLO) include = { [kPessoa]: true };
         else if (entityName === TABLES.VAGA) include = { [kLotacao]: true, [kCargo]: true, [kEdital]: true, [kContrato]: true, [kReserva]: true, [kExercicio]: { include: { [kLotacao]: true } } };
 
         // Build Where Clause for Search
@@ -310,7 +350,7 @@ app.get('/api/:entity', authenticateToken, async (req, res) => {
             where = {
                 OR: searchFields.map(f => ({ [f]: { contains: search, mode: 'insensitive' } }))
             };
-            if (entityName === TABLES.CONTRATO || entityName === TABLES.SERVIDOR) {
+            if (entityName === TABLES.CONTRATO || entityName === TABLES.SERVIDOR || entityName === TABLES.ATENDIMENTO || entityName === TABLES.PROTOCOLO) {
                where.OR.push({ [kPessoa]: { NOME: { contains: search, mode: 'insensitive' } } });
             }
         }
@@ -444,6 +484,67 @@ app.post(`/api/${TABLES.VAGA}/:id/toggle-lock`, authenticateToken, async (req, r
         const updated = await vagaDelegate.update({ where: { ID_VAGA: req.params.id }, data: { BLOQUEADA: !vaga.BLOQUEADA } });
         res.json(updated.BLOQUEADA);
     } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// --- RESTORE AUDIT LOG ---
+app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: any, res) => {
+    const { id } = req.params;
+    const auditDelegate = getPrismaDelegate(TABLES.AUDITORIA);
+
+    try {
+        const log = await auditDelegate.findUnique({ where: { ID_LOG: id } });
+        if (!log) return res.status(404).json({ success: false, message: 'Registro de auditoria não encontrado.' });
+
+        const entityName = log.TABELA_AFETADA;
+        if (!isValidTable(entityName)) return res.status(400).json({ message: 'Tabela inválida no log.' });
+
+        // @ts-ignore
+        const meta = Prisma.dmmf.datamodel.models.find((m: any) => m.name === entityName);
+        const pkField = meta?.fields.find((f: any) => f.isId)?.name;
+        
+        if (!pkField) throw new Error('PK não identificada para a tabela ' + entityName);
+
+        await prisma.$transaction(async (tx: any) => {
+            const targetDelegate = tx[getClientKey(entityName)];
+            const txAudit = tx[getClientKey(TABLES.AUDITORIA)];
+
+            if (log.ACAO === 'CRIAR') {
+                // Inverso de CRIAR é DELETAR
+                const exists = await targetDelegate.findUnique({ where: { [pkField]: log.ID_REGISTRO_AFETADO }});
+                if (!exists) throw new Error('O registro original já foi excluído.');
+                
+                await targetDelegate.delete({ where: { [pkField]: log.ID_REGISTRO_AFETADO } });
+            } 
+            else if (log.ACAO === 'EDITAR') {
+                // Inverso de EDITAR é restaurar VALOR_ANTIGO
+                if (!log.VALOR_ANTIGO) throw new Error('Não há dados antigos para restaurar.');
+                const oldData = JSON.parse(log.VALOR_ANTIGO);
+                
+                const exists = await targetDelegate.findUnique({ where: { [pkField]: log.ID_REGISTRO_AFETADO }});
+                if (!exists) throw new Error('O registro foi excluído, não é possível reverter a edição.');
+
+                await targetDelegate.update({ where: { [pkField]: log.ID_REGISTRO_AFETADO }, data: oldData });
+            } 
+            else if (log.ACAO === 'EXCLUIR') {
+                // Inverso de EXCLUIR é recriar (CRIAR) com VALOR_ANTIGO
+                if (!log.VALOR_ANTIGO) throw new Error('Não há dados para restaurar.');
+                const oldData = JSON.parse(log.VALOR_ANTIGO);
+                
+                // Tenta criar. Se PK já existir, vai dar erro no create e cair no catch
+                await targetDelegate.create({ data: oldData });
+            }
+
+            // Se tudo deu certo, remove o log de auditoria
+            await txAudit.delete({ where: { ID_LOG: id } });
+        });
+
+        res.json({ success: true, message: 'Ação revertida com sucesso.' });
+    } catch (e: any) {
+        let msg = e.message;
+        if (e.code === 'P2003') msg = 'Impossível reverter: Violação de integridade (FK) ao tentar apagar.';
+        if (e.code === 'P2002') msg = 'Impossível reverter: Registro duplicado (PK ou Unique constraint).';
+        res.status(400).json({ success: false, message: msg });
+    }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

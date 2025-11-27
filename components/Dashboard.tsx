@@ -16,7 +16,8 @@ interface DashboardProps extends AppContextProps {}
 
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // --- STATE ---
-  const [activeTab, setActiveTab] = useState('PESSOA');
+  // Ensure default is a valid key from ENTITY_CONFIGS (PascalCase)
+  const [activeTab, setActiveTab] = useState('Pessoa');
   const [formData, setFormData] = useState<RecordData>({});
   const [isEditing, setIsEditing] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -115,7 +116,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // --- COMPUTED VALUES ---
 
-  const tabs = useMemo(() => Object.keys(ENTITY_CONFIGS).filter(k => k !== 'AUDITORIA' && k !== 'ATENDIMENTO'), []);
+  const tabs = useMemo(() => Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && k !== 'Atendimento'), []);
   
   const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
 
@@ -179,7 +180,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     else if (name === 'SALARIO') processedValue = validation.maskCurrency(value);
 
     // Auto-calculate prefix for Servidor
-    if (activeTab === 'SERVIDOR' && name === 'VINCULO') {
+    if (activeTab === 'Servidor' && name === 'VINCULO') {
          const prefix = getPrefixForVinculo(value);
          setFormData(prev => ({ ...prev, [name]: processedValue, 'PREFIXO_MATRICULA': prefix }));
     } else {
@@ -192,7 +193,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     let payload = { ...formData };
 
     // Frontend Validations
-    if (activeTab === 'PESSOA') {
+    if (activeTab === 'Pessoa') {
         if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
         payload.CPF = payload.CPF.replace(/\D/g, ""); 
         
@@ -202,12 +203,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         payload.NOME = validation.capitalizeName(payload.NOME);
     }
 
-    if (activeTab === 'CARGOS' && payload.SALARIO) {
+    if (activeTab === 'Cargo' && payload.SALARIO) {
         payload.SALARIO = payload.SALARIO.replace(/[R$\.\s]/g, '').replace(',', '.');
     }
 
     // Business Logic: Calculate Metadata for Atendimento
-    if (activeTab === 'ATENDIMENTO') {
+    if (activeTab === 'Atendimento') {
         const metadata = businessLogic.calculateAtendimentoMetadata(payload);
         payload = { ...payload, ...metadata };
     }
@@ -230,7 +231,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         // Refresh Data
         const newData = await api.fetchEntity(activeTab);
         setCardData(prev => ({ ...prev, [activeTab]: newData }));
-        if (activeTab === 'CONTRATO') {
+        if (activeTab === 'Contrato') {
             const resData = await api.fetchEntity('RESERVAS');
             setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
         }
@@ -268,8 +269,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       try {
           const newStatus = await api.toggleVagaBloqueada(idVaga);
           showToast('success', newStatus ? 'Vaga bloqueada.' : 'Vaga desbloqueada.');
-          const newData = await api.fetchEntity('VAGAS');
-          setCardData(prev => ({ ...prev, 'VAGAS': newData }));
+          const newData = await api.fetchEntity('Vaga');
+          setCardData(prev => ({ ...prev, 'Vaga': newData }));
       } catch (err: any) { showToast('error', err.message); }
   };
 
@@ -297,8 +298,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
     // Logic to hide specific fields based on role or edit state
     if ((isPK && !isEditing && !config.manualPk) || 
-        (activeTab === 'CARGOS' && field === 'SALARIO' && session.papel === 'GGT') ||
-        (activeTab === 'PROTOCOLO' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
+        (activeTab === 'Cargo' && field === 'SALARIO' && session.papel === 'GGT') ||
+        (activeTab === 'Protocolo' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
         return null;
     }
 
@@ -353,7 +354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                      <div className="w-9 h-9 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors">
                         <i className="fas fa-folder-open text-xs"></i>
                      </div>
-                     <span>{ENTITY_CONFIGS[activeTab]?.title || 'Selecione...'}</span>
+                     <span>{ENTITY_CONFIGS[activeTab]?.title || ENTITY_CONFIGS['Pessoa'].title}</span>
                 </div>
                 <i className={`fas fa-chevron-down text-xs text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}></i>
             </button>
@@ -488,7 +489,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        const isOcupada = item.STATUS_VAGA === 'Ocupada';
                        
                        let exerciseData = undefined;
-                       if (entity === 'VAGAS') {
+                       if (entity === 'Vaga') {
                            exerciseData = { label: item.NOME_LOTACAO_EXERCICIO || 'Sem exercício definido', onEdit: () => setExerciseVagaId(pkValue) };
                        }
 
@@ -505,9 +506,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                             exerciseData={exerciseData}
                             actions={
                              <>
-                               {entity === 'PESSOA' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
-                               {entity === 'VAGAS' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
-                               {entity !== 'AUDITORIA' && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDelete(e, item, entity)} />}
+                               {entity === 'Pessoa' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
+                               {entity === 'Vaga' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
+                               {entity !== 'Auditoria' && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDelete(e, item, entity)} />}
                              </>
                            }
                          />
@@ -522,7 +523,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('VAGAS').then(d => setCardData(p => ({...p, 'VAGAS': d}))); }} />}
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga').then(d => setCardData(p => ({...p, 'Vaga': d}))); }} />}
       {actionAtendimentoId && <ActionExecutionModal idAtendimento={actionAtendimentoId} onClose={() => setActionAtendimentoId(null)} onSuccess={() => { setActionAtendimentoId(null); loadAllRequiredData(); api.getRevisoesPendentes().then(setPendingReviews); showToast('success', 'Sucesso!'); }} />}
       {showReviewsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4 animate-fade-in">

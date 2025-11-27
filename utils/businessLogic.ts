@@ -16,38 +16,38 @@ export const businessLogic = {
       
       if (status === "Aguardando") {
         tipoAcao = "CRIAR";
-        entidadeAlvo = "ATENDIMENTO";
+        entidadeAlvo = "Atendimento";
       } else if (status === "Acatado") {
         switch (tipo) {
           case "Contratação":
             tipoAcao = "CRIAR"; 
-            entidadeAlvo = "CONTRATO"; 
+            entidadeAlvo = "Contrato"; 
             break;
           case "Promoção (Contratado)":
           case "Mudança (Contratado)":
             tipoAcao = "EDITAR"; 
-            entidadeAlvo = "CONTRATO"; 
+            entidadeAlvo = "Contrato"; 
             break;
           case "Demissão":
             tipoAcao = "CRIAR"; 
-            entidadeAlvo = "PROTOCOLO"; 
+            entidadeAlvo = "Protocolo"; 
             break;
           case "Alocação de Servidor":
             tipoAcao = "CRIAR"; 
-            entidadeAlvo = "ALOCACAO"; 
+            entidadeAlvo = "Alocacao"; 
             break;
           case "Mudança de Alocação (Servidor)":
             tipoAcao = "EDITAR"; 
-            entidadeAlvo = "ALOCACAO"; 
+            entidadeAlvo = "Alocacao"; 
             break;
           case "Nomeação de Cargo Comissionado":
             tipoAcao = "CRIAR"; 
-            entidadeAlvo = "NOMEAÇÃO"; 
+            entidadeAlvo = "Nomeacao"; 
             break;
           case "Exoneração de Cargo Comissionado":
           case "Exoneração do Serviço Público":
             tipoAcao = "INATIVAR"; 
-            entidadeAlvo = "SERVIDOR"; 
+            entidadeAlvo = "Servidor"; 
             break;
         }
       }

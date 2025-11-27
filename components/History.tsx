@@ -40,6 +40,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     
+    // Modal State
+    const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
+
     // Global Search
     const [globalSearch, setGlobalSearch] = useState('');
 
@@ -89,17 +92,17 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     };
 
     const handleRestore = async (idLog: string) => {
-        if (!window.confirm('Deseja realmente desfazer esta ação? O registro voltará ao estado anterior.')) return;
+        if (!window.confirm('Deseja realmente desfazer esta ação? O registro voltará ao estado anterior e este log será apagado.')) return;
         try {
             const res = await api.restoreAuditLog(idLog);
             if (res.success) {
                 showToast('success', res.message);
                 loadData();
             } else {
-                showToast('error', 'Não foi possível restaurar.');
+                showToast('error', res.message || 'Não foi possível restaurar.');
             }
-        } catch (e) {
-            showToast('error', 'Erro de conexão.');
+        } catch (e: any) {
+            showToast('error', e.message || 'Erro de conexão.');
         }
     };
 
@@ -222,16 +225,14 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         // Special Audit Rendering
         if (currentView === 'AUDITORIA') {
             if (col === 'DETALHES') {
-                 if (item.ACAO === 'EDITAR') {
-                    return (
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <span className="line-through text-red-400 bg-red-50 px-1 rounded text-xs">{item.VALOR_ANTIGO || 'Vazio'}</span>
-                            <i className="fas fa-arrow-right text-[10px] text-gray-300"></i>
-                            <span className="text-green-600 bg-green-50 px-1 rounded font-medium text-xs">{item.VALOR_NOVO}</span>
-                        </div>
-                    );
-                 }
-                 return <span className="text-gray-400 italic text-xs">Ação estrutural</span>;
+                 return (
+                    <button 
+                        onClick={() => setSelectedAudit(item)}
+                        className="px-4 py-1.5 rounded-full bg-white border border-gray-200 shadow-sm text-xs font-bold text-simas-dark hover:border-simas-cyan hover:text-simas-cyan transition-all flex items-center gap-2"
+                    >
+                        <i className="fas fa-eye text-[10px]"></i> Ver Detalhes
+                    </button>
+                 );
             }
             if (col === 'DATA_HORA') return new Date(item[col]).toLocaleString('pt-BR');
             if (col === 'ACAO') {
@@ -262,6 +263,105 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         if (col === 'CPF' && val) val = validation.formatCPF(val);
         
         return <span className="text-sm text-gray-600 truncate block max-w-[200px]" title={String(val)}>{val}</span>;
+    };
+
+    // --- Modal Render Logic ---
+    const renderAuditModal = () => {
+        if (!selectedAudit) return null;
+
+        const action = selectedAudit.ACAO;
+        let oldData: any = {};
+        let newData: any = {};
+        
+        try { oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}'); } catch(e){}
+        try { newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}'); } catch(e){}
+
+        // Cores baseadas na ação
+        let cardClass = "bg-white border-gray-200"; // Padrão/Editar
+        let headerIcon = "fa-pen text-simas-blue";
+        
+        if (action === 'CRIAR') {
+            cardClass = "bg-green-50 border-green-200";
+            headerIcon = "fa-plus-circle text-green-600";
+        } else if (action === 'EXCLUIR') {
+            cardClass = "bg-red-50 border-red-200";
+            headerIcon = "fa-trash-alt text-red-600";
+        }
+
+        // Definir qual conjunto de chaves mostrar
+        const dataDisplay = action === 'EXCLUIR' ? oldData : (action === 'CRIAR' ? newData : { ...oldData, ...newData });
+        const keys = Object.keys(dataDisplay).sort();
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
+                 <div className={`w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] ${cardClass} border-2 animate-slide-in`}>
+                    
+                    {/* Header do Card */}
+                    <div className="p-5 border-b border-black/5 flex justify-between items-center bg-white/60 backdrop-blur-sm">
+                        <div>
+                            <h3 className="font-bold text-lg text-simas-dark flex items-center gap-2">
+                                <i className={`fas ${headerIcon}`}></i>
+                                Auditoria: {action}
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                                Registro: {selectedAudit.ID_REGISTRO_AFETADO} • Tabela: {selectedAudit.TABELA_AFETADA}
+                            </p>
+                        </div>
+                        <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-black/10 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
+                    </div>
+
+                    {/* Conteúdo Scrollável */}
+                    <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
+                        {keys.map(key => {
+                            if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null; // Ocultar campos técnicos irrelevantes
+
+                            let content;
+                            
+                            if (action === 'EDITAR') {
+                                const oldVal = oldData[key];
+                                const newVal = newData[key];
+                                
+                                // Verifica mudança (conversão para string para comparação simples)
+                                const hasChanged = JSON.stringify(oldVal) !== JSON.stringify(newVal);
+
+                                if (hasChanged) {
+                                    content = (
+                                        <div className="flex flex-col items-start bg-white/50 p-2 rounded border border-black/5 mt-1">
+                                            <span className="line-through text-gray-400 text-xs mb-1 select-none" title="Valor Antigo">
+                                                {String(oldVal === null || oldVal === undefined ? '(Vazio)' : oldVal)}
+                                            </span>
+                                            <span className="text-red-600 font-bold text-sm" title="Valor Novo">
+                                                {String(newVal === null || newVal === undefined ? '(Vazio)' : newVal)}
+                                            </span>
+                                        </div>
+                                    );
+                                } else {
+                                    // Valor inalterado
+                                    content = <span className="text-gray-600 font-medium text-sm">{String(newVal === null || newVal === undefined ? '' : newVal)}</span>;
+                                }
+                            } else {
+                                // CRIAR ou EXCLUIR (mostra o valor plano)
+                                const val = dataDisplay[key];
+                                content = <span className="text-gray-800 font-medium text-sm">{String(val === null || val === undefined ? '' : val)}</span>;
+                            }
+
+                            return (
+                                <div key={key} className="flex flex-col border-b border-black/5 last:border-0 pb-3 last:pb-0">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">{key.replace(/_/g, ' ')}</span>
+                                    {content}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Footer com Metadados */}
+                    <div className="p-4 bg-gray-50/80 border-t border-black/5 text-xs text-gray-500 flex justify-between">
+                        <span>Usuário: <strong>{selectedAudit.USUARIO}</strong></span>
+                        <span>{new Date(selectedAudit.DATA_HORA).toLocaleString()}</span>
+                    </div>
+                 </div>
+            </div>
+        );
     };
 
     return (
@@ -357,11 +457,11 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                 ))}
                                                 {currentView === 'AUDITORIA' && (
                                                     <td className="px-6 py-4 text-right">
-                                                        {(item.ACAO === 'EDITAR' || item.ACAO === 'EXCLUIR') && (
+                                                        {(item.ACAO === 'CRIAR' || item.ACAO === 'EDITAR' || item.ACAO === 'EXCLUIR') && (
                                                             <button 
                                                                 onClick={() => handleRestore(item.ID_LOG)}
                                                                 className="text-gray-300 hover:text-orange-500 hover:bg-orange-50 p-2 rounded-lg transition-all"
-                                                                title="Reverter Alteração"
+                                                                title="Reverter Ação"
                                                             >
                                                                 <i className="fas fa-undo"></i>
                                                             </button>
@@ -377,6 +477,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Modal de Auditoria */}
+            {renderAuditModal()}
         </div>
     );
 };
