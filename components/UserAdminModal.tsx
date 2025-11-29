@@ -8,9 +8,10 @@ import { ConfirmModal } from './ConfirmModal';
 interface UserAdminModalProps {
   onClose: () => void;
   session: UserSession;
+  showToast: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
-export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session }) => {
+export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session, showToast }) => {
   const [formData, setFormData] = useState({
     usuario: '',
     senha: '',
@@ -66,7 +67,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
       // Using correct Entity Name 'Usuario' as defined in tables.ts
       const res = await api.createRecord('Usuario', payload);
       if (res.success) {
-        alert('Usuário criado com sucesso!');
+        showToast('success', 'Usuário criado com sucesso!');
         setFormData({
             usuario: '',
             senha: '',
@@ -75,10 +76,10 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
         });
         loadUsers(); // Refresh list
       } else {
-        alert(res.message || 'Erro ao criar usuário.');
+        showToast('error', res.message || 'Erro ao criar usuário.');
       }
     } catch (error) {
-      alert('Erro ao conectar.');
+      showToast('error', 'Erro ao conectar.');
     } finally {
       setLoading(false);
     }
@@ -91,13 +92,13 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
       try {
           const res = await api.deleteUser(userToDelete);
           if (res.success) {
-              alert('Usuário excluído.');
+              showToast('success', 'Usuário excluído.');
               loadUsers();
           } else {
-              alert(res.message || 'Erro ao excluir.');
+              showToast('error', res.message || 'Erro ao excluir.');
           }
       } catch (e: any) {
-          alert('Erro: ' + e.message);
+          showToast('error', 'Erro: ' + e.message);
       } finally {
           setDeleting(false);
           setUserToDelete(null);
