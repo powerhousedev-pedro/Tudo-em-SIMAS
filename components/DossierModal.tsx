@@ -148,46 +148,79 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
 
             </div>
 
-            {/* COL 2 & 3: Linha do Tempo */}
+            {/* COL 2 & 3: Linha do Tempo e Capacitações */}
             <div className="lg:col-span-2 print:mt-6">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b border-gray-100 pb-2 flex items-center gap-2 print:text-black print:border-black">
-                    <i className="fas fa-history"></i> Histórico Profissional
-                </h3>
+                
+                {/* SEÇÃO 1: Histórico Profissional */}
+                <div className="mb-10 print:break-inside-avoid">
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b border-gray-100 pb-2 flex items-center gap-2 print:text-black print:border-black">
+                        <i className="fas fa-history"></i> Histórico Profissional
+                    </h3>
 
-                <div className="relative pl-4">
-                    {/* Vertical Line */}
-                    <div className="absolute left-[21px] top-2 bottom-0 w-0.5 bg-gray-100 print:border-l print:border-gray-300"></div>
+                    <div className="relative pl-4">
+                        {/* Vertical Line */}
+                        <div className="absolute left-[21px] top-2 bottom-0 w-0.5 bg-gray-100 print:border-l print:border-gray-300"></div>
 
-                    <div className="space-y-8">
-                        {(!data.historico || data.historico.length === 0) ? (
-                             <div className="text-center py-10 text-gray-400 italic bg-gray-50 rounded-xl print:bg-transparent print:border print:border-gray-300">Nenhum histórico registrado.</div>
-                        ) : (
-                            data.historico.map((item, idx) => (
-                                <div key={idx} className="relative flex gap-6 group print:break-inside-avoid">
-                                    {/* Icon Dot */}
-                                    <div className={`
-                                        relative z-10 w-11 h-11 rounded-full border-4 border-white shadow-sm flex items-center justify-center shrink-0
-                                        ${item.cor === 'red' ? 'bg-red-100 text-red-600' : 
-                                          item.cor === 'blue' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}
-                                        print:border-black print:bg-white print:text-black
-                                    `}>
-                                        <i className={`fas ${item.icone} text-sm`}></i>
-                                    </div>
-
-                                    {/* Content Card */}
-                                    <div className="flex-1 pt-1 pb-4">
-                                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-1">
-                                            <h4 className="text-base font-bold text-gray-900">{item.tipo}</h4>
-                                            <span className="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded print:bg-transparent print:text-black print:border print:border-black">{item.periodo}</span>
+                        <div className="space-y-8">
+                            {(!data.historico || data.historico.length === 0) ? (
+                                <div className="text-center py-6 text-gray-400 italic bg-gray-50 rounded-xl print:bg-transparent print:border print:border-gray-300">Nenhum histórico registrado.</div>
+                            ) : (
+                                data.historico.map((item, idx) => (
+                                    <div key={idx} className="relative flex gap-6 group print:break-inside-avoid">
+                                        {/* Icon Dot */}
+                                        <div className={`
+                                            relative z-10 w-11 h-11 rounded-full border-4 border-white shadow-sm flex items-center justify-center shrink-0
+                                            ${item.cor === 'red' ? 'bg-red-100 text-red-600' : 
+                                            item.cor === 'blue' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}
+                                            print:border-black print:bg-white print:text-black
+                                        `}>
+                                            <i className={`fas ${item.icone} text-sm`}></i>
                                         </div>
-                                        <p className="text-sm font-medium text-simas-dark/80 mb-1 print:text-black">{item.descricao}</p>
-                                        <p className="text-sm text-gray-500 leading-relaxed print:text-gray-700">{item.detalhes}</p>
+
+                                        {/* Content Card */}
+                                        <div className="flex-1 pt-1 pb-4">
+                                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-1">
+                                                <h4 className="text-base font-bold text-gray-900">{item.tipo}</h4>
+                                                <span className="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded print:bg-transparent print:text-black print:border print:border-black">{item.periodo}</span>
+                                            </div>
+                                            <p className="text-sm font-medium text-simas-dark/80 mb-1 print:text-black">{item.descricao}</p>
+                                            <p className="text-sm text-gray-500 leading-relaxed print:text-gray-700">{item.detalhes}</p>
+                                        </div>
                                     </div>
-                                </div>
-                            ))
-                        )}
+                                ))
+                            )}
+                        </div>
                     </div>
                 </div>
+
+                {/* SEÇÃO 2: Capacitações / Frequência (NOVO) */}
+                <div className="print:break-inside-avoid">
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b border-gray-100 pb-2 flex items-center gap-2 print:text-black print:border-black">
+                        <i className="fas fa-graduation-cap"></i> Capacitação e Desenvolvimento
+                    </h3>
+
+                    {(!data.atividadesEstudantis?.capacitacoes || data.atividadesEstudantis.capacitacoes.length === 0) ? (
+                        <div className="text-center py-6 text-gray-400 italic bg-gray-50 rounded-xl print:bg-transparent print:border print:border-gray-300">Nenhuma atividade de capacitação registrada.</div>
+                    ) : (
+                        <div className="grid grid-cols-1 gap-3">
+                            {data.atividadesEstudantis.capacitacoes.map((cap, idx) => (
+                                <div key={idx} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 print:border-black print:shadow-none">
+                                    <div>
+                                        <h4 className="font-bold text-simas-dark text-sm print:text-black">{cap.nome}</h4>
+                                        <p className="text-xs text-gray-500 mt-1 print:text-gray-700">{cap.turma}</p>
+                                    </div>
+                                    <div className="flex items-center gap-4 text-xs font-medium">
+                                        <span className="text-gray-500 print:text-black"><i className="far fa-calendar mr-1"></i> {cap.data}</span>
+                                        <span className={`px-2 py-1 rounded-md border ${cap.status === 'Presente' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'} print:border-black print:bg-transparent print:text-black`}>
+                                            {cap.status}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
             </div>
 
         </div>
