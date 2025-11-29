@@ -96,10 +96,10 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
 
       {/* Floating Actions */}
       <div className={`
-        absolute top-2 right-2 z-20 flex flex-col gap-1
+        absolute top-2 right-2 z-30 flex flex-col gap-1
         transition-all duration-200
         ${selected 
-            ? 'opacity-100 translate-x-0' 
+            ? 'opacity-100 translate-x-0 pointer-events-auto' 
             : 'opacity-0 translate-x-2 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 group-hover:pointer-events-auto'}
       `}>
           {onEdit && (

@@ -9,6 +9,7 @@ import { validation } from '../utils/validation';
 import { businessLogic } from '../utils/businessLogic';
 import { DossierModal } from './DossierModal';
 import { ExerciseSelectionModal } from './ExerciseSelectionModal';
+import { ConfirmModal } from './ConfirmModal';
 
 interface DashboardProps extends AppContextProps {}
 
@@ -54,6 +55,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // Modal State
   const [dossierCpf, setDossierCpf] = useState<string | null>(null);
   const [exerciseVagaId, setExerciseVagaId] = useState<string | null>(null);
+  
+  // Delete Confirmation State
+  const [itemToDelete, setItemToDelete] = useState<{item: any, entity: string} | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
@@ -102,9 +107,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const loadAllRequiredData = async () => {
     setLoadingData(true);
-    // Load only entities relevant to current view + active tab to optimize
-    // However, to keep relationship columns working, we might need related entities
-    // For now, loading all permitted entities is safer for relationship resolution
     const entitiesToLoad = tabs; 
     
     try {
@@ -137,7 +139,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     
     modelFields.forEach(field => {
         const linkedEntity = FK_MAPPING[field];
-        // Only show column if user has permission to see that entity
         if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity) && linkedEntity !== activeTab) {
              if (tabs.includes(linkedEntity)) {
                  columns.push(linkedEntity);
@@ -180,7 +181,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       if (formatted.TELEFONE) formatted.TELEFONE = validation.maskPhone(formatted.TELEFONE);
       if (formatted.CPF) formatted.CPF = validation.maskCPF(formatted.CPF);
 
-      // CORREÇÃO: Formatar datas para o padrão do input date (YYYY-MM-DD)
       Object.keys(formatted).forEach(key => {
           if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key) && formatted[key]) {
              try {
@@ -291,18 +291,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, item: any, entityName: string) => {
+  const handleDeleteRequest = (e: React.MouseEvent, item: any, entityName: string) => {
     e.stopPropagation();
-    if (!window.confirm('Confirmar exclusão?')) return;
-    const config = ENTITY_CONFIGS[entityName];
+    setItemToDelete({ item, entity: entityName });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    
+    setIsDeleting(true);
+    const { entity, item } = itemToDelete;
+    const config = ENTITY_CONFIGS[entity];
+    
     try {
-      const res = await api.deleteRecord(entityName, config.pk, item[config.pk]);
+      const res = await api.deleteRecord(entity, config.pk, item[config.pk]);
       if (res.success) {
         showToast('info', 'Registro excluído.');
-        const newData = await api.fetchEntity(entityName);
-        setCardData(prev => ({ ...prev, [entityName]: newData }));
-      } else { showToast('error', 'Erro ao excluir.'); }
-    } catch(err) { showToast('error', 'Erro de conexão.'); }
+        const newData = await api.fetchEntity(entity);
+        setCardData(prev => ({ ...prev, [entity]: newData }));
+      } else { 
+        showToast('error', 'Erro ao excluir.'); 
+      }
+    } catch(err) { 
+      showToast('error', 'Erro de conexão.'); 
+    } finally {
+      setIsDeleting(false);
+      setItemToDelete(null);
+    }
   };
 
   const handleLockVaga = async (e: React.MouseEvent, idVaga: string, isOcupada: boolean) => {
@@ -620,7 +635,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                              <>
                                {entity === 'Pessoa' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
                                {entity === 'Vaga' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
-                               {entity !== 'Auditoria' && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDelete(e, item, entity)} />}
+                               {entity !== 'Auditoria' && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDeleteRequest(e, item, entity)} />}
                              </>
                            }
                          />
@@ -636,6 +651,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
       {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga').then(d => setCardData(p => ({...p, 'Vaga': d}))); }} />}
+      
+      {itemToDelete && (
+        <ConfirmModal 
+          title="Confirmar Exclusão"
+          message={`Tem certeza que deseja excluir este registro de ${ENTITY_CONFIGS[itemToDelete.entity].title}?`}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setItemToDelete(null)}
+          isLoading={isDeleting}
+        />
+      )}
     </div>
   );
 };
