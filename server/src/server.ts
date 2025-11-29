@@ -91,7 +91,7 @@ function getEntityPk(entity: string): string {
 
 const auditAction = async (
     usuario: string, 
-    acao: 'ADICIONAR' | 'EDITAR' | 'EXCLUIR', 
+    acao: 'CRIAR' | 'EDITAR' | 'EXCLUIR', 
     tabela: string, 
     idRegistro: string, 
     oldVal: any = null, 
@@ -259,7 +259,7 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
             const newAlocacao = await tx.alocacao.create({ data });
             
             // Auditar criação
-            await auditAction(usuario, 'ADICIONAR', 'Alocacao', newAlocacao.ID_ALOCACAO, null, newAlocacao, tx);
+            await auditAction(usuario, 'CRIAR', 'Alocacao', newAlocacao.ID_ALOCACAO, null, newAlocacao, tx);
             
             return newAlocacao;
         });
@@ -300,7 +300,7 @@ app.post('/api/Contrato', authenticateToken, async (req: AuthenticatedRequest, r
                 await auditAction(usuario, 'EDITAR', 'Reserva', reserva.ID_RESERVA, oldReserva, updatedReserva, tx);
             }
 
-            await auditAction(usuario, 'ADICIONAR', 'Contrato', newContrato.ID_CONTRATO, null, newContrato, tx);
+            await auditAction(usuario, 'CRIAR', 'Contrato', newContrato.ID_CONTRATO, null, newContrato, tx);
             return newContrato;
         });
 
@@ -370,7 +370,7 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
                 MOTIVO_INATIVACAO: MOTIVO
             };
             const inativo = await tx.inativo.create({ data: inativoData });
-            await auditAction(usuario, 'ADICIONAR', 'Inativo', inativo.MATRICULA, null, inativo, tx);
+            await auditAction(usuario, 'CRIAR', 'Inativo', inativo.MATRICULA, null, inativo, tx);
 
             // 2. Remover Alocação Ativa
             const alocacao = await tx.alocacao.findFirst({ where: { MATRICULA } });
@@ -469,7 +469,7 @@ app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, re
         // Audit (Skip for Audit table itself)
         if (entity !== 'Auditoria') {
             const pk = result[getEntityPk(entity)];
-            await auditAction(usuario, 'ADICIONAR', entity, pk, null, result);
+            await auditAction(usuario, 'CRIAR', entity, pk, null, result);
         }
 
         res.json({ success: true, data: result });
@@ -577,7 +577,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
         if (log.ACAO === 'EXCLUIR') {
             // Restaurar registro deletado
             await model.create({ data: oldVal });
-        } else if (log.ACAO === 'ADICIONAR') {
+        } else if (log.ACAO === 'CRIAR') {
             // Deletar registro criado
             await model.delete({ where: { [pk]: log.ID_REGISTRO_AFETADO } });
         } else if (log.ACAO === 'EDITAR') {
