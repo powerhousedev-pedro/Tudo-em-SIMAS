@@ -4,16 +4,13 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 // Workaround: Use require for PrismaClient to avoid compilation errors when the client hasn't been generated yet.
-// This allows the server file to compile even in environments where `prisma generate` hasn't run.
 const { PrismaClient } = require('@prisma/client');
 
 const app = express();
-// Fix: PrismaClient type might be missing if not generated, so we let it be any or inferred from require
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'simas-secure-secret';
 
 app.use(cors());
-// Cast to any to avoid potential type mismatch with NextHandleFunction in some environments
 app.use(express.json() as any);
 
 const authenticateToken = (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
@@ -29,13 +26,42 @@ const authenticateToken = (req: ExpressRequest, res: ExpressResponse, next: Next
     });
 };
 
+// --- HELPERS ---
+
+const cleanData = (data: any) => {
+    const cleaned: any = {};
+    for (const key in data) {
+        if (data[key] === "") {
+            cleaned[key] = null;
+        } else {
+            cleaned[key] = data[key];
+        }
+    }
+    return cleaned;
+};
+
+const getModel = (modelName: string) => {
+    const name = modelName.charAt(0).toLowerCase() + modelName.slice(1);
+    return (prisma as any)[name];
+};
+
+function getEntityPk(entity: string): string {
+    const pks: any = {
+        'Pessoa': 'CPF',
+        'Servidor': 'MATRICULA',
+        'Usuario': 'id',
+        'Inativo': 'MATRICULA'
+    };
+    if (pks[entity]) return pks[entity];
+    return `ID_${entity.toUpperCase()}`;
+}
+
 // --- AUTH ROUTES ---
 
 app.post('/api/auth/login', async (req: any, res: any) => {
     const { usuario, senha } = req.body;
     
     try {
-        // Prisma models are usually camelCase (e.g. prisma.usuario)
         const user = await prisma.usuario.findFirst({
             where: { usuario }
         });
@@ -44,12 +70,10 @@ app.post('/api/auth/login', async (req: any, res: any) => {
             return res.status(401).json({ message: 'Usuário não encontrado' });
         }
 
-        // Check password (bcrypt or plain for migration)
         let isValid = false;
         if (user.senha.startsWith('$2')) {
             isValid = await bcrypt.compare(senha, user.senha);
         } else {
-            // Fallback for plain text passwords during migration
             isValid = (senha === user.senha);
         }
 
@@ -76,27 +100,195 @@ app.post('/api/auth/login', async (req: any, res: any) => {
     }
 });
 
+// --- REPORTS ROUTE ---
+
+app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any) => {
+    const { reportName } = req.params;
+
+    try {
+        let result: any = {};
+
+        if (reportName === 'dashboardPessoal') {
+            const totalContratos = await prisma.contrato.count();
+            const totalServidores = await prisma.servidor.count();
+            
+            // Vinculos
+            const servidoresGroup = await prisma.servidor.groupBy({
+                by: ['VINCULO'],
+                _count: { VINCULO: true }
+            });
+            
+            const vinculoData = servidoresGroup.map((g: any) => ({ name: g.VINCULO || 'Não informado', value: g._count.VINCULO }));
+            vinculoData.push({ name: 'OSC (Contratados)', value: totalContratos });
+
+            // Lotações (Complex logic: join alocacao + contratos)
+            // Simplified: count most frequent ID_LOTACAO in Alocacao and ID_LOTACAO via Vaga in Contrato
+            const alocacoes = await prisma.alocacao.findMany({ include: { lotacao: true } });
+            const contratos = await prisma.contrato.findMany({ include: { vaga: { include: { lotacao: true } } } });
+
+            const lotacaoCounts: Record<string, number> = {};
+            alocacoes.forEach((a: any) => {
+                const name = a.lotacao?.LOTACAO || 'Desconhecida';
+                lotacaoCounts[name] = (lotacaoCounts[name] || 0) + 1;
+            });
+            contratos.forEach((c: any) => {
+                const name = c.vaga?.lotacao?.LOTACAO || 'Desconhecida';
+                lotacaoCounts[name] = (lotacaoCounts[name] || 0) + 1;
+            });
+
+            const lotacaoData = Object.entries(lotacaoCounts)
+                .map(([name, value]) => ({ name, value }))
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 10);
+
+            result = {
+                totais: { contratados: totalContratos, servidores: totalServidores, total: totalContratos + totalServidores },
+                graficos: { vinculo: vinculoData, lotacao: lotacaoData }
+            };
+
+        } else if (reportName === 'painelVagas') {
+            // Fetch necessary data
+            const vagas = await prisma.vaga.findMany({ 
+                include: { lotacao: true, cargo: true, edital: true } 
+            });
+            
+            const activeReservations = await prisma.reserva.findMany({
+                where: { STATUS: 'Ativa' }
+            });
+            const activeResMap = new Map(activeReservations.map((r: any) => [r.ID_VAGA, r.ID_ATENDIMENTO]));
+
+            // Need to link reservation to person name via Atendimento -> CPF -> Pessoa
+            const atendimentos = await prisma.atendimento.findMany({
+                where: { ID_ATENDIMENTO: { in: Array.from(activeResMap.values()) } },
+                select: { ID_ATENDIMENTO: true, CPF: true }
+            });
+            const atendMap = new Map(atendimentos.map((a: any) => [a.ID_ATENDIMENTO, a.CPF]));
+            
+            const cpfs = atendimentos.map((a: any) => a.CPF).filter((c: any) => c);
+            const pessoas = await prisma.pessoa.findMany({
+                where: { CPF: { in: cpfs } },
+                select: { CPF: true, NOME: true }
+            });
+            const pessoaMap = new Map(pessoas.map((p: any) => [p.CPF, p.NOME]));
+
+            // Contratos/Ocupantes
+            const contratos = await prisma.contrato.findMany({
+                select: { ID_VAGA: true, CPF: true } // Assuming link via ID_VAGA
+            });
+            const ocupadaMap = new Set(contratos.map((c: any) => c.ID_VAGA));
+
+            // Quantitativo Logic
+            const quantitativoMap = new Map();
+            const panorama: any[] = [];
+
+            vagas.forEach((v: any) => {
+                let status = 'Disponível';
+                let reservadaPara = null;
+
+                if (v.BLOQUEADA) status = 'Bloqueada';
+                else if (ocupadaMap.has(v.ID_VAGA)) status = 'Ocupada';
+                else if (activeResMap.has(v.ID_VAGA)) {
+                    status = 'Reservada';
+                    const atdId = activeResMap.get(v.ID_VAGA);
+                    const cpf = atendMap.get(atdId);
+                    reservadaPara = pessoaMap.get(cpf);
+                }
+
+                // Add to Panorama
+                panorama.push({
+                    ID_VAGA: v.ID_VAGA,
+                    STATUS: status,
+                    VINCULACAO: v.lotacao?.VINCULACAO || 'N/A',
+                    LOTACAO_OFICIAL: v.lotacao?.LOTACAO || 'N/A',
+                    NOME_CARGO: v.cargo?.NOME_CARGO || 'N/A',
+                    RESERVADA_PARA: reservadaPara,
+                    OCUPANTE: status === 'Ocupada' ? 'Ocupada' : null
+                });
+
+                // Add to Quantitativo (only available/reserved)
+                if (status !== 'Ocupada' && status !== 'Bloqueada') {
+                    const key = `${v.lotacao?.VINCULACAO || 'N/A'}|${v.lotacao?.LOTACAO || 'N/A'}|${v.cargo?.NOME_CARGO || 'N/A'}`;
+                    if (!quantitativoMap.has(key)) {
+                        quantitativoMap.set(key, { free: 0, reserved: [] });
+                    }
+                    const entry = quantitativoMap.get(key);
+                    if (status === 'Reservada') entry.reserved.push(reservadaPara || 'Anônimo');
+                    else entry.free++;
+                }
+            });
+
+            const quantitativo = Array.from(quantitativoMap.entries()).map(([key, val]: any) => {
+                const [vinculacao, lotacao, cargo] = key.split('|');
+                const detailsParts = [];
+                if (val.free > 0) detailsParts.push(`Livre x${val.free}`);
+                if (val.reserved.length > 0) detailsParts.push(`Reservada x${val.reserved.length} (${val.reserved.join(', ')})`);
+                return {
+                    VINCULACAO: vinculacao,
+                    LOTACAO: lotacao,
+                    CARGO: cargo,
+                    DETALHES: detailsParts.join(', ')
+                };
+            });
+
+            result = {
+                panorama,
+                quantitativo
+            };
+
+        } else if (reportName === 'analiseCustos') {
+            const contratos = await prisma.contrato.findMany({
+                include: { vaga: { include: { lotacao: true, cargo: true } } }
+            });
+            
+            const custoMap: Record<string, number> = {};
+            
+            contratos.forEach((c: any) => {
+                const lotacao = c.vaga?.lotacao?.LOTACAO || 'N/A';
+                const salario = parseFloat(c.vaga?.cargo?.SALARIO || '0');
+                custoMap[lotacao] = (custoMap[lotacao] || 0) + salario;
+            });
+
+            const sortedCustos = Object.entries(custoMap)
+                .map(([name, value]) => ({ name, value }))
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 10);
+
+            result = {
+                graficos: { custoPorLotacao: sortedCustos },
+                tabela: { 
+                    colunas: ['Lotação', 'Custo Total'], 
+                    linhas: Object.entries(custoMap).map(([k, v]) => [k, v]) 
+                }
+            };
+        } else if (reportName === 'atividadeUsuarios') {
+            const logs = await prisma.auditoria.findMany({
+                orderBy: { DATA_HORA: 'desc' },
+                take: 100
+            });
+            
+            result = {
+                colunas: ['Data', 'Usuário', 'Ação', 'Tabela', 'ID'],
+                linhas: logs.map((l: any) => [
+                    new Date(l.DATA_HORA).toLocaleString(),
+                    l.USUARIO,
+                    l.ACAO,
+                    l.TABELA_AFETADA,
+                    l.ID_REGISTRO_AFETADO
+                ])
+            };
+        } else {
+            return res.status(404).json({ message: 'Relatório não implementado' });
+        }
+
+        res.json(result);
+
+    } catch (e: any) {
+        console.error(`Erro report ${reportName}:`, e);
+        res.status(500).json({ message: 'Erro ao gerar relatório' });
+    }
+});
+
 // --- GENERIC CRUD ROUTES ---
-
-// Helper to get prisma model dynamically
-const getModel = (modelName: string) => {
-    // Convert EntityName to camelCase (e.g. Pessoa -> pessoa)
-    const name = modelName.charAt(0).toLowerCase() + modelName.slice(1);
-    return (prisma as any)[name];
-};
-
-// Helper for PKs mapping
-function getEntityPk(entity: string): string {
-    const pks: any = {
-        'Pessoa': 'CPF',
-        'Servidor': 'MATRICULA',
-        'Usuario': 'id',
-        'Inativo': 'MATRICULA'
-    };
-    if (pks[entity]) return pks[entity];
-    // Default fallback: ID_ENTITY (e.g. ID_CONTRATO)
-    return `ID_${entity.toUpperCase()}`;
-}
 
 app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {
     const { entity } = req.params;
@@ -109,7 +301,6 @@ app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {
             where: {
                 OR: [
                     { [getEntityPk(entity)]: { contains: req.query.search } }
-                    // Add other search fields if needed
                 ]
             }
         } : {};
@@ -118,7 +309,6 @@ app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {
         res.json(data);
     } catch (e: any) {
         console.error(`Error fetching ${entity}:`, e);
-        // Return empty array instead of 500 to prevent frontend crash on missing tables
         res.json([]);
     }
 });
@@ -130,9 +320,8 @@ app.post('/api/:entity', authenticateToken, async (req: any, res: any) => {
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
 
     try {
-        let data = req.body;
+        let data = cleanData(req.body);
         
-        // Special handling for Usuario password hashing
         if (entity === 'Usuario' && data.senha) {
             const salt = await bcrypt.genSalt(10);
             data.senha = await bcrypt.hash(data.senha, salt);
@@ -153,9 +342,8 @@ app.put('/api/:entity/:id', authenticateToken, async (req: any, res: any) => {
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
 
     try {
-        // Filter out fields that shouldn't be updated or are unknown
-        // For simplicity, we pass body directly, relying on Prisma to error or ignore
-        const { editToken, ...data } = req.body; // Remove frontend-only fields
+        const { editToken, ...rawData } = req.body;
+        const data = cleanData(rawData);
 
         const result = await model.update({
             where: { [getEntityPk(entity)]: id },
@@ -164,7 +352,7 @@ app.put('/api/:entity/:id', authenticateToken, async (req: any, res: any) => {
         res.json({ success: true, data: result });
     } catch (e: any) {
         console.error(`Error updating ${entity}:`, e);
-        res.status(500).json({ message: 'Erro ao atualizar registro' });
+        res.status(500).json({ message: 'Erro ao atualizar registro: ' + e.message });
     }
 });
 
@@ -205,8 +393,6 @@ app.post('/api/Vaga/:id/toggle-lock', authenticateToken, async (req: any, res: a
     }
 });
 
-// --- DOSSIER ENDPOINT ---
-
 app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any) => {
     let { cpf } = req.params;
     cpf = cpf.replace(/\D/g, '');
@@ -227,7 +413,6 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any
              return res.status(404).json({ message: `Pessoa com CPF ${cpf} não encontrada.` });
         }
 
-        // --- Active Links (Vínculos Ativos) ---
         const contratos = await contratoDelegate.findMany({
             where: { CPF: cpf },
             include: { funcao: true } 
@@ -280,7 +465,6 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any
             });
         }
 
-        // --- Timeline (Histórico Unificado) ---
         const timeline: any[] = [];
         
         const histContratos = await contratoHistDelegate.findMany({ where: { CPF: cpf } });
