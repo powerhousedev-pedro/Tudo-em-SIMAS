@@ -1,9 +1,8 @@
 
-
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'https://tudoemsimas.powerhouseapp.de/api';
 const TOKEN_KEY = 'simas_auth_token';
 
 // --- CACHE & REQUEST MANAGEMENT ---
@@ -66,9 +65,8 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        // Backend returns error in 'message' OR 'error' property. If both empty, fallback to Status.
-        const errorMessage = errorData.message || errorData.error || response.statusText || `Erro ${response.status}`;
-        throw new Error(errorMessage.includes('Erro na API') ? errorMessage : `Erro na API: ${errorMessage}`);
+        // Backend returns error in 'message' OR 'error' property
+        throw new Error(errorData.message || errorData.error || `Erro na API: ${response.statusText}`);
     }
     
     return await response.json();
