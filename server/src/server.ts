@@ -194,6 +194,7 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res) => 
     const contratoHistDelegate = prisma.contratoHistorico;
     const alocacaoHistDelegate = prisma.alocacaoHistorico;
     const inativoDelegate = prisma.inativo;
+    const lotacaoDelegate = prisma.lotacao;
 
     try {
         const pessoa = await pessoaDelegate.findUnique({ where: { CPF: cpf } });
@@ -211,17 +212,18 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res) => 
         });
         
         // Servidores: Inclui Cargo e Alocação atual
+        // Cast as any[] to avoid TS errors about nested includes if types aren't perfect
         const servidores = await servidorDelegate.findMany({
             where: { CPF: cpf },
             include: { 
                 cargo: true,
                 alocacao: {
-                     include: { lotacao: true, funcao: true },
-                     orderBy: { DATA_INICIO: 'desc' },
-                     take: 1
+                     // Removing orderBy inside include to avoid TS2353 error
+                     // We will sort manually in JS
+                     include: { lotacao: true, funcao: true }
                 }
             }
-        });
+        }) as any[];
 
         // Determinar Perfil Principal
         let tipoPerfil = 'Avulso';
@@ -244,7 +246,15 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res) => 
 
         // Adicionar Servidores
         for (const s of servidores) {
-            const aloc = s.alocacao?.[0]; // Pega a alocação mais recente
+            // Manual sort of alocacao array to get most recent
+            let aloc = null;
+            if (s.alocacao && Array.isArray(s.alocacao) && s.alocacao.length > 0) {
+                 s.alocacao.sort((a: any, b: any) => new Date(b.DATA_INICIO).getTime() - new Date(a.DATA_INICIO).getTime());
+                 aloc = s.alocacao[0];
+            } else if (s.alocacao && !Array.isArray(s.alocacao)) {
+                aloc = s.alocacao;
+            }
+
             vinculosAtivos.push({
                 tipo: 'Servidor',
                 matricula: s.MATRICULA,
@@ -291,16 +301,20 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res) => 
         ];
         
         if (matriculas.length > 0) {
+            // Load all Lotacoes for manual name resolution (since include lotacao might fail on history table)
+            const allLotacoes = await lotacaoDelegate.findMany();
+            const lotacaoMap = new Map(allLotacoes.map((l: any) => [l.ID_LOTACAO, l.LOTACAO]));
+
             const histAlocacoes = await alocacaoHistDelegate.findMany({
-                where: { MATRICULA: { in: matriculas } },
-                include: { lotacao: true }
+                where: { MATRICULA: { in: matriculas } }
+                // Remove include 'lotacao' to fix TS Error 2322
             });
 
             histAlocacoes.forEach((a: any) => timeline.push({
                 tipo: 'Movimentação / Alocação',
                 data_ordenacao: a.DATA_FIM ? new Date(a.DATA_FIM) : new Date(a.DATA_INICIO),
                 periodo: `${new Date(a.DATA_INICIO).toLocaleDateString('pt-BR')} - ${a.DATA_FIM ? new Date(a.DATA_FIM).toLocaleDateString('pt-BR') : 'Atual'}`,
-                descricao: `Lotação em ${a.lotacao?.LOTACAO || a.ID_LOTACAO}`,
+                descricao: `Lotação em ${lotacaoMap.get(a.ID_LOTACAO) || a.ID_LOTACAO}`,
                 detalhes: `Matrícula ${a.MATRICULA}. Motivo: ${a.MOTIVO_MUDANCA || 'Rotina'}`,
                 icone: 'fa-map-marker-alt',
                 cor: 'blue'
