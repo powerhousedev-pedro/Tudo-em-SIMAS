@@ -151,9 +151,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const handleEdit = (item: any) => {
       const formatted = { ...item };
+      
+      // Formatting for Masks
       if (formatted.SALARIO) formatted.SALARIO = validation.formatCurrency(formatted.SALARIO);
       if (formatted.TELEFONE) formatted.TELEFONE = validation.maskPhone(formatted.TELEFONE);
       if (formatted.CPF) formatted.CPF = validation.maskCPF(formatted.CPF);
+
+      // CORREÇÃO: Formatar datas para o padrão do input date (YYYY-MM-DD)
+      // Usar split('T') garante que pegamos a data "como está" no DB/ISO sem conversão de fuso horário local
+      Object.keys(formatted).forEach(key => {
+          if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key) && formatted[key]) {
+             try {
+                 if (typeof formatted[key] === 'string' && formatted[key].includes('T')) {
+                     formatted[key] = formatted[key].split('T')[0];
+                 } else if (formatted[key] instanceof Date) {
+                     formatted[key] = formatted[key].toISOString().split('T')[0];
+                 }
+             } catch(e) {
+                 console.warn("Could not format date for edit:", key);
+             }
+          }
+      });
 
       setFormData(formatted);
       setIsEditing(true);
@@ -343,6 +361,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const inputCommonClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all duration-200 text-sm font-medium text-simas-dark";
 
     if (options.length > 0) {
+      // CORREÇÃO: Se houver poucas opções (ex: Sexo M/F), usar checkbox exclusivo (Botões lado a lado)
+      if (options.length <= 4) {
+          return (
+             <div key={field} className="relative group mb-1">
+                 <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-2 ml-1">
+                    {field.replace(/_/g, ' ')} <span className="text-red-400 font-bold">*</span>
+                 </label>
+                 <div className="flex gap-2 w-full">
+                     {options.map((opt) => {
+                         const isSelected = formData[field] === opt;
+                         let label = opt;
+                         if (field === 'SEXO') {
+                             if (opt === 'M') label = 'Masculino';
+                             if (opt === 'F') label = 'Feminino';
+                         }
+
+                         return (
+                             <button
+                                key={opt}
+                                type="button"
+                                onClick={() => handleInputChange({ target: { name: field, value: opt } } as any)}
+                                className={`
+                                    flex-1 py-3 px-3 rounded-xl text-xs font-bold border transition-all duration-200 flex items-center justify-center gap-2 outline-none
+                                    ${isSelected 
+                                        ? 'bg-simas-cyan text-white border-simas-cyan shadow-md transform scale-[1.02]' 
+                                        : 'bg-white text-gray-500 border-gray-200 hover:border-simas-cyan/50 hover:bg-gray-50'}
+                                `}
+                             >
+                                 <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-white' : 'border-gray-300'}`}>
+                                     {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
+                                 </div>
+                                 {label}
+                             </button>
+                         )
+                     })}
+                 </div>
+             </div>
+          );
+      }
+
+      // Dropdown padrão para muitas opções
       return (
         <div key={field} className="relative group">
           <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>

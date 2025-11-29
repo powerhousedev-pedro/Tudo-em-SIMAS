@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { DossierData } from '../types';
@@ -16,7 +17,9 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await api.getDossiePessoal(cpf);
+        // Limpar CPF antes de enviar para evitar erros de formatação (ex: 123.456.789-00 -> 12345678900)
+        const cleanCpf = cpf.replace(/\D/g, '');
+        const res = await api.getDossiePessoal(cleanCpf);
         setData(res);
       } catch (e) {
         console.error(e);
@@ -42,9 +45,22 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
     );
   }
 
-  if (!data) return null;
+  // Verifica se o objeto data existe e tenta renderizar o que for possível
+  // Se 'pessoal' for nulo, ainda assim tenta renderizar o erro, mas se data for totalmente nulo, exibe erro genérico
+  if (!data) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm text-center">
+                <i className="fas fa-exclamation-circle text-4xl text-red-500 mb-3"></i>
+                <h3 className="text-lg font-bold text-gray-800">Erro ao carregar</h3>
+                <p className="text-sm text-gray-500 mb-4">Não foi possível recuperar os dados completos para este CPF.</p>
+                <button onClick={onClose} className="px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-600 hover:bg-gray-200">Fechar</button>
+            </div>
+        </div>
+      );
+  }
 
-  const p = data.pessoal;
+  const p = data.pessoal || { NOME: 'Desconhecido', CPF: cpf };
   const badgeColors: {[key: string]: string} = {
     'Contratado': 'bg-green-100 text-green-800 border-green-200',
     'Servidor': 'bg-blue-100 text-blue-800 border-blue-200',
@@ -60,9 +76,9 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
         <div className="bg-white px-8 py-6 border-b border-gray-200 flex justify-between items-start print:border-b-2 print:border-black">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-2xl font-bold text-simas-dark">{p.NOME}</h2>
+              <h2 className="text-2xl font-bold text-simas-dark">{p.NOME || 'Nome não informado'}</h2>
               <span className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeColors[data.tipoPerfil] || badgeColors['Avulso']}`}>
-                {data.tipoPerfil}
+                {data.tipoPerfil || 'Desconhecido'}
               </span>
             </div>
             <p className="text-gray-500 text-sm flex items-center gap-2">
@@ -120,7 +136,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
             <h3 className="text-lg font-bold text-simas-medium mb-4 border-b pb-2 flex items-center gap-2">
               <i className="fas fa-briefcase"></i> Vínculo Ativo
             </h3>
-            {data.vinculosAtivos.length > 0 ? (
+            {data.vinculosAtivos && data.vinculosAtivos.length > 0 ? (
               data.vinculosAtivos.map((v, i) => (
                 <div key={i} className="text-sm space-y-2 mb-4 last:mb-0">
                   <p><span className="font-semibold text-gray-600">Tipo:</span> {v.tipo}</p>
@@ -142,7 +158,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
             <h3 className="text-lg font-bold text-simas-medium mb-4 border-b pb-2 flex items-center gap-2">
               <i className="fas fa-history"></i> Histórico Profissional
             </h3>
-            {data.historico.length > 0 ? (
+            {data.historico && data.historico.length > 0 ? (
               <ul className="relative border-l-2 border-gray-200 ml-3 space-y-6">
                 {data.historico.map((h, i) => (
                   <li key={i} className="ml-6 relative">
