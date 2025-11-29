@@ -424,6 +424,107 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
     }
 });
 
+// 5. Upsert Exercício (Lógica específica: Um exercício por vaga)
+app.post('/api/Exercicio', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const data = cleanData(req.body);
+    const usuario = req.user?.usuario || 'Desconhecido';
+
+    if (!data.ID_VAGA || !data.ID_LOTACAO) {
+        return res.status(400).json({ message: "Vaga e Lotação são obrigatórias." });
+    }
+
+    try {
+        const result = await prisma.$transaction(async (tx: any) => {
+            const existingExercise = await tx.exercicio.findFirst({
+                where: { ID_VAGA: data.ID_VAGA }
+            });
+
+            if (existingExercise) {
+                const updated = await tx.exercicio.update({
+                    where: { ID_EXERCICIO: existingExercise.ID_EXERCICIO },
+                    data: { ID_LOTACAO: data.ID_LOTACAO }
+                });
+                await auditAction(usuario, 'EDITAR', 'Exercicio', updated.ID_EXERCICIO, existingExercise, updated, tx);
+                return updated;
+            } else {
+                if (!data.ID_EXERCICIO) data.ID_EXERCICIO = `EXE${Date.now()}`;
+                const created = await tx.exercicio.create({ data });
+                await auditAction(usuario, 'CRIAR', 'Exercicio', created.ID_EXERCICIO, null, created, tx);
+                return created;
+            }
+        });
+
+        res.json({ success: true, data: result, message: 'Exercício definido com sucesso.' });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+// 6. Criar Atendimento com Validação de Regras de Negócio e Auto-Reserva
+app.post('/api/Atendimento', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const data = cleanData(req.body);
+    const usuario = req.user?.usuario || 'Desconhecido';
+
+    try {
+        // Validações de Pré-requisitos (Regra de Negócio Legada)
+        const tiposDesligamentoContratado = ["Demissão", "Promoção (Contratado)", "Mudança (Contratado)"];
+        const tiposDesligamentoServidor = ["Exoneração de Cargo Comissionado", "Exoneração do Serviço Público", "Mudança de Alocação (Servidor)"];
+
+        if (tiposDesligamentoContratado.includes(data.TIPO_PEDIDO)) {
+            const contrato = await prisma.contrato.findFirst({ where: { CPF: data.CPF } });
+            if (!contrato) {
+                return res.status(400).json({ message: `Ação não permitida. O CPF ${data.CPF} não possui contrato ativo para este pedido.` });
+            }
+        }
+
+        if (tiposDesligamentoServidor.includes(data.TIPO_PEDIDO)) {
+            const servidor = await prisma.servidor.findFirst({ where: { CPF: data.CPF } });
+            if (!servidor) {
+                return res.status(400).json({ message: `Ação não permitida. O CPF ${data.CPF} não é um servidor ativo para este pedido.` });
+            }
+        }
+
+        if (data.TIPO_PEDIDO === 'Reserva de Vaga' && !data.ID_VAGA) {
+             // O campo ID_VAGA é enviado pelo frontend mas não existe na tabela Atendimento.
+             // Ele é usado para criar a reserva associada.
+             return res.status(400).json({ message: "Para reservar uma vaga, é obrigatório selecionar a vaga." });
+        }
+
+        // Separa o ID_VAGA para uso na lógica de reserva, pois ele não é persistido em Atendimento
+        const idVagaReserva = data.ID_VAGA;
+        delete data.ID_VAGA; 
+
+        const result = await prisma.$transaction(async (tx: any) => {
+            if (!data.ID_ATENDIMENTO) data.ID_ATENDIMENTO = `ATD${Date.now()}`;
+            if (!data.DATA_ENTRADA) data.DATA_ENTRADA = new Date();
+
+            // 1. Criar Atendimento
+            const atendimento = await tx.atendimento.create({ data });
+            await auditAction(usuario, 'CRIAR', 'Atendimento', atendimento.ID_ATENDIMENTO, null, atendimento, tx);
+
+            // 2. Criar Reserva se aplicável (Lógica do Legado: addAtendimento -> create Reserva)
+            if (atendimento.TIPO_PEDIDO === 'Reserva de Vaga' && idVagaReserva) {
+                 const novaReserva = await tx.reserva.create({
+                     data: {
+                         ID_RESERVA: `RES${Date.now()}`,
+                         ID_ATENDIMENTO: atendimento.ID_ATENDIMENTO,
+                         ID_VAGA: idVagaReserva,
+                         DATA_RESERVA: new Date(),
+                         STATUS: 'Ativa'
+                     }
+                 });
+                 await auditAction(usuario, 'CRIAR', 'Reserva', novaReserva.ID_RESERVA, null, novaReserva, tx);
+            }
+
+            return atendimento;
+        });
+
+        res.json({ success: true, data: result, message: 'Atendimento registrado com sucesso.' });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
 // --- GENERIC CRUD ROUTES WITH AUDIT ---
 
 app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {
