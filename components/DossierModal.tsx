@@ -17,9 +17,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
   useEffect(() => {
     const load = async () => {
       try {
-        // Limpar CPF antes de enviar para evitar erros de formatação (ex: 123.456.789-00 -> 12345678900)
-        const cleanCpf = cpf.replace(/\D/g, '');
-        const res = await api.getDossiePessoal(cleanCpf);
+        const res = await api.getDossiePessoal(cpf);
         setData(res);
       } catch (e) {
         console.error(e);
@@ -45,9 +43,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
     );
   }
 
-  // Verifica se o objeto data existe e tenta renderizar o que for possível
-  // Se 'pessoal' for nulo, ainda assim tenta renderizar o erro, mas se data for totalmente nulo, exibe erro genérico
-  if (!data) {
+  if (!data || !data.pessoal) {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
             <div className="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm text-center">
@@ -60,7 +56,7 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
       );
   }
 
-  const p = data.pessoal || { NOME: 'Desconhecido', CPF: cpf };
+  const p = data.pessoal;
   const badgeColors: {[key: string]: string} = {
     'Contratado': 'bg-green-100 text-green-800 border-green-200',
     'Servidor': 'bg-blue-100 text-blue-800 border-blue-200',
