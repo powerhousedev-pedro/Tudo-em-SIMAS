@@ -1,4 +1,5 @@
 
+
 export interface UserSession {
   token: string;
   usuario: string;
@@ -33,11 +34,21 @@ export enum AppRoute {
   HISTORY = 'history'
 }
 
+export interface DossierHistoryItem {
+    tipo: string;
+    data_ordenacao: string | Date; // Permite Date ou ISO String
+    periodo: string;
+    descricao: string;
+    detalhes: string;
+    icone: string;
+    cor: string;
+}
+
 export interface DossierData {
   pessoal: RecordData;
   tipoPerfil: string;
   vinculosAtivos: any[];
-  historico: any[];
+  historico: DossierHistoryItem[];
   atividadesEstudantis: { capacitacoes: any[] };
 }
 

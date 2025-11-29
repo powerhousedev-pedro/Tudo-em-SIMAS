@@ -1,4 +1,5 @@
 
+
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
@@ -65,8 +66,9 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        // Backend returns error in 'message' OR 'error' property
-        throw new Error(errorData.message || errorData.error || `Erro na API: ${response.statusText}`);
+        // Backend returns error in 'message' OR 'error' property. If both empty, fallback to Status.
+        const errorMessage = errorData.message || errorData.error || response.statusText || `Erro ${response.status}`;
+        throw new Error(errorMessage.includes('Erro na API') ? errorMessage : `Erro na API: ${errorMessage}`);
     }
     
     return await response.json();
