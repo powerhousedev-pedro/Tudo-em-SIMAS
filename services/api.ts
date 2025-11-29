@@ -3,7 +3,7 @@
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
-const API_BASE_URL = 'https://tudoemsimas.powerhouseapp.de/api';
+const API_BASE_URL = 'http://localhost:3001/api';
 const TOKEN_KEY = 'simas_auth_token';
 
 // --- CACHE & REQUEST MANAGEMENT ---

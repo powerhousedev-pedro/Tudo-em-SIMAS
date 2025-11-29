@@ -1,4 +1,5 @@
 
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -166,17 +167,22 @@ const authenticateToken = (req: any, res: any, next: any) => {
 // --- AUTH ROUTES ---
 
 app.post('/api/auth/login', async (req, res) => {
-  const { usuario, senha } = req.body;
-  const userDelegate = getPrismaDelegate(TABLES.USUARIO);
-  
-  const user = await userDelegate.findUnique({ where: { usuario } });
-  if (!user) return res.status(400).json({ success: false, message: 'Usuário não encontrado' });
+  try {
+    const { usuario, senha } = req.body;
+    const userDelegate = getPrismaDelegate(TABLES.USUARIO);
+    
+    const user = await userDelegate.findUnique({ where: { usuario } });
+    if (!user) return res.status(400).json({ success: false, message: 'Usuário não encontrado' });
 
-  const validPassword = await bcrypt.compare(senha, user.senha);
-  if (!validPassword) return res.status(400).json({ success: false, message: 'Senha incorreta' });
+    const validPassword = await bcrypt.compare(senha, user.senha);
+    if (!validPassword) return res.status(400).json({ success: false, message: 'Senha incorreta' });
 
-  const token = jwt.sign({ usuario: user.usuario, papel: user.papel, isGerente: user.isGerente }, JWT_SECRET, { expiresIn: '8h' });
-  res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
+    const token = jwt.sign({ usuario: user.usuario, papel: user.papel, isGerente: user.isGerente }, JWT_SECRET, { expiresIn: '8h' });
+    res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
+  } catch (error: any) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Erro interno no servidor' });
+  }
 });
 
 // --- DOSSIER ENDPOINT ---
