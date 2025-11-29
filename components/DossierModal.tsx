@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { DossierData } from '../types';
 import { validation } from '../utils/validation';
+import { generateDossierPDF } from '../utils/pdfGenerator';
 
 interface DossierModalProps {
   cpf: string;
@@ -31,8 +32,8 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
     load();
   }, [cpf]);
 
-  const handlePrint = () => {
-    window.print();
+  const handleDownloadPDF = () => {
+    if (data) generateDossierPDF(data);
   };
 
   if (loading) {
@@ -93,8 +94,8 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
                 </div>
                 
                 <div className="flex gap-3 print:hidden">
-                    <button onClick={handlePrint} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                        <i className="fas fa-print"></i> Imprimir
+                    <button onClick={handleDownloadPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                        <i className="fas fa-file-pdf"></i> Baixar PDF
                     </button>
                     <button onClick={onClose} className="bg-white text-simas-dark hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
                         Fechar
@@ -224,12 +225,6 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
             </div>
 
         </div>
-
-        {/* Footer for Print */}
-        <div className="hidden print:block text-center text-xs text-gray-500 mt-8 pt-4 border-t border-black pb-8">
-            Documento gerado eletronicamente pelo sistema Tudo em SIMAS em {new Date().toLocaleDateString()}.
-        </div>
-
       </div>
     </div>
   );

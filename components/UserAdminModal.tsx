@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { api } from '../services/api';
 import { UserSession } from '../types';
+import { ConfirmModal } from './ConfirmModal';
 
 interface UserAdminModalProps {
   onClose: () => void;
@@ -19,6 +20,10 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
   const [loading, setLoading] = useState(false);
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingList, setLoadingList] = useState(false);
+  
+  // Deletion State
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const isCoord = session.papel === 'COORDENAÇÃO';
 
@@ -79,11 +84,12 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
     }
   };
 
-  const handleDeleteUser = async (usuarioId: string) => {
-      if (!window.confirm(`Tem certeza que deseja excluir o usuário ${usuarioId}?`)) return;
+  const confirmDeleteUser = async () => {
+      if (!userToDelete) return;
+      setDeleting(true);
       
       try {
-          const res = await api.deleteUser(usuarioId);
+          const res = await api.deleteUser(userToDelete);
           if (res.success) {
               alert('Usuário excluído.');
               loadUsers();
@@ -92,6 +98,9 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
           }
       } catch (e: any) {
           alert('Erro: ' + e.message);
+      } finally {
+          setDeleting(false);
+          setUserToDelete(null);
       }
   };
 
@@ -213,7 +222,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                                 
                                 {user.usuario !== session.usuario && (
                                     <button 
-                                        onClick={() => handleDeleteUser(user.usuario)}
+                                        onClick={() => setUserToDelete(user.usuario)}
                                         className="w-8 h-8 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
                                         title="Excluir Usuário"
                                     >
@@ -226,8 +235,17 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                 )}
             </div>
         </div>
-
       </div>
+      
+      {userToDelete && (
+          <ConfirmModal 
+              title="Excluir Usuário" 
+              message={`Tem certeza que deseja excluir permanentemente o usuário ${userToDelete}?`}
+              onConfirm={confirmDeleteUser} 
+              onCancel={() => setUserToDelete(null)}
+              isLoading={deleting}
+          />
+      )}
     </div>
   );
 };

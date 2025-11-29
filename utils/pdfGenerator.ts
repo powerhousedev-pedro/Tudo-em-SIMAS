@@ -1,7 +1,8 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { ReportData } from '../types';
+import { ReportData, DossierData } from '../types';
+import { validation } from '../utils/validation';
 
 export const generateReportPDF = (
   reportId: string, 
@@ -76,4 +77,116 @@ export const generateReportPDF = (
     }
 
     doc.save(`${reportLabel.replace(/\s+/g, '_')}_${today}.pdf`);
+};
+
+export const generateDossierPDF = (data: DossierData) => {
+    if (!data) return;
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFillColor(19, 51, 90); 
+    doc.rect(0, 0, 210, 25, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.text(data.pessoal.NOME || 'Dossiê', 14, 13);
+    doc.setFontSize(10);
+    doc.text(`CPF: ${validation.formatCPF(data.pessoal.CPF)}`, 14, 20);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, 150, 20);
+
+    let currentY = 35;
+
+    // Dados Pessoais
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    doc.text("Dados Pessoais", 14, currentY);
+    currentY += 5;
+    
+    const personalRows = [
+        ['Nascimento', validation.formatDate(data.pessoal.DATA_DE_NASCIMENTO)],
+        ['Telefone', validation.formatPhone(data.pessoal.TELEFONE)],
+        ['Email', data.pessoal.EMAIL || 'N/A'],
+        ['Bairro', data.pessoal.BAIRRO || 'N/A'],
+        ['Escolaridade', data.pessoal.ESCOLARIDADE || 'N/A'],
+        ['Formação', data.pessoal.FORMACAO || 'N/A']
+    ];
+
+    autoTable(doc, {
+        startY: currentY,
+        body: personalRows,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 1 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 40 } }
+    });
+    
+    currentY = (doc as any).lastAutoTable.finalY + 10;
+
+    // Vínculos
+    if (data.vinculosAtivos && data.vinculosAtivos.length > 0) {
+        doc.setFontSize(12);
+        doc.text("Vínculos Ativos", 14, currentY);
+        currentY += 5;
+
+        const vinculosRows = data.vinculosAtivos.map(v => [
+            v.tipo, 
+            v.cargo_efetivo || v.funcao || 'N/A', 
+            v.lotacao || v.alocacao_atual || 'N/A',
+            validation.formatDate(v.data_inicio || v.data_admissao)
+        ]);
+
+        autoTable(doc, {
+            startY: currentY,
+            head: [['Tipo', 'Cargo/Função', 'Lotação', 'Início']],
+            body: vinculosRows,
+            theme: 'striped',
+            headStyles: { fillColor: [42, 104, 143] }
+        });
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+    }
+
+    // Histórico
+    if (data.historico && data.historico.length > 0) {
+        doc.setFontSize(12);
+        doc.text("Histórico", 14, currentY);
+        currentY += 5;
+
+        const histRows = data.historico.map(h => [
+            h.periodo, 
+            h.tipo, 
+            h.descricao, 
+            h.detalhes
+        ]);
+
+        autoTable(doc, {
+            startY: currentY,
+            head: [['Período', 'Tipo', 'Descrição', 'Detalhes']],
+            body: histRows,
+            theme: 'striped',
+            headStyles: { fillColor: [19, 51, 90] }
+        });
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+    }
+
+    // Capacitações
+    if (data.atividadesEstudantis?.capacitacoes?.length > 0) {
+         doc.setFontSize(12);
+        doc.text("Capacitação", 14, currentY);
+        currentY += 5;
+
+        const capRows = data.atividadesEstudantis.capacitacoes.map(c => [
+            c.data,
+            c.nome,
+            c.turma,
+            c.status
+        ]);
+
+        autoTable(doc, {
+            startY: currentY,
+            head: [['Data', 'Atividade', 'Turma', 'Presença']],
+            body: capRows,
+            theme: 'striped',
+            headStyles: { fillColor: [16, 185, 129] }
+        });
+    }
+
+    doc.save(`Dossie_${data.pessoal.NOME?.split(' ')[0] || 'Completo'}.pdf`);
 };
