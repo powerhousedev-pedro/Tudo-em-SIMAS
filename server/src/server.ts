@@ -87,6 +87,40 @@ function getEntityPk(entity: string): string {
     return `ID_${entity.toUpperCase()}`;
 }
 
+// --- ERROR HANDLING HELPER ---
+const getFriendlyErrorMessage = (error: any): string => {
+    const msg = error.message || '';
+
+    // Prisma Unique Constraint (P2002)
+    if (msg.includes('Unique constraint') || error.code === 'P2002') {
+        return 'Já existe um registro com estes dados (CPF, Matrícula ou ID duplicado).';
+    }
+
+    // Prisma Foreign Key Constraint (P2003)
+    if (msg.includes('Foreign key constraint') || error.code === 'P2003') {
+        return 'Não é possível excluir ou alterar este registro pois ele está vinculado a outros dados no sistema.';
+    }
+
+    // Prisma Record Not Found (P2025)
+    if (msg.includes('Record to delete does not exist') || msg.includes('Record to update not found') || error.code === 'P2025') {
+        return 'O registro solicitado não foi encontrado no banco de dados. Pode ter sido excluído anteriormente.';
+    }
+
+    // Prisma Invalid Field/Column
+    if (msg.includes('Unknown argument') || msg.includes('Invalid `model')) {
+        return 'Erro interno de dados: Estrutura inválida ou campo inexistente.';
+    }
+
+    // Generic "Record not found" custom throws
+    if (msg.includes('não encontrado') || msg.includes('não encontrada')) {
+        return msg; // Retorna a mensagem customizada já limpa
+    }
+
+    // Fallback for technical errors needed for debugging but hidden from simple UI
+    console.error("Technical Error:", msg);
+    return 'Ocorreu um erro ao processar sua solicitação. Verifique os dados e tente novamente.';
+};
+
 // --- AUDIT SYSTEM ---
 
 const auditAction = async (
@@ -266,8 +300,7 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
 
         res.json({ success: true, data: result, message: 'Alocação realizada com sucesso.' });
     } catch (e: any) {
-        console.error(e);
-        res.status(500).json({ message: 'Erro ao criar alocação: ' + e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -306,8 +339,7 @@ app.post('/api/Contrato', authenticateToken, async (req: AuthenticatedRequest, r
 
         res.json({ success: true, data: result });
     } catch (e: any) {
-        console.error(e);
-        res.status(500).json({ message: 'Erro ao criar contrato: ' + e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -342,7 +374,7 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
 
         res.json({ success: true, data: result });
     } catch (e: any) {
-        res.status(500).json({ message: e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -388,8 +420,7 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
 
         res.json({ success: true, data: result });
     } catch (e: any) {
-        console.error(e);
-        res.status(500).json({ message: 'Erro ao inativar servidor: ' + e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -474,8 +505,7 @@ app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, re
 
         res.json({ success: true, data: result });
     } catch (e: any) {
-        console.error(`Error creating ${entity}:`, e);
-        res.status(500).json({ message: 'Erro ao criar registro: ' + e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -505,8 +535,7 @@ app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest,
 
         res.json({ success: true, data: result });
     } catch (e: any) {
-        console.error(`Error updating ${entity}:`, e);
-        res.status(500).json({ message: 'Erro ao atualizar registro: ' + e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -520,6 +549,8 @@ app.delete('/api/:entity/:id', authenticateToken, async (req: AuthenticatedReque
     try {
         const pkField = getEntityPk(entity);
         const oldRecord = await model.findUnique({ where: { [pkField]: id } });
+        
+        if (!oldRecord) throw new Error('Record to delete does not exist');
 
         await model.delete({
             where: { [pkField]: id }
@@ -531,8 +562,7 @@ app.delete('/api/:entity/:id', authenticateToken, async (req: AuthenticatedReque
 
         res.json({ success: true });
     } catch (e: any) {
-        console.error(`Error deleting ${entity}:`, e);
-        res.status(500).json({ message: 'Erro ao excluir registro. Verifique dependências.' });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -555,7 +585,7 @@ app.post('/api/Vaga/:id/toggle-lock', authenticateToken, async (req: Authenticat
         
         res.json(newStatus);
     } catch (e: any) {
-        res.status(500).json({ message: e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -565,23 +595,34 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
 
     try {
         const log = await prisma.auditoria.findUnique({ where: { ID_LOG: id } });
-        if (!log) return res.status(404).json({ message: 'Log não encontrado' });
+        if (!log) return res.status(404).json({ message: 'Log de auditoria não encontrado.' });
 
         const model = getModel(log.TABELA_AFETADA);
-        if (!model) return res.status(400).json({ message: 'Tabela não suportada para restauração automatica.' });
+        if (!model) return res.status(400).json({ message: 'Esta tabela não suporta restauração automática.' });
 
         const pk = getEntityPk(log.TABELA_AFETADA);
         const oldVal = JSON.parse(log.VALOR_ANTIGO || '{}');
         const newVal = JSON.parse(log.VALOR_NOVO || '{}');
 
         if (log.ACAO === 'EXCLUIR') {
-            // Restaurar registro deletado
+            // Restaurar registro deletado (Tentar recriar)
+            // Verificar se já existe (pra evitar erro de PK)
+            const exists = await model.findUnique({ where: { [pk]: log.ID_REGISTRO_AFETADO } });
+            if (exists) throw new Error('Já existe um registro com este ID. Não é possível restaurar.');
+            
             await model.create({ data: oldVal });
         } else if (log.ACAO === 'CRIAR') {
             // Deletar registro criado
+            // Verificar se ainda existe
+            const exists = await model.findUnique({ where: { [pk]: log.ID_REGISTRO_AFETADO } });
+            if (!exists) throw new Error('Record to delete does not exist');
+            
             await model.delete({ where: { [pk]: log.ID_REGISTRO_AFETADO } });
         } else if (log.ACAO === 'EDITAR') {
             // Reverter campos
+             const exists = await model.findUnique({ where: { [pk]: log.ID_REGISTRO_AFETADO } });
+            if (!exists) throw new Error('O registro original não foi encontrado para ser revertido.');
+            
             await model.update({
                 where: { [pk]: log.ID_REGISTRO_AFETADO },
                 data: oldVal // Restaura todos os campos antigos
@@ -593,7 +634,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
 
         res.json({ success: true, message: 'Ação restaurada com sucesso.' });
     } catch (e: any) {
-        res.status(500).json({ message: e.message });
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
