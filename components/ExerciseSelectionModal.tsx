@@ -9,9 +9,10 @@ interface ExerciseSelectionModalProps {
   vagaId: string;
   onClose: () => void;
   onSuccess: () => void;
+  showToast: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
-export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ vagaId, onClose, onSuccess }) => {
+export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ vagaId, onClose, onSuccess, showToast }) => {
   const [lotacoes, setLotacoes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,10 +41,10 @@ export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ 
       if (res.success) {
         onSuccess();
       } else {
-        alert('Erro ao salvar exercício.');
+        showToast('error', 'Erro ao salvar exercício.');
       }
     } catch (e) {
-      alert('Erro de conexão.');
+      showToast('error', 'Erro de conexão.');
     } finally {
       setSaving(false);
     }

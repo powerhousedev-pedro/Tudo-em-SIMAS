@@ -10,9 +10,10 @@ interface ActionModalProps {
   idAtendimento: string;
   onClose: () => void;
   onSuccess: () => void;
+  showToast: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
-export const ActionExecutionModal: React.FC<ActionModalProps> = ({ idAtendimento, onClose, onSuccess }) => {
+export const ActionExecutionModal: React.FC<ActionModalProps> = ({ idAtendimento, onClose, onSuccess, showToast }) => {
   const [context, setContext] = useState<ActionContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -69,10 +70,10 @@ export const ActionExecutionModal: React.FC<ActionModalProps> = ({ idAtendimento
       if (res.success) {
         onSuccess();
       } else {
-        alert(res.message);
+        showToast('error', res.message);
       }
     } catch (e) {
-      alert('Erro ao executar ação.');
+      showToast('error', 'Erro ao executar ação.');
     } finally {
       setSubmitting(false);
     }

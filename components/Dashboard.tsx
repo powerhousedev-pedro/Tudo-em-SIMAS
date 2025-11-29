@@ -650,7 +650,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga').then(d => setCardData(p => ({...p, 'Vaga': d}))); }} />}
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga').then(d => setCardData(p => ({...p, 'Vaga': d}))); }} showToast={showToast} />}
       
       {itemToDelete && (
         <ConfirmModal 

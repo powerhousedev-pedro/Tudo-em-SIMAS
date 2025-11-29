@@ -179,7 +179,7 @@ const App: React.FC = () => {
         </main>
 
         {/* Global Modals */}
-        {showUserAdminModal && <UserAdminModal onClose={() => setShowUserAdminModal(false)} session={session} />}
+        {showUserAdminModal && <UserAdminModal onClose={() => setShowUserAdminModal(false)} session={session} showToast={showToast} />}
         
         {/* EXECUTION MODAL (Global) */}
         {actionAtendimentoId && (
@@ -190,7 +190,8 @@ const App: React.FC = () => {
               setActionAtendimentoId(null); 
               loadPendingReviews(); 
               showToast('success', 'Ação executada com sucesso!'); 
-            }} 
+            }}
+            showToast={showToast}
           />
         )}
 
