@@ -179,6 +179,133 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
 });
 
+// --- DOSSIER ENDPOINT ---
+
+app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res) => {
+    const { cpf } = req.params;
+    
+    // Delegates
+    const pessoaDelegate = getPrismaDelegate(TABLES.PESSOA);
+    const contratoDelegate = getPrismaDelegate(TABLES.CONTRATO);
+    const servidorDelegate = getPrismaDelegate(TABLES.SERVIDOR);
+    const contratoHistDelegate = getPrismaDelegate(TABLES.CONTRATO_HISTORICO);
+    const alocacaoHistDelegate = getPrismaDelegate(TABLES.ALOCACAO_HISTORICO);
+    const inativoDelegate = getPrismaDelegate(TABLES.INATIVO);
+
+    try {
+        const pessoa = await pessoaDelegate.findUnique({ where: { CPF: cpf } });
+        if (!pessoa) return res.status(404).json({ message: 'Pessoa não encontrada' });
+
+        // Active Links
+        const contratos = await contratoDelegate.findMany({
+            where: { CPF: cpf },
+            include: { [getClientKey(TABLES.FUNCAO)]: true }
+        });
+        
+        const servidores = await servidorDelegate.findMany({
+            where: { CPF: cpf },
+            include: { 
+                [getClientKey(TABLES.CARGO)]: true,
+                [getClientKey(TABLES.ALOCACAO)]: {
+                     include: { [getClientKey(TABLES.LOTACAO)]: true, [getClientKey(TABLES.FUNCAO)]: true },
+                     orderBy: { DATA_INICIO: 'desc' },
+                     take: 1
+                }
+            }
+        });
+
+        // Determine Profile
+        let tipoPerfil = 'Avulso';
+        if (servidores.length > 0) tipoPerfil = 'Servidor';
+        if (contratos.length > 0) tipoPerfil = 'Contratado';
+
+        // Construct Active Vinculos View
+        const vinculosAtivos: any[] = [];
+        for (const c of contratos) {
+            vinculosAtivos.push({
+                tipo: 'Contrato',
+                id_contrato: c.ID_CONTRATO,
+                funcao: c.funcao?.FUNCAO || 'N/A',
+                data_inicio: c.DATA_DO_CONTRATO,
+            });
+        }
+        for (const s of servidores) {
+            const aloc = s.alocacao?.[0]; // Recent alloc
+            vinculosAtivos.push({
+                tipo: 'Servidor',
+                matricula: s.MATRICULA,
+                cargo_efetivo: s.cargo?.NOME_CARGO,
+                salario: s.cargo?.SALARIO,
+                funcao_atual: aloc?.funcao?.FUNCAO || 'N/A',
+                alocacao_atual: aloc?.lotacao?.LOTACAO || 'Sem Lotação',
+                data_admissao: s.DATA_MATRICULA
+            });
+        }
+
+        // History
+        const histContratos = await contratoHistDelegate.findMany({ where: { CPF: cpf } });
+        const inativos = await inativoDelegate.findMany({ where: { CPF: cpf } });
+        
+        // Alocacao History requires matriculas
+        const matriculas = [
+            ...servidores.map((s:any) => s.MATRICULA),
+            ...inativos.map((i:any) => i.MATRICULA)
+        ];
+        
+        let histAlocacoes: any[] = [];
+        if (matriculas.length > 0) {
+            histAlocacoes = await alocacaoHistDelegate.findMany({
+                where: { MATRICULA: { in: matriculas } },
+                include: { [getClientKey(TABLES.LOTACAO)]: true }
+            });
+        }
+
+        // Merge History for Timeline
+        const timeline: any[] = [];
+        
+        histContratos.forEach((h: any) => timeline.push({
+            tipo: 'Contrato Encerrado',
+            periodo: `${h.DATA_DO_CONTRATO ? new Date(h.DATA_DO_CONTRATO).getFullYear() : '?'} - ${h.DATA_ARQUIVAMENTO ? new Date(h.DATA_ARQUIVAMENTO).getFullYear() : '?'}`,
+            descricao: `Contrato ${h.ID_CONTRATO}`,
+            detalhes: `Arquivado em ${new Date(h.DATA_ARQUIVAMENTO).toLocaleDateString('pt-BR')}. Motivo: ${h.MOTIVO_ARQUIVAMENTO || 'N/A'}`
+        }));
+
+        inativos.forEach((i: any) => timeline.push({
+            tipo: 'Servidor Inativo',
+            periodo: `Encerrado em ${new Date(i.DATA_INATIVACAO).toLocaleDateString('pt-BR')}`,
+            descricao: `Matrícula ${i.MATRICULA} - ${i.CARGO || 'N/A'}`,
+            detalhes: `Motivo: ${i.MOTIVO || 'N/A'}`
+        }));
+
+        histAlocacoes.forEach((a: any) => timeline.push({
+            tipo: 'Movimentação',
+            periodo: `${new Date(a.DATA_INICIO).toLocaleDateString('pt-BR')} - ${a.DATA_FIM ? new Date(a.DATA_FIM).toLocaleDateString('pt-BR') : 'Atual'}`,
+            descricao: `Lotação em ${a.lotacao?.LOTACAO || a.ID_LOTACAO}`,
+            detalhes: `Matrícula ${a.MATRICULA}. ${a.MOTIVO_MUDANCA || ''}`
+        }));
+        
+        timeline.sort((a, b) => {
+             const getYear = (s: string) => {
+                 const m = s.match(/\d{4}/);
+                 return m ? parseInt(m[0]) : 0;
+             };
+             return getYear(b.periodo) - getYear(a.periodo);
+        });
+
+        res.json({
+            pessoal: pessoa,
+            tipoPerfil,
+            vinculosAtivos,
+            historico: timeline,
+            atividadesEstudantis: { capacitacoes: [] } 
+        });
+
+    } catch (e: any) {
+        console.error(e);
+        res.status(500).json({ message: e.message });
+    }
+});
+
 // --- REPORTS ENDPOINTS (Server-Side Aggregation) ---
 
 app.get('/api/reports/:reportName', authenticateToken, async (req: any, res) => {
