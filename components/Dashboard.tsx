@@ -1,7 +1,6 @@
 
-
 import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
-import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, BOOLEAN_FIELD_CONFIG } from '../constants';
+import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, BOOLEAN_FIELD_CONFIG, PERMISSOES_POR_PAPEL } from '../constants';
 import { api } from '../services/api';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -14,9 +13,27 @@ import { ExerciseSelectionModal } from './ExerciseSelectionModal';
 interface DashboardProps extends AppContextProps {}
 
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
+  // --- SESSION ---
+  const session: UserSession = useMemo(() => {
+      const stored = localStorage.getItem('simas_user_session');
+      return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
+  }, []);
+
+  // --- COMPUTED VALUES (Role Filtering) ---
+  const tabs = useMemo(() => {
+      const allKeys = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && k !== 'Atendimento');
+      const userPermissions = PERMISSOES_POR_PAPEL[session.papel] || [];
+      
+      if (userPermissions.includes('TODAS')) {
+          return allKeys;
+      }
+
+      return allKeys.filter(key => userPermissions.includes(key));
+  }, [session.papel]);
+
   // --- STATE ---
-  // Ensure default is a valid key from ENTITY_CONFIGS (PascalCase)
-  const [activeTab, setActiveTab] = useState('Pessoa');
+  // Ensure default is a valid key available to the user
+  const [activeTab, setActiveTab] = useState(tabs[0] || 'Pessoa');
   const [formData, setFormData] = useState<RecordData>({});
   const [isEditing, setIsEditing] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -40,13 +57,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
-  // --- SESSION ---
-  const session: UserSession = useMemo(() => {
-      const stored = localStorage.getItem('simas_user_session');
-      return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
-  }, []);
-
   // --- EFFECTS ---
+
+  // Ensure activeTab is valid when tabs change (e.g. login)
+  useEffect(() => {
+      if (!tabs.includes(activeTab) && tabs.length > 0) {
+          setActiveTab(tabs[0]);
+      }
+  }, [tabs, activeTab]);
 
   // 1. Tab Change Reset
   useEffect(() => {
@@ -84,9 +102,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const loadAllRequiredData = async () => {
     setLoadingData(true);
-    const allEntities = Object.keys(ENTITY_CONFIGS);
+    // Load only entities relevant to current view + active tab to optimize
+    // However, to keep relationship columns working, we might need related entities
+    // For now, loading all permitted entities is safer for relationship resolution
+    const entitiesToLoad = tabs; 
+    
     try {
-      const results = await Promise.all(allEntities.map(async (entity) => {
+      const results = await Promise.all(entitiesToLoad.map(async (entity) => {
            try {
              const data = await api.fetchEntity(entity);
              return { entity, data };
@@ -106,8 +128,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   };
 
   // --- COMPUTED VALUES ---
-
-  const tabs = useMemo(() => Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && k !== 'Atendimento'), []);
   
   const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
 
@@ -117,12 +137,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     
     modelFields.forEach(field => {
         const linkedEntity = FK_MAPPING[field];
+        // Only show column if user has permission to see that entity
         if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity) && linkedEntity !== activeTab) {
-             columns.push(linkedEntity);
+             if (tabs.includes(linkedEntity)) {
+                 columns.push(linkedEntity);
+             }
         }
     });
     return columns;
-  }, [activeTab, showMainList]);
+  }, [activeTab, showMainList, tabs]);
 
   // --- HANDLERS ---
 
@@ -158,12 +181,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       if (formatted.CPF) formatted.CPF = validation.maskCPF(formatted.CPF);
 
       // CORREÇÃO: Formatar datas para o padrão do input date (YYYY-MM-DD)
-      // Usar split('T') garante que pegamos a data "como está" no DB/ISO sem conversão de fuso horário local
       Object.keys(formatted).forEach(key => {
           if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key) && formatted[key]) {
              try {
                  if (typeof formatted[key] === 'string') {
-                     // Se for uma string ISO completa (ex: 2023-01-01T00:00:00.000Z), pega só a parte da data
                      formatted[key] = formatted[key].split('T')[0];
                  } else if (formatted[key] instanceof Date) {
                      formatted[key] = formatted[key].toISOString().split('T')[0];
@@ -362,7 +383,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const inputCommonClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all duration-200 text-sm font-medium text-simas-dark";
 
     if (options.length > 0) {
-      // CORREÇÃO: Se houver poucas opções (ex: Sexo M/F), usar checkbox exclusivo (Botões lado a lado)
       if (options.length <= 4) {
           return (
              <div key={field} className="relative group mb-1">
@@ -402,7 +422,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
           );
       }
 
-      // Dropdown padrão para muitas opções
       return (
         <div key={field} className="relative group">
           <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
