@@ -61,25 +61,41 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
     if (response.status === 401 || (method === 'GET' && response.status === 403)) {
          localStorage.removeItem(TOKEN_KEY);
          window.location.href = '#/login';
-         throw new Error('Sessão expirada');
+         throw new Error('Sessão expirada. Faça login novamente.');
     }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        // Backend returns error in 'message' OR 'error' property. If both empty, fallback to Status.
-        const errorMessage = errorData.message || errorData.error || response.statusText || `Erro ${response.status}`;
-        throw new Error(errorMessage.includes('Erro na API') ? errorMessage : `Erro na API: ${errorMessage}`);
+        // Backend now returns sanitized 'message', but we double check here
+        let errorMessage = errorData.message || errorData.error || response.statusText;
+        
+        // Final Safety Net: If backend leaked a Prisma error or code, sanitize it here
+        if (errorMessage.includes('Prisma') || errorMessage.includes('invocation') || errorMessage.includes('Internal Server Error')) {
+            errorMessage = 'Ocorreu um erro técnico no servidor. Tente novamente mais tarde.';
+        }
+        
+        // Handle HTML response (e.g. Nginx 500/502)
+        if (errorMessage.includes('<!DOCTYPE html>')) {
+             errorMessage = 'Servidor temporariamente indisponível.';
+        }
+
+        throw new Error(errorMessage);
     }
     
     return await response.json();
   } catch (error: any) {
     if (error.name === 'AbortError') throw error;
     
-    // Only log strictly unknown errors to console to reduce noise
-    // 400-level errors are often functional (e.g. invalid password)
+    // Transform Connection Refused / Network Error
+    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        throw new Error('Não foi possível conectar ao servidor. Verifique sua internet.');
+    }
+
+    // Pass through the sanitized error
     const isClientError = error.message && (error.message.includes('Senha incorreta') || error.message.includes('Usuário'));
     if (!isClientError) {
-        console.error(`API Error (${method} ${endpoint}):`, error);
+        // Log original error for dev debugging, but user sees the friendly one
+        console.warn(`API Error (${method} ${endpoint}):`, error);
     }
     throw error;
   }
