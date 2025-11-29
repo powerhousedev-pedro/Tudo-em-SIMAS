@@ -13,7 +13,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'simas-secure-secret';
 app.use(cors());
 app.use(express.json() as any);
 
-const authenticateToken = (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
+const authenticateToken = (req: any, res: any, next: NextFunction) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
@@ -21,7 +21,7 @@ const authenticateToken = (req: ExpressRequest, res: ExpressResponse, next: Next
 
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
         if (err) return res.sendStatus(403);
-        (req as any).user = user;
+        req.user = user;
         next();
     });
 };
@@ -34,7 +34,16 @@ const cleanData = (data: any) => {
         if (data[key] === "") {
             cleaned[key] = null;
         } else {
-            cleaned[key] = data[key];
+            let val = data[key];
+            // Fix for Prisma DateTime validation (YYYY-MM-DD -> ISO)
+            if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+                // Check if likely a date field based on name heuristic matching frontend constants
+                if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key)) {
+                    // Treat YYYY-MM-DD as UTC midnight to avoid timezone shifts
+                    val = new Date(val).toISOString();
+                }
+            }
+            cleaned[key] = val;
         }
     }
     return cleaned;
@@ -221,7 +230,7 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
                 const [vinculacao, lotacao, cargo] = key.split('|');
                 const detailsParts = [];
                 if (val.free > 0) detailsParts.push(`Livre x${val.free}`);
-                if (val.reserved.length > 0) detailsParts.push(`Reservada x${val.reserved.length} (${val.reserved.join(', ')})`);
+                if (val.reserved.length > 0) detailsParts.push(`Reservada x${val.reserved.length} (${val.reserved.length > 0 ? val.reserved.join(', ') : '?'})`);
                 return {
                     VINCULACAO: vinculacao,
                     LOTACAO: lotacao,
