@@ -158,12 +158,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       if (formatted.CPF) formatted.CPF = validation.maskCPF(formatted.CPF);
 
       // CORREÇÃO: Formatar datas para o padrão do input date (YYYY-MM-DD)
+      // Usar split('T') garante que pegamos a data "como está" no DB/ISO sem conversão de fuso horário local
       Object.keys(formatted).forEach(key => {
           if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key) && formatted[key]) {
              try {
-                 const d = new Date(formatted[key]);
-                 if (!isNaN(d.getTime())) {
-                     formatted[key] = d.toISOString().split('T')[0];
+                 if (typeof formatted[key] === 'string') {
+                     // Se for uma string ISO completa (ex: 2023-01-01T00:00:00.000Z), pega só a parte da data
+                     formatted[key] = formatted[key].split('T')[0];
+                 } else if (formatted[key] instanceof Date) {
+                     formatted[key] = formatted[key].toISOString().split('T')[0];
                  }
              } catch(e) {
                  console.warn("Could not format date for edit:", key);

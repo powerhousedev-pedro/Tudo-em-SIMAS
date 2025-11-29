@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { DossierData } from '../types';
@@ -13,14 +12,18 @@ interface DossierModalProps {
 export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
   const [data, setData] = useState<DossierData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await api.getDossiePessoal(cpf);
+        const cleanCpf = cpf.replace(/\D/g, '');
+        const res = await api.getDossiePessoal(cleanCpf);
+        if (!res) throw new Error("Dados não retornados.");
         setData(res);
-      } catch (e) {
+      } catch (e: any) {
         console.error(e);
+        setError(e.message || 'Erro desconhecido ao carregar dossiê.');
       } finally {
         setLoading(false);
       }
@@ -34,29 +37,32 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div className="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center">
-          <div className="spinner-border text-simas-medium mb-4"></div>
-          <p className="text-gray-600">Carregando dossiê...</p>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm print:hidden">
+        <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center">
+          <div className="w-12 h-12 border-4 border-simas-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-600 font-medium">Gerando ficha cadastral...</p>
         </div>
       </div>
     );
   }
 
-  if (!data || !data.pessoal) {
+  if (error || !data) {
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm text-center">
-                <i className="fas fa-exclamation-circle text-4xl text-red-500 mb-3"></i>
-                <h3 className="text-lg font-bold text-gray-800">Erro ao carregar</h3>
-                <p className="text-sm text-gray-500 mb-4">Não foi possível recuperar os dados completos para este CPF.</p>
-                <button onClick={onClose} className="px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-600 hover:bg-gray-200">Fechar</button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm print:hidden">
+            <div className="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm text-center">
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+                    <i className="fas fa-exclamation-triangle text-2xl text-red-500"></i>
+                </div>
+                <h3 className="text-lg font-bold text-gray-800 mb-2">Erro ao carregar</h3>
+                <p className="text-sm text-gray-500 mb-6">{error || 'Dados não encontrados.'}</p>
+                <button onClick={onClose} className="px-6 py-2.5 bg-gray-100 rounded-full text-sm font-bold text-gray-700 hover:bg-gray-200 transition-colors">Fechar</button>
             </div>
         </div>
       );
   }
 
-  const p = data.pessoal;
+  const p = data.pessoal || { NOME: 'Desconhecido', CPF: cpf };
+  
   const badgeColors: {[key: string]: string} = {
     'Contratado': 'bg-green-100 text-green-800 border-green-200',
     'Servidor': 'bg-blue-100 text-blue-800 border-blue-200',
@@ -65,113 +71,141 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm overflow-y-auto py-10 print:bg-white print:static print:block print:p-0">
-      <div className="bg-gray-50 w-full max-w-4xl rounded-xl shadow-2xl border border-gray-200 overflow-hidden print:shadow-none print:border-none print:w-full print:max-w-none">
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto print:p-0 print:bg-white print:overflow-visible print:block print:relative print:inset-auto">
+      <div className="relative w-full max-w-5xl my-8 bg-white rounded-3xl shadow-2xl overflow-hidden print:shadow-none print:rounded-none print:w-full print:max-w-none print:my-0">
         
-        {/* Header */}
-        <div className="bg-white px-8 py-6 border-b border-gray-200 flex justify-between items-start print:border-b-2 print:border-black">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-2xl font-bold text-simas-dark">{p.NOME || 'Nome não informado'}</h2>
-              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${badgeColors[data.tipoPerfil] || badgeColors['Avulso']}`}>
-                {data.tipoPerfil || 'Desconhecido'}
-              </span>
-            </div>
-            <p className="text-gray-500 text-sm flex items-center gap-2">
-              <i className="fas fa-id-card"></i> {validation.formatCPF(p.CPF)}
-            </p>
-          </div>
-          <div className="flex gap-2 print:hidden">
-            <button onClick={handlePrint} className="btn btn-sm bg-white border hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg">
-              <i className="fas fa-print mr-2"></i> Imprimir
-            </button>
-            <button onClick={onClose} className="btn btn-sm bg-simas-dark text-white hover:bg-simas-medium px-3 py-2 rounded-lg">
-              Fechar
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8 print:block print:space-y-6">
-          
-          {/* Personal Data */}
-          <section className="col-span-2 md:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-gray-100 print:border print:p-4 print:mb-4 print:break-inside-avoid">
-            <h3 className="text-lg font-bold text-simas-medium mb-4 border-b pb-2 flex items-center gap-2">
-              <i className="fas fa-user"></i> Dados Pessoais
-            </h3>
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-3 gap-2">
-                <span className="text-gray-500 font-medium">Nascimento:</span>
-                <span className="col-span-2 text-gray-900">{validation.formatDate(p.DATA_DE_NASCIMENTO)} ({validation.calculateAge(p.DATA_DE_NASCIMENTO) || '-'} anos)</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <span className="text-gray-500 font-medium">Telefone:</span>
-                <span className="col-span-2 text-gray-900">{validation.formatPhone(p.TELEFONE || '')}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <span className="text-gray-500 font-medium">Email:</span>
-                <span className="col-span-2 text-gray-900">{p.EMAIL || 'N/A'}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <span className="text-gray-500 font-medium">Bairro:</span>
-                <span className="col-span-2 text-gray-900">{p.BAIRRO || 'N/A'}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <span className="text-gray-500 font-medium">Escolaridade:</span>
-                <span className="col-span-2 text-gray-900">{p.ESCOLARIDADE || 'N/A'}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <span className="text-gray-500 font-medium">Formação:</span>
-                <span className="col-span-2 text-gray-900">{p.FORMACAO || 'N/A'}</span>
-              </div>
-            </div>
-          </section>
-
-          {/* Active Link */}
-          <section className="col-span-2 md:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-gray-100 print:border print:p-4 print:mb-4 print:break-inside-avoid">
-            <h3 className="text-lg font-bold text-simas-medium mb-4 border-b pb-2 flex items-center gap-2">
-              <i className="fas fa-briefcase"></i> Vínculo Ativo
-            </h3>
-            {data.vinculosAtivos && data.vinculosAtivos.length > 0 ? (
-              data.vinculosAtivos.map((v, i) => (
-                <div key={i} className="text-sm space-y-2 mb-4 last:mb-0">
-                  <p><span className="font-semibold text-gray-600">Tipo:</span> {v.tipo}</p>
-                  <p><span className="font-semibold text-gray-600">ID/Matrícula:</span> {v.id_contrato || v.matricula}</p>
-                  <p><span className="font-semibold text-gray-600">Cargo:</span> {v.cargo || v.cargo_efetivo}</p>
-                  <p><span className="font-semibold text-gray-600">Função:</span> {v.funcao || v.funcao_atual}</p>
-                  <p><span className="font-semibold text-gray-600">Lotação:</span> {v.lotacao || v.alocacao_atual}</p>
-                  <p><span className="font-semibold text-gray-600">Salário:</span> {v.salario ? validation.formatCurrency(v.salario) : 'N/A'}</p>
-                  <p><span className="font-semibold text-gray-600">Início:</span> {validation.formatDate(v.data_inicio || v.data_admissao)}</p>
+        {/* --- HEADER --- */}
+        <div className="bg-simas-dark text-white p-8 print:p-6 print:border-b-2 print:border-black print:bg-white print:text-black">
+            <div className="flex justify-between items-start">
+                <div className="flex gap-6 items-center">
+                     <div className="w-20 h-20 rounded-full bg-white text-simas-dark flex items-center justify-center text-3xl font-black shadow-lg print:border-2 print:border-black print:shadow-none">
+                         {p.NOME?.charAt(0) || '?'}
+                     </div>
+                     <div>
+                         <h1 className="text-3xl font-bold tracking-tight mb-2 print:text-black">{p.NOME}</h1>
+                         <div className="flex items-center gap-3">
+                             <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border print:border-black print:bg-transparent print:text-black ${badgeColors[data.tipoPerfil] || 'bg-gray-500'}`}>
+                                 {data.tipoPerfil}
+                             </span>
+                             <span className="text-sm opacity-80 print:opacity-100 font-mono">CPF: {validation.formatCPF(p.CPF)}</span>
+                         </div>
+                     </div>
                 </div>
-              ))
-            ) : (
-              <p className="text-gray-400 italic">Nenhum vínculo ativo.</p>
-            )}
-          </section>
+                
+                <div className="flex gap-3 print:hidden">
+                    <button onClick={handlePrint} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+                        <i className="fas fa-print"></i> Imprimir
+                    </button>
+                    <button onClick={onClose} className="bg-white text-simas-dark hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        </div>
 
-          {/* History */}
-          <section className="col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-100 print:border print:p-4 print:break-inside-avoid">
-            <h3 className="text-lg font-bold text-simas-medium mb-4 border-b pb-2 flex items-center gap-2">
-              <i className="fas fa-history"></i> Histórico Profissional
-            </h3>
-            {data.historico && data.historico.length > 0 ? (
-              <ul className="relative border-l-2 border-gray-200 ml-3 space-y-6">
-                {data.historico.map((h, i) => (
-                  <li key={i} className="ml-6 relative">
-                    <span className="absolute -left-[31px] top-0 w-4 h-4 bg-gray-200 rounded-full border-2 border-white"></span>
-                    <h4 className="text-sm font-bold text-gray-900">{h.descricao}</h4>
-                    <span className="text-xs text-gray-500 block mb-1">{h.periodo}</span>
-                    <p className="text-sm text-gray-600">{h.detalhes}</p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-gray-400 italic">Sem histórico registrado.</p>
-            )}
-          </section>
+        {/* --- CONTENT GRID --- */}
+        <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8 print:block print:p-6">
+            
+            {/* COL 1: Dados Pessoais e Vínculo (Sidebar no Desktop) */}
+            <div className="lg:col-span-1 space-y-8 print:mb-8 print:break-inside-avoid">
+                
+                {/* Dados Pessoais */}
+                <section>
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-100 pb-2 flex items-center gap-2 print:text-black print:border-black">
+                        <i className="fas fa-user-circle"></i> Dados Pessoais
+                    </h3>
+                    <div className="space-y-4">
+                        <InfoRow label="Data de Nascimento" value={`${validation.formatDate(p.DATA_DE_NASCIMENTO)} (${validation.calculateAge(p.DATA_DE_NASCIMENTO) || '?'} anos)`} />
+                        <InfoRow label="Telefone" value={validation.formatPhone(p.TELEFONE || '')} />
+                        <InfoRow label="Email" value={p.EMAIL} />
+                        <InfoRow label="Endereço (Bairro)" value={p.BAIRRO} />
+                        <InfoRow label="Escolaridade" value={p.ESCOLARIDADE} />
+                        <InfoRow label="Formação" value={p.FORMACAO} />
+                    </div>
+                </section>
+
+                {/* Vínculo Ativo */}
+                <section className="bg-gray-50 rounded-2xl p-6 border border-gray-100 print:bg-transparent print:border-black print:p-4 print:mt-4">
+                    <h3 className="text-xs font-bold text-simas-dark uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <i className="fas fa-id-badge"></i> Vínculo Ativo
+                    </h3>
+                    {data.vinculosAtivos && data.vinculosAtivos.length > 0 ? (
+                        data.vinculosAtivos.map((v, i) => (
+                            <div key={i} className="space-y-3 text-sm mb-6 last:mb-0">
+                                <div className="font-bold text-simas-blue border-b border-gray-200 pb-1 mb-2 print:text-black print:border-black">{v.tipo.toUpperCase()}</div>
+                                <InfoRow label="ID/Matrícula" value={v.id_contrato || v.matricula} compact />
+                                <InfoRow label="Cargo/Função" value={v.cargo_efetivo || v.funcao} compact />
+                                <InfoRow label="Lotação" value={v.lotacao || v.alocacao_atual} compact />
+                                {v.salario && <InfoRow label="Salário" value={validation.formatCurrency(v.salario)} compact />}
+                                <InfoRow label="Início" value={validation.formatDate(v.data_inicio || v.data_admissao)} compact />
+                                {v.detalhes && <p className="text-xs text-gray-500 mt-2 italic print:text-black">{v.detalhes}</p>}
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-sm text-gray-400 italic">Nenhum vínculo ativo no momento.</p>
+                    )}
+                </section>
+
+            </div>
+
+            {/* COL 2 & 3: Linha do Tempo */}
+            <div className="lg:col-span-2 print:mt-6">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6 border-b border-gray-100 pb-2 flex items-center gap-2 print:text-black print:border-black">
+                    <i className="fas fa-history"></i> Histórico Profissional
+                </h3>
+
+                <div className="relative pl-4">
+                    {/* Vertical Line */}
+                    <div className="absolute left-[21px] top-2 bottom-0 w-0.5 bg-gray-100 print:border-l print:border-gray-300"></div>
+
+                    <div className="space-y-8">
+                        {(!data.historico || data.historico.length === 0) ? (
+                             <div className="text-center py-10 text-gray-400 italic bg-gray-50 rounded-xl print:bg-transparent print:border print:border-gray-300">Nenhum histórico registrado.</div>
+                        ) : (
+                            data.historico.map((item, idx) => (
+                                <div key={idx} className="relative flex gap-6 group print:break-inside-avoid">
+                                    {/* Icon Dot */}
+                                    <div className={`
+                                        relative z-10 w-11 h-11 rounded-full border-4 border-white shadow-sm flex items-center justify-center shrink-0
+                                        ${item.cor === 'red' ? 'bg-red-100 text-red-600' : 
+                                          item.cor === 'blue' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}
+                                        print:border-black print:bg-white print:text-black
+                                    `}>
+                                        <i className={`fas ${item.icone} text-sm`}></i>
+                                    </div>
+
+                                    {/* Content Card */}
+                                    <div className="flex-1 pt-1 pb-4">
+                                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline mb-1">
+                                            <h4 className="text-base font-bold text-gray-900">{item.tipo}</h4>
+                                            <span className="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded print:bg-transparent print:text-black print:border print:border-black">{item.periodo}</span>
+                                        </div>
+                                        <p className="text-sm font-medium text-simas-dark/80 mb-1 print:text-black">{item.descricao}</p>
+                                        <p className="text-sm text-gray-500 leading-relaxed print:text-gray-700">{item.detalhes}</p>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
 
         </div>
+
+        {/* Footer for Print */}
+        <div className="hidden print:block text-center text-xs text-gray-500 mt-8 pt-4 border-t border-black pb-8">
+            Documento gerado eletronicamente pelo sistema Tudo em SIMAS em {new Date().toLocaleDateString()}.
+        </div>
+
       </div>
     </div>
   );
 };
+
+// Helper Component for Data Rows
+const InfoRow: React.FC<{ label: string; value: any; compact?: boolean }> = ({ label, value, compact }) => (
+    <div className={`${compact ? 'mb-1' : 'mb-3'}`}>
+        <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider print:text-black">{label}</span>
+        <span className={`block text-gray-900 font-medium ${compact ? 'text-sm' : 'text-base'}`}>{value || 'N/A'}</span>
+    </div>
+);

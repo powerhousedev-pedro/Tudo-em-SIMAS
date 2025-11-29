@@ -179,6 +179,152 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ success: true, token, role: user.papel, isGerente: user.isGerente });
 });
 
+// --- DOSSIER ENDPOINT (REFATORADO) ---
+
+app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res) => {
+    let { cpf } = req.params;
+    
+    // Robustez: Remover caracteres não numéricos do CPF para evitar 404 por formatação
+    cpf = cpf.replace(/\D/g, '');
+
+    // Delegates (usando nomes fixos para garantir acesso correto)
+    const pessoaDelegate = prisma.pessoa;
+    const contratoDelegate = prisma.contrato;
+    const servidorDelegate = prisma.servidor;
+    const contratoHistDelegate = prisma.contratoHistorico;
+    const alocacaoHistDelegate = prisma.alocacaoHistorico;
+    const inativoDelegate = prisma.inativo;
+
+    try {
+        const pessoa = await pessoaDelegate.findUnique({ where: { CPF: cpf } });
+        
+        if (!pessoa) {
+             // Retornar 404 limpo se a pessoa não existir
+             return res.status(404).json({ message: `Pessoa com CPF ${cpf} não encontrada.` });
+        }
+
+        // --- Active Links (Vínculos Ativos) ---
+        // Contratos: Inclui Função
+        const contratos = await contratoDelegate.findMany({
+            where: { CPF: cpf },
+            include: { funcao: true } 
+        });
+        
+        // Servidores: Inclui Cargo e Alocação atual
+        const servidores = await servidorDelegate.findMany({
+            where: { CPF: cpf },
+            include: { 
+                cargo: true,
+                alocacao: {
+                     include: { lotacao: true, funcao: true },
+                     orderBy: { DATA_INICIO: 'desc' },
+                     take: 1
+                }
+            }
+        });
+
+        // Determinar Perfil Principal
+        let tipoPerfil = 'Avulso';
+        if (servidores.length > 0) tipoPerfil = 'Servidor';
+        else if (contratos.length > 0) tipoPerfil = 'Contratado';
+
+        // Construir View Unificada de Vínculos
+        const vinculosAtivos: any[] = [];
+
+        // Adicionar Contratos
+        for (const c of contratos) {
+            vinculosAtivos.push({
+                tipo: 'Contrato',
+                id_contrato: c.ID_CONTRATO,
+                funcao: c.funcao?.FUNCAO || 'Função não definida',
+                data_inicio: c.DATA_DO_CONTRATO,
+                detalhes: `Vaga ${c.ID_VAGA || 'N/A'}`
+            });
+        }
+
+        // Adicionar Servidores
+        for (const s of servidores) {
+            const aloc = s.alocacao?.[0]; // Pega a alocação mais recente
+            vinculosAtivos.push({
+                tipo: 'Servidor',
+                matricula: s.MATRICULA,
+                cargo_efetivo: s.cargo?.NOME_CARGO || 'Cargo não definido',
+                salario: s.cargo?.SALARIO,
+                funcao_atual: aloc?.funcao?.FUNCAO || 'Sem função comissionada',
+                alocacao_atual: aloc?.lotacao?.LOTACAO || 'Sem Lotação',
+                data_admissao: s.DATA_MATRICULA,
+                detalhes: `Vínculo: ${s.VINCULO}`
+            });
+        }
+
+        // --- Timeline (Histórico Unificado) ---
+        const timeline: any[] = [];
+        
+        // 1. Histórico de Contratos
+        const histContratos = await contratoHistDelegate.findMany({ where: { CPF: cpf } });
+        histContratos.forEach((h: any) => timeline.push({
+            tipo: 'Contrato Encerrado',
+            data_ordenacao: h.DATA_ARQUIVAMENTO ? new Date(h.DATA_ARQUIVAMENTO) : new Date(0), // Data real para ordenação
+            periodo: `${h.DATA_DO_CONTRATO ? new Date(h.DATA_DO_CONTRATO).getFullYear() : '?'} - ${h.DATA_ARQUIVAMENTO ? new Date(h.DATA_ARQUIVAMENTO).getFullYear() : '?'}`,
+            descricao: `Contrato ${h.ID_CONTRATO}`,
+            detalhes: `Arquivado em ${new Date(h.DATA_ARQUIVAMENTO).toLocaleDateString('pt-BR')}. Motivo: ${h.MOTIVO_ARQUIVAMENTO || 'N/A'}`,
+            icone: 'fa-file-contract',
+            cor: 'gray'
+        }));
+
+        // 2. Histórico de Inatividade
+        const inativos = await inativoDelegate.findMany({ where: { CPF: cpf } });
+        inativos.forEach((i: any) => timeline.push({
+            tipo: 'Inativação de Servidor',
+            data_ordenacao: i.DATA_INATIVACAO ? new Date(i.DATA_INATIVACAO) : new Date(0),
+            periodo: `Encerrado em ${new Date(i.DATA_INATIVACAO).toLocaleDateString('pt-BR')}`,
+            descricao: `Matrícula ${i.MATRICULA} - ${i.CARGO || 'N/A'}`,
+            detalhes: `Motivo: ${i.MOTIVO || 'N/A'}. Processo: ${i.PROCESSO || 'N/A'}`,
+            icone: 'fa-user-slash',
+            cor: 'red'
+        }));
+
+        // 3. Histórico de Alocação (precisa das matrículas)
+        const matriculas = [
+            ...servidores.map((s:any) => s.MATRICULA),
+            ...inativos.map((i:any) => i.MATRICULA)
+        ];
+        
+        if (matriculas.length > 0) {
+            const histAlocacoes = await alocacaoHistDelegate.findMany({
+                where: { MATRICULA: { in: matriculas } },
+                include: { lotacao: true }
+            });
+
+            histAlocacoes.forEach((a: any) => timeline.push({
+                tipo: 'Movimentação / Alocação',
+                data_ordenacao: a.DATA_FIM ? new Date(a.DATA_FIM) : new Date(a.DATA_INICIO),
+                periodo: `${new Date(a.DATA_INICIO).toLocaleDateString('pt-BR')} - ${a.DATA_FIM ? new Date(a.DATA_FIM).toLocaleDateString('pt-BR') : 'Atual'}`,
+                descricao: `Lotação em ${a.lotacao?.LOTACAO || a.ID_LOTACAO}`,
+                detalhes: `Matrícula ${a.MATRICULA}. Motivo: ${a.MOTIVO_MUDANCA || 'Rotina'}`,
+                icone: 'fa-map-marker-alt',
+                cor: 'blue'
+            }));
+        }
+
+        // Ordenação Robusta por Data (Decrescente)
+        // Isso resolve o problema de ordenação frágil baseada em string
+        timeline.sort((a, b) => b.data_ordenacao.getTime() - a.data_ordenacao.getTime());
+
+        res.json({
+            pessoal: pessoa,
+            tipoPerfil,
+            vinculosAtivos,
+            historico: timeline,
+            atividadesEstudantis: { capacitacoes: [] } 
+        });
+
+    } catch (e: any) {
+        console.error("Erro no Dossiê:", e);
+        res.status(500).json({ message: 'Erro interno ao gerar dossiê. ' + e.message });
+    }
+});
+
 // --- REPORTS ENDPOINTS (Server-Side Aggregation) ---
 
 app.get('/api/reports/:reportName', authenticateToken, async (req: any, res) => {
