@@ -230,6 +230,7 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
             if (contratoAtivo) {
                 // 1. Prepara dados para a tabela histórica física
                 const dadosParaHistorico = {
+                    ID_HISTORICO_CONTRATO: generateId('HTC'), // Gerando PK
                     ID_CONTRATO: contratoAtivo.ID_CONTRATO,
                     CPF: contratoAtivo.CPF,
                     ID_VAGA: contratoAtivo.ID_VAGA,
@@ -286,6 +287,7 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
 
             // 1. Prepara dados para a tabela Inativo
             const dadosInativo = {
+                ID_INATIVO: generateId('INA'), // Gerando PK
                 MATRICULA: servidor.MATRICULA,
                 CPF: servidor.CPF,
                 ID_CARGO: servidor.ID_CARGO,
@@ -327,12 +329,13 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
                 // 1. Insere na tabela Histórica
                 await tx.alocacaoHistorico.create({
                     data: {
+                        ID_HISTORICO_ALOCACAO: generateId('HAL'), // Gerando PK
                         ID_ALOCACAO: alocacaoExistente.ID_ALOCACAO,
                         MATRICULA: alocacaoExistente.MATRICULA,
                         ID_LOTACAO: alocacaoExistente.ID_LOTACAO,
                         ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
                         DATA_INICIO: alocacaoExistente.DATA_INICIO,
-                        DATA_FIM: new Date(),
+                        DATA_ARQUIVAMENTO: new Date(), // Nome correto do campo
                         MOTIVO_MUDANCA: "Nova alocação criada"
                     }
                 });
@@ -405,53 +408,55 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 let dataToRestore: any = null;
 
                 if (log.TABELA_AFETADA === 'Contrato') {
-                    // Busca na tabela histórica física
-                    const historico = await tx.contratoHistorico.findUnique({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
+                    // Busca na tabela histórica física usando findFirst porque ID_CONTRATO não é PK lá
+                    const historico = await tx.contratoHistorico.findFirst({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
                     if (!historico) throw new Error("Registro não encontrado na tabela de histórico.");
 
                     // Limpa dados de controle do histórico
                     dataToRestore = { ...historico };
+                    delete dataToRestore.ID_HISTORICO_CONTRATO; // Remover PK da histórica
                     delete dataToRestore.DATA_ARQUIVAMENTO;
                     delete dataToRestore.MOTIVO_ARQUIVAMENTO;
 
                     // Insere na ativa
                     await tx.contrato.create({ data: dataToRestore });
-                    // Remove da histórica
-                    await tx.contratoHistorico.delete({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
+                    // Remove da histórica usando a PK correta encontrada
+                    await tx.contratoHistorico.delete({ where: { ID_HISTORICO_CONTRATO: historico.ID_HISTORICO_CONTRATO } });
 
                 } else if (log.TABELA_AFETADA === 'Servidor') {
                     // O ID do log é a MATRICULA
-                    const inativo = await tx.inativo.findUnique({ where: { MATRICULA: log.ID_REGISTRO_AFETADO } });
+                    const inativo = await tx.inativo.findFirst({ where: { MATRICULA: log.ID_REGISTRO_AFETADO } });
                     if (!inativo) throw new Error("Registro não encontrado na tabela de inativos.");
 
                     dataToRestore = { ...inativo };
+                    delete dataToRestore.ID_INATIVO; // Remover PK da histórica
                     delete dataToRestore.DATA_INATIVACAO;
-                    delete dataToRestore.MOTIVO; // ou MOTIVO_INATIVACAO dependendo do schema
+                    delete dataToRestore.MOTIVO; 
                     delete dataToRestore.PROCESSO;
                     delete dataToRestore.DATA_PUBLICACAO;
 
                     await tx.servidor.create({ data: dataToRestore });
-                    await tx.inativo.delete({ where: { MATRICULA: log.ID_REGISTRO_AFETADO } });
+                    // Remove usando a PK correta
+                    await tx.inativo.delete({ where: { ID_INATIVO: inativo.ID_INATIVO } });
 
                 } else if (log.TABELA_AFETADA === 'Alocacao') {
-                    const hist = await tx.alocacaoHistorico.findUnique({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
+                    const hist = await tx.alocacaoHistorico.findFirst({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
                     if (!hist) throw new Error("Registro histórico de alocação não encontrado.");
 
                     dataToRestore = { ...hist };
-                    delete dataToRestore.DATA_FIM;
+                    delete dataToRestore.ID_HISTORICO_ALOCACAO; // Remover PK da histórica
+                    delete dataToRestore.DATA_ARQUIVAMENTO;
                     delete dataToRestore.MOTIVO_MUDANCA;
 
                     await tx.alocacao.create({ data: dataToRestore });
-                    await tx.alocacaoHistorico.delete({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
+                    // Remove usando a PK correta
+                    await tx.alocacaoHistorico.delete({ where: { ID_HISTORICO_ALOCACAO: hist.ID_HISTORICO_ALOCACAO } });
                 } else {
                     throw new Error(`Restauração de arquivamento não suportada para ${log.TABELA_AFETADA}`);
                 }
 
                 // Cria log de Restauração
                 await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, dataToRestore, tx);
-                
-                // Opcional: Remover o log original de arquivamento para evitar confusão ou duplicidade de ações
-                // Mas geralmente auditoria é imutável. Vamos manter o log original, mas o front saberá que já voltou.
              });
 
         } 
