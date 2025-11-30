@@ -637,6 +637,87 @@ app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
     }
 });
 
+// --- CUSTOM REPORT GENERATION WITH JOINS ---
+
+app.post('/api/reports/custom', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { primaryEntity, joins } = req.body; // joins is array of strings e.g. ['Lotacao', 'Contrato']
+    const model = getModel(primaryEntity);
+    
+    if (!model) return res.status(400).json({ message: `Entidade ${primaryEntity} inválida` });
+
+    try {
+        const includeObj: any = {};
+        
+        // Construct Prisma Include based on requested joins
+        if (joins && Array.isArray(joins)) {
+            joins.forEach((joinEntity: string) => {
+                const relationName = joinEntity.charAt(0).toLowerCase() + joinEntity.slice(1);
+                includeObj[relationName] = true;
+            });
+        }
+
+        const queryOptions: any = {};
+        if (Object.keys(includeObj).length > 0) {
+            queryOptions.include = includeObj;
+        }
+
+        const data = await model.findMany(queryOptions);
+
+        // FLATTEN RESULT
+        // Convert nested objects { Vaga: { Lotacao: { NOME: 'X' } } } to { 'Vaga_ID': 1, 'Lotacao_NOME': 'X' }
+        const flattenedData = data.map((item: any) => {
+            const flatItem: any = {};
+            
+            // Add primary fields (prefixed with Entity Name for clarity in mixed tables)
+            Object.keys(item).forEach(key => {
+                if (typeof item[key] !== 'object' || item[key] === null || item[key] instanceof Date) {
+                    flatItem[`${primaryEntity}.${key}`] = item[key];
+                }
+            });
+
+            // Add joined fields
+            if (joins) {
+                joins.forEach((joinEntity: string) => {
+                    const relationName = joinEntity.charAt(0).toLowerCase() + joinEntity.slice(1);
+                    const relationData = item[relationName];
+
+                    if (relationData) {
+                        if (Array.isArray(relationData)) {
+                             // Handle One-to-Many (e.g. Vaga -> Contratos) - take first active or count?
+                             // For simple flattening, we usually take the most recent or count.
+                             // Strategy: Just indicate count or take first for now to avoid explosion.
+                             flatItem[`${joinEntity}.COUNT`] = relationData.length;
+                             if(relationData.length > 0) {
+                                 // Add fields of the first item as example
+                                 const first = relationData[0];
+                                 Object.keys(first).forEach(rKey => {
+                                     if (typeof first[rKey] !== 'object') {
+                                         flatItem[`${joinEntity}.${rKey}`] = first[rKey];
+                                     }
+                                 });
+                             }
+                        } else {
+                            // Handle One-to-One / Many-to-One
+                            Object.keys(relationData).forEach(rKey => {
+                                if (typeof relationData[rKey] !== 'object' || relationData[rKey] === null || relationData[rKey] instanceof Date) {
+                                    flatItem[`${joinEntity}.${rKey}`] = relationData[rKey];
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+            return flatItem;
+        });
+
+        res.json(flattenedData);
+
+    } catch (e: any) {
+        console.error('Custom Report Error:', e);
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
 // --- GENERIC CRUD ROUTES WITH AUDIT ---
 
 app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {

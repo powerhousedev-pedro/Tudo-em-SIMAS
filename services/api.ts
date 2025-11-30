@@ -228,5 +228,10 @@ export const api = {
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
-  getReportData: async (reportName: string): Promise<ReportData> => request(`/reports/${reportName}`)
+  getReportData: async (reportName: string): Promise<ReportData> => request(`/reports/${reportName}`),
+
+  // Novo método para o Gerador Personalizado com Joins
+  generateCustomReport: async (primaryEntity: string, joins: string[]) => {
+      return request('/reports/custom', 'POST', { primaryEntity, joins });
+  }
 };
