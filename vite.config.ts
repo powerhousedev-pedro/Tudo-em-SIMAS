@@ -16,6 +16,18 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false
+    sourcemap: false,
+    rollupOptions: {
+      external: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react-router-dom',
+        'recharts',
+        'jspdf',
+        'jspdf-autotable',
+        '@tanstack/react-query'
+      ]
+    }
   }
 });
