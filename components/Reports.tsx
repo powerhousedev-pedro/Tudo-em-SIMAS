@@ -1,5 +1,3 @@
-
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -920,7 +918,7 @@ export const Reports: React.FC = () => {
                   <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden animate-slide-in mb-10">
                       <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
                           <div>
-                              <h3 className="font-extrabold text-simas-dark text-lg">Resultados da Consulta</h3>
+                              <h3 className="font-black uppercase tracking-brand text-simas-dark text-lg">Resultados da Consulta</h3>
                               <p className="text-xs text-gray-500 font-medium">{customResults.length} registros encontrados</p>
                           </div>
                           <div className="flex gap-3">
@@ -1068,7 +1066,7 @@ export const Reports: React.FC = () => {
         {/* SIDEBAR */}
         <div className="w-64 bg-white border-r border-gray-200 flex flex-col overflow-y-auto flex-none z-10">
             <div className="p-6 border-b border-gray-100">
-                <h2 className="text-xl font-extrabold text-simas-dark tracking-tight">Relatórios</h2>
+                <h2 className="text-xl font-black uppercase tracking-brand text-simas-dark">Relatórios</h2>
                 <p className="text-xs text-gray-400 mt-1">Selecione uma visão</p>
             </div>
             <div className="p-4 space-y-6">
@@ -1101,7 +1099,7 @@ export const Reports: React.FC = () => {
             <div className="max-w-7xl mx-auto pb-10">
                 <header className="mb-8 flex justify-between items-center">
                     <div>
-                        <h1 className="text-3xl font-bold text-simas-dark">{validReports.find(r => r.id === currentReport)?.label}</h1>
+                        <h1 className="text-3xl font-black uppercase tracking-brand text-simas-dark">{validReports.find(r => r.id === currentReport)?.label}</h1>
                         <p className="text-gray-500 mt-2">
                             {currentReport === 'customGenerator' ? 'Business Intelligence: Crie consultas complexas cruzando tabelas.' : 'Visualização atualizada do sistema.'}
                         </p>

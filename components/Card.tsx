@@ -1,4 +1,3 @@
-
 import React, { memo } from 'react';
 
 interface CardProps {
@@ -43,9 +42,9 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
     <div 
       onClick={onSelect}
       className={`
-        group relative p-4 mb-3 transition-all duration-200 cursor-pointer rounded-xl border border-l-[5px]
+        group relative p-5 mb-4 transition-all duration-300 cursor-pointer rounded-2xl border border-l-[5px]
         ${selected 
-          ? 'bg-white border-simas-cyan ring-1 ring-simas-cyan shadow-md z-10' 
+          ? 'bg-white border-simas-cyan ring-1 ring-simas-cyan shadow-lg z-10 transform scale-[1.01]' 
           : `bg-white border-slate-200 hover:border-simas-cyan/50 shadow-sm hover:shadow-md border-l-simas-cyan`}
         ${borderOverride}
         ${blockedOverride}
@@ -53,32 +52,35 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
     >
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0 pr-6">
-            <h4 className={`font-bold truncate text-sm leading-tight ${selected && !blockedOverride ? 'text-simas-cyan' : (blockedOverride ? 'text-white' : 'text-simas-dark')}`}>
+            {/* Título Curto do Card: Cera Pro Medium, Uppercase */}
+            <h4 className={`font-medium text-sm uppercase tracking-normal leading-snug ${selected && !blockedOverride ? 'text-simas-cyan' : (blockedOverride ? 'text-white' : 'text-simas-dark')}`}>
                 {title}
             </h4>
-            {subtitle && <p className={`text-xs font-medium truncate mt-0.5 ${blockedOverride ? 'text-gray-300' : 'text-gray-500'}`}>{subtitle}</p>}
+            {/* Subtítulo: Normal/Sentence Case */}
+            <p className={`text-xs font-normal mt-1 tracking-wide truncate ${blockedOverride ? 'text-gray-300' : 'text-gray-500'}`}>{subtitle}</p>
         </div>
       </div>
 
       {details && (
-        <div className={`mt-2 pt-2 border-t flex items-start gap-2 ${blockedOverride ? 'border-white/10' : 'border-gray-50'}`}>
-            <div className={`w-0.5 h-full min-h-[12px] rounded-full flex-shrink-0 mt-1 ${blockedOverride ? 'bg-white/30' : 'bg-gray-200'}`}></div>
-            <p className={`text-[11px] font-medium leading-tight whitespace-pre-line ${blockedOverride ? 'text-gray-300' : 'text-gray-500'}`}>
+        <div className={`mt-3 pt-3 border-t flex items-start gap-3 ${blockedOverride ? 'border-white/10' : 'border-gray-50'}`}>
+            <div className={`w-0.5 h-full min-h-[14px] rounded-full flex-shrink-0 mt-1 ${blockedOverride ? 'bg-white/30' : 'bg-gray-200'}`}></div>
+            {/* Texto Longo: Cera Pro Regular */}
+            <p className={`text-[11px] font-normal leading-relaxed whitespace-pre-line tracking-wide ${blockedOverride ? 'text-gray-300' : 'text-gray-500'}`}>
                 {details}
             </p>
         </div>
       )}
       
       {exerciseData && (
-          <div className={`mt-3 pt-2 border-t ${blockedOverride ? 'border-white/10' : 'border-gray-50'}`}>
+          <div className={`mt-3 pt-3 border-t ${blockedOverride ? 'border-white/10' : 'border-gray-50'}`}>
               <div className="flex items-center justify-between group/ex">
-                  <div className={`flex items-center gap-2 overflow-hidden rounded px-2 py-1 max-w-full border ${blockedOverride ? 'bg-white/10 border-white/20' : 'bg-slate-50 border-slate-100'}`}>
+                  <div className={`flex items-center gap-2 overflow-hidden rounded-lg px-2.5 py-1.5 max-w-full border ${blockedOverride ? 'bg-white/10 border-white/20' : 'bg-slate-50 border-slate-100'}`}>
                       <i className={`fas fa-map-marker-alt text-[10px] ${blockedOverride ? 'text-simas-cyan' : 'text-simas-blue'}`}></i>
-                      <span className={`text-[10px] font-semibold truncate ${blockedOverride ? 'text-gray-200' : 'text-gray-600'}`}>{exerciseData.label}</span>
+                      <span className={`text-[10px] font-medium tracking-wide truncate ${blockedOverride ? 'text-gray-200' : 'text-gray-600'}`}>{exerciseData.label}</span>
                   </div>
                   <button 
                       onClick={(e) => { e.stopPropagation(); exerciseData.onEdit(); }}
-                      className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${blockedOverride ? 'text-gray-400 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-simas-cyan hover:bg-white'}`}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${blockedOverride ? 'text-gray-400 hover:text-white hover:bg-white/20' : 'text-gray-400 hover:text-simas-cyan hover:bg-white shadow-sm'}`}
                   >
                       <i className="fas fa-pencil-alt text-[10px]"></i>
                   </button>
@@ -86,9 +88,9 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
           </div>
       )}
       
-      <div className="flex items-center justify-between mt-3">
+      <div className="flex items-center justify-between mt-4">
           {status && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border ${colorClass}`}>
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest border ${colorClass}`}>
                   {status}
               </span>
           )}
@@ -96,7 +98,7 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
 
       {/* Floating Actions */}
       <div className={`
-        absolute top-2 right-2 z-30 flex flex-col gap-1
+        absolute top-3 right-3 z-30 flex flex-col gap-1.5
         transition-all duration-200
         ${selected 
             ? 'opacity-100 translate-x-0 pointer-events-auto' 
@@ -105,7 +107,7 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
           {onEdit && (
              <button 
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg border shadow-sm transition-all ${blockedOverride ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-white border-gray-200 text-gray-400 hover:border-simas-cyan hover:text-simas-cyan'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm transition-all ${blockedOverride ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-white border-gray-200 text-gray-400 hover:border-simas-cyan hover:text-simas-cyan'}`}
                 title="Editar"
              >
                 <i className="fas fa-pen text-[10px]"></i>

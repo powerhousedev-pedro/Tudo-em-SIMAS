@@ -383,7 +383,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             {/* Sidebar Navigation */}
             <div className="w-64 bg-white border-r border-gray-200 flex flex-col flex-none z-20 shadow-sm">
                 <div className="p-6 border-b border-gray-100">
-                    <h2 className="text-xl font-black text-simas-dark tracking-tight leading-none">Arquivo Morto</h2>
+                    <h2 className="text-xl font-black text-simas-dark tracking-brand uppercase leading-none">Arquivo Morto</h2>
                     <p className="text-xs text-gray-400 mt-1">Consultas históricas</p>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-1">
@@ -411,7 +411,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 {/* Top Bar */}
                 <div className="px-8 py-6 bg-white border-b border-gray-200 flex justify-between items-center shadow-sm z-10">
                     <div>
-                        <h1 className="text-2xl font-bold text-simas-dark">{VIEWS.find(v => v.id === currentView)?.label}</h1>
+                        <h1 className="text-2xl font-black text-simas-dark uppercase tracking-brand">{VIEWS.find(v => v.id === currentView)?.label}</h1>
                         <p className="text-sm text-gray-500 mt-1">
                             {data.length} registros encontrados
                             {Object.keys(activeFilters).length > 0 && <span className="text-simas-accent ml-2 font-medium">(Filtrado)</span>}

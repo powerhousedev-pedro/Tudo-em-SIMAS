@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import { Button } from './Button';
@@ -238,7 +237,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
       return (
           <div className="flex-1 min-w-[300px] bg-gray-100/50 rounded-2xl p-4 flex flex-col h-full border border-gray-200/50">
               <div className={`flex items-center justify-between mb-4 pb-2 border-b border-${color}-200`}>
-                  <h3 className={`font-bold text-${color}-700 uppercase tracking-wide text-sm`}>{title}</h3>
+                  <h3 className={`font-medium text-${color}-700 uppercase tracking-wide text-sm`}>{title}</h3>
                   <span className={`bg-${color}-100 text-${color}-800 text-xs font-bold px-2 py-1 rounded-full`}>{items.length}</span>
               </div>
               
@@ -269,11 +268,11 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                 
                                 <div className="pl-3">
                                     <div className="flex justify-between items-start mb-1">
-                                        <h4 className="font-bold text-simas-dark text-sm truncate pr-2" title={req.TIPO_PEDIDO}>{req.TIPO_PEDIDO}</h4>
+                                        <h4 className="font-medium text-simas-dark text-sm truncate pr-2 uppercase" title={req.TIPO_PEDIDO}>{req.TIPO_PEDIDO}</h4>
                                         <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{req.ID_ATENDIMENTO}</span>
                                     </div>
                                     
-                                    <p className="text-sm text-gray-600 mb-2 font-medium">{req.NOME_PESSOA || req.CPF}</p>
+                                    <p className="text-sm text-gray-600 mb-2 font-normal">{req.NOME_PESSOA || req.CPF}</p>
                                     
                                     {isFutureItem ? (
                                         <div className="mb-3">
@@ -324,7 +323,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
         {/* Header */}
         <div className="px-8 py-6 bg-white border-b border-gray-200 flex justify-between items-center shadow-sm z-10">
             <div>
-                <h1 className="text-2xl font-black text-simas-dark tracking-tight">Central de Atendimentos</h1>
+                <h1 className="text-2xl font-black text-simas-dark tracking-brand uppercase">Central de Atendimentos</h1>
                 <p className="text-sm text-gray-500 mt-1">Gerencie solicitações e fluxos de trabalho</p>
             </div>
             <div className="flex gap-3">
@@ -379,7 +378,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-slide-in">
                 <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                     <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                        <h3 className="font-bold text-xl text-simas-dark">Iniciar Novo Fluxo</h3>
+                        <h3 className="font-bold text-xl text-simas-dark uppercase">Iniciar Novo Fluxo</h3>
                         <button onClick={() => setShowNewModal(false)} className="text-gray-400 hover:text-red-500"><i className="fas fa-times"></i></button>
                     </div>
                     
@@ -388,7 +387,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                             
                             {/* Pessoa Selection */}
                             <div>
-                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Pessoa</label>
+                                <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Pessoa</label>
                                 <select 
                                     required 
                                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
@@ -403,7 +402,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                             {/* Type Selection */}
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Tipo de Pedido</label>
+                                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Tipo de Pedido</label>
                                     <select 
                                         required 
                                         className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
@@ -415,7 +414,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Remetente</label>
+                                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Remetente</label>
                                     <select 
                                         required 
                                         className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
@@ -432,7 +431,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                             {/* Conditional Vaga for Reserva */}
                             {formData.TIPO_PEDIDO === 'Reserva de Vaga' && (
                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                    <label className="block text-xs font-bold text-blue-400 uppercase tracking-widest mb-2">Vaga a Reservar</label>
+                                    <label className="block text-xs font-medium text-blue-400 uppercase tracking-widest mb-2">Vaga a Reservar</label>
                                     <select 
                                         required 
                                         className="w-full px-4 py-3 bg-white border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-200 outline-none"
@@ -450,7 +449,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                             {/* Status & Justification */}
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Status Inicial</label>
+                                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Status Inicial</label>
                                     <select 
                                         required 
                                         className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
@@ -465,7 +464,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                 
                                 {formData.STATUS_PEDIDO === 'Declinado' && (
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Justificativa</label>
+                                        <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Justificativa</label>
                                         <select 
                                             required 
                                             className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
@@ -480,7 +479,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
                                 {((formData.STATUS_PEDIDO === 'Acatado' && formData.TIPO_PEDIDO !== 'Reserva de Vaga') || formData.STATUS_PEDIDO === 'Aguardando') && (
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Data Agendamento/Revisão</label>
+                                        <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Data Agendamento/Revisão</label>
                                         <input 
                                             type="date"
                                             required
@@ -493,7 +492,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Descrição / Observações</label>
+                                <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Descrição / Observações</label>
                                 <textarea 
                                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none h-24 resize-none"
                                     placeholder="Detalhes adicionais..."
