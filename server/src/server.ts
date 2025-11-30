@@ -288,14 +288,14 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
             // 1. Prepara dados para a tabela Inativo
             const dadosInativo = {
                 ID_INATIVO: generateId('INA'), // Gerando PK
-                MATRICULA: servidor.MATRICULA,
+                MATRICULA_ORIGINAL: servidor.MATRICULA, // CORREÇÃO: Schema diz MATRICULA_ORIGINAL
                 CPF: servidor.CPF,
                 ID_CARGO: servidor.ID_CARGO,
                 DATA_MATRICULA: servidor.DATA_MATRICULA,
                 VINCULO: servidor.VINCULO,
                 PREFIXO_MATRICULA: servidor.PREFIXO_MATRICULA,
                 DATA_INATIVACAO: new Date(),
-                MOTIVO: MOTIVO || 'Inativação'
+                MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
             };
 
             // 2. Insere na Tabela Inativo
@@ -427,15 +427,22 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                     const oldData = JSON.parse(log.VALOR_ANTIGO || '{}');
                     // Workaround: Buscar por CPF e filtrar em memória, pois MATRICULA pode não estar no WhereInput
                     const candidates = await tx.inativo.findMany({ where: { CPF: oldData.CPF } });
-                    const inativo = candidates.find((c: any) => c.MATRICULA === log.ID_REGISTRO_AFETADO);
+                    // CORREÇÃO: Comparar MATRICULA_ORIGINAL com o ID do log
+                    const inativo = candidates.find((c: any) => c.MATRICULA_ORIGINAL === log.ID_REGISTRO_AFETADO);
                     
                     if (!inativo) throw new Error("Registro não encontrado na tabela de inativos.");
 
                     dataToRestore = { ...inativo };
+                    
+                    // CORREÇÃO: Mapear MATRICULA_ORIGINAL de volta para MATRICULA
+                    dataToRestore.MATRICULA = inativo.MATRICULA_ORIGINAL;
+                    
                     delete dataToRestore.ID_INATIVO; // Remover PK da histórica
+                    delete dataToRestore.MATRICULA_ORIGINAL;
                     delete dataToRestore.DATA_INATIVACAO;
-                    delete dataToRestore.MOTIVO; 
-                    delete dataToRestore.PROCESSO;
+                    delete dataToRestore.MOTIVO_INATIVACAO; // Campo correto do Schema
+                    delete dataToRestore.MOTIVO; // Caso exista
+                    delete dataToRestore.PROCESSO; // Campo extra do inativo não existente em Servidor
                     delete dataToRestore.DATA_PUBLICACAO;
 
                     await tx.servidor.create({ data: dataToRestore });
@@ -449,7 +456,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                     dataToRestore = { ...hist };
                     delete dataToRestore.ID_HISTORICO_ALOCACAO; // Remover PK da histórica
                     delete dataToRestore.DATA_ARQUIVAMENTO;
-                    delete dataToRestore.MOTIVO_MUDANCA;
+                    // delete dataToRestore.MOTIVO_MUDANCA; // Removido pois não existe no schema atual
 
                     await tx.alocacao.create({ data: dataToRestore });
                     // Remove usando a PK correta
