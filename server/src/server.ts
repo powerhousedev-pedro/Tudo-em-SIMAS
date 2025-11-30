@@ -1,5 +1,3 @@
-
-
 import express, { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -237,8 +235,8 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
                 // Criar Histórico
                 const idHistorico = generateId('HCT');
                 const historicoData = {
-                    ID_HISTORICO_CONTRATO: idHistorico,
-                    ID_CONTRATO_ORIGINAL: contratoAtivo.ID_CONTRATO,
+                    ID_HISTORICO_CONTRATO: idHistorico, // PK do Histórico
+                    ID_CONTRATO: contratoAtivo.ID_CONTRATO, // Referência ao contrato original
                     ID_VAGA: contratoAtivo.ID_VAGA,
                     CPF: contratoAtivo.CPF,
                     DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
@@ -334,7 +332,8 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
                 // Move para histórico
                 const idHistorico = generateId('HAL');
                 const historicoData = {
-                    ID_HISTORICO_ALOCACAO: idHistorico,
+                    ID_HISTORICO_ALOCACAO: idHistorico, // PK do Histórico
+                    ID_ALOCACAO: alocacaoExistente.ID_ALOCACAO, // ID da alocação original
                     MATRICULA: alocacaoExistente.MATRICULA,
                     ID_LOTACAO: alocacaoExistente.ID_LOTACAO,
                     ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
