@@ -1,9 +1,14 @@
+
+
+
 import express, { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cron from 'node-cron';
-import { PrismaClient } from '@prisma/client';
+
+// Workaround: Use require for PrismaClient to avoid compilation errors when the client hasn't been generated yet.
+const { PrismaClient } = require('@prisma/client');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -118,7 +123,7 @@ const getFriendlyErrorMessage = (error: any): string => {
 
     // Fallback for technical errors needed for debugging but hidden from simple UI
     console.error("Technical Error:", msg);
-    return `Ocorreu um erro ao processar sua solicitação: ${msg}`;
+    return 'Ocorreu um erro ao processar sua solicitação. Verifique os dados e tente novamente.';
 };
 
 // --- AUDIT SYSTEM ---
@@ -164,34 +169,9 @@ app.post('/api/auth/login', async (req: any, res: any) => {
     const { usuario, senha } = req.body;
     
     try {
-        let user: any = null;
-        let dbError: any = null;
-
-        // Tenta buscar no banco
-        try {
-            user = await prisma.usuario.findFirst({
-                where: { usuario }
-            });
-        } catch (e) {
-            dbError = e;
-            console.warn("Database unavailable during login. Checking fallback credentials.");
-        }
-
-        // Se falhou o banco OU não achou usuário, verifica credenciais de fallback (admin/admin)
-        // Isso permite acessar o sistema em modo de desenvolvimento/demo mesmo sem DB
-        if ((!user || dbError) && usuario === 'admin' && senha === 'admin') {
-            console.log("Using fallback admin credentials");
-            user = {
-                id: 'fallback-admin',
-                usuario: 'admin',
-                senha: 'admin', // Plain text handled below
-                papel: 'COORDENAÇÃO',
-                isGerente: true
-            };
-        } else if (dbError) {
-            // Se não for admin/admin e deu erro no banco, repassa o erro
-            throw dbError;
-        }
+        const user = await prisma.usuario.findFirst({
+            where: { usuario }
+        });
 
         if (!user) {
             return res.status(401).json({ message: 'Usuário não encontrado' });
@@ -223,7 +203,7 @@ app.post('/api/auth/login', async (req: any, res: any) => {
 
     } catch (e: any) {
         console.error("Login error:", e);
-        res.status(500).json({ message: `Erro interno: ${e.message}` });
+        res.status(500).json({ message: 'Erro interno no servidor' });
     }
 });
 
