@@ -1,12 +1,10 @@
 
-
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReportData, UserSession, QuantitativoItem } from '../types';
 import { Button } from './Button';
-import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, FIELD_LABELS } from '../constants';
+import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, FIELD_LABELS, BOOLEAN_FIELD_CONFIG } from '../constants';
 import { generateReportPDF } from '../utils/pdfGenerator';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -19,6 +17,34 @@ interface JoinOption {
     parentPath: string; // Ex: "", "vaga"
     depth: number;
 }
+
+// Configuração de Operadores por Tipo
+const OPERATORS_BY_TYPE: Record<string, { value: string, label: string }[]> = {
+    string: [
+        { value: 'contains', label: 'Contém' },
+        { value: 'equals', label: 'Igual a' },
+        { value: 'not_equals', label: 'Diferente de' }
+    ],
+    date: [
+        { value: 'equals', label: 'Igual a' },
+        { value: 'not_equals', label: 'Diferente de' },
+        { value: 'greater', label: 'Posterior a (>)' },
+        { value: 'less', label: 'Anterior a (<)' },
+        { value: 'greater_equal', label: 'Posterior ou Igual (>=)' },
+        { value: 'less_equal', label: 'Anterior ou Igual (<=)' }
+    ],
+    number: [
+        { value: 'equals', label: 'Igual a' },
+        { value: 'not_equals', label: 'Diferente de' },
+        { value: 'greater', label: 'Maior que (>)' },
+        { value: 'less', label: 'Menor que (<)' },
+        { value: 'greater_equal', label: 'Maior ou Igual (>=)' },
+        { value: 'less_equal', label: 'Menor ou Igual (<=)' }
+    ],
+    boolean: [
+        { value: 'equals', label: 'Igual a' }
+    ]
+};
 
 export const Reports: React.FC = () => {
   const getSession = (): UserSession => {
@@ -58,6 +84,7 @@ export const Reports: React.FC = () => {
   
   // Estado temporário para adicionar novo filtro
   const [newFilter, setNewFilter] = useState({ field: '', operator: 'contains', value: '' });
+  const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
 
   // Carregar dados dos relatórios fixos
   useEffect(() => {
@@ -107,15 +134,26 @@ export const Reports: React.FC = () => {
 
       return true;
   };
+
+  // Inferência de Tipo de Campo - Baseado no Schema Prisma e Nomenclatura
+  const getFieldType = (fullPath: string): 'string' | 'date' | 'number' | 'boolean' => {
+      const fieldName = fullPath.split('.').pop() || '';
+      
+      if (BOOLEAN_FIELD_CONFIG[fieldName]) return 'boolean';
+      
+      // Prisma DateTime fields keywords
+      if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE|CRIACAO|ATENDIMENTO|AGENDAMENTO/i.test(fieldName)) return 'date';
+      
+      // Prisma Int fields or logical numbers (e.g., ANO_ENTRADA, SALARIO treated as num for filter)
+      if (/SALARIO|VALOR|COUNT|NUMERO|ANO/i.test(fieldName)) return 'number';
+      
+      return 'string';
+  };
   
   const translateOperator = (op: string) => {
-      switch(op) {
-          case 'contains': return 'Contém';
-          case 'equals': return 'Igual a';
-          case 'starts': return 'Começa com';
-          case 'ends': return 'Termina com';
-          default: return op;
-      }
+      const allOps = Object.values(OPERATORS_BY_TYPE).flat();
+      const found = allOps.find(o => o.value === op);
+      return found ? found.label : op;
   };
 
   const getColumnLabel = (fullPath: string) => {
@@ -123,10 +161,6 @@ export const Reports: React.FC = () => {
       const field = parts.pop()!;
       
       // Tenta inferir a entidade com base no prefixo (ex: Vaga.Lotacao -> Lotacao)
-      // O backend retorna os dados achatados onde o prefixo é o caminho camelCase capitalizado.
-      // O 'availableColumns' foi construído com esse prefixo.
-      // A entidade de contexto é o último segmento do caminho (ex: Lotacao em Vaga.Lotacao) ou a customEntity se for raiz.
-      
       let entityName = customEntity;
       if (parts.length > 0) {
           entityName = parts[parts.length - 1]; // Pega o último segmento (ex: Lotacao)
@@ -177,6 +211,7 @@ export const Reports: React.FC = () => {
       setCustomFilters([]);
       setCustomResults([]);
       setGenerated(false);
+      setFilterSuggestions([]);
   }, [customEntity]);
 
   // --- LÓGICA RECURSIVA DE JOINS COM PREVENÇÃO DE REDUNDÂNCIA ---
@@ -190,12 +225,9 @@ export const Reports: React.FC = () => {
           if (!newSelected.includes(path)) newSelected.push(path);
 
           // RASTREAMENTO DE ENTIDADES DISPONÍVEIS (PREVENÇÃO DE REDUNDÂNCIA)
-          // A regra agora é: Se a entidade JÁ APARECE na lista de opções (availableJoins) 
-          // ou é a entidade raiz, ela NÃO deve ser oferecida novamente como filha.
+          // Verificamos o que JÁ ESTÁ na lista de opções para não adicionar de novo
           const entitiesAlreadyOption = new Set<string>();
-          entitiesAlreadyOption.add(customEntity); // A principal conta
-          
-          // Mapeia tudo que já está visível para o usuário
+          entitiesAlreadyOption.add(customEntity); 
           newAvailable.forEach(opt => entitiesAlreadyOption.add(opt.entity));
 
           // DESCOBRIR NOVAS RELAÇÕES (NÍVEL N+1)
@@ -204,11 +236,9 @@ export const Reports: React.FC = () => {
           childRelations.forEach(rel => {
               const childPath = `${path}.${rel.entity.toLowerCase()}`;
               
-              // IMPEDIR REDUNDÂNCIA:
-              // Se 'Pessoa' já está na lista (ex: vizinha da raiz), não adiciona 'Pessoa' de novo como filha de 'Servidor'.
+              // Se a entidade JÁ existe como opção em qualquer lugar da árvore, não adiciona de novo
               if (entitiesAlreadyOption.has(rel.entity)) return;
 
-              // Evitar duplicatas na lista de disponíveis (caso o path exato já exista, embora a lógica acima deva prevenir)
               if (!newAvailable.some(opt => opt.path === childPath)) {
                   newAvailable.push({
                       label: `${ENTITY_CONFIGS[rel.entity]?.title || rel.entity} (via ${ENTITY_CONFIGS[entity]?.title})`,
@@ -217,8 +247,6 @@ export const Reports: React.FC = () => {
                       parentPath: path,
                       depth: (path.split('.').length)
                   });
-                  
-                  // Adiciona ao Set local para garantir unicidade dentro deste próprio loop (caso haja 2 FKs para a mesma tabela)
                   entitiesAlreadyOption.add(rel.entity);
               }
           });
@@ -227,9 +255,6 @@ export const Reports: React.FC = () => {
           // Remover dos selecionados e remover recursivamente os filhos dependentes
           const pathsToRemove = newSelected.filter(p => p === path || p.startsWith(path + '.'));
           newSelected = newSelected.filter(p => !pathsToRemove.includes(p));
-          
-          // Opcional: Poderíamos limpar 'newAvailable' de órfãos, mas manter as opções lá não quebra nada
-          // e permite re-selecionar sem recalcular tudo.
       }
 
       setSelectedJoins(newSelected);
@@ -254,7 +279,6 @@ export const Reports: React.FC = () => {
           const option = availableJoins.find(opt => opt.path === path);
           if (option) {
               const fields = DATA_MODEL[option.entity] || [];
-              // Prefixo da coluna usa o Path "Bonito"
               const displayPrefix = path.split('.').map(p => {
                   return p.charAt(0).toUpperCase() + p.slice(1);
               }).join('.');
@@ -267,11 +291,9 @@ export const Reports: React.FC = () => {
 
       setAvailableColumns([...primaryFields, ...joinFields]);
       
-      // Resetar seleção se a lista ficar vazia (ou inicializar)
       if (selectedColumns.length === 0) {
           setSelectedColumns(primaryFields.slice(0, 5));
       } else {
-          // Filtrar colunas selecionadas que não existem mais (caso um join tenha sido removido)
           const allCols = [...primaryFields, ...joinFields];
           setSelectedColumns(prev => prev.filter(c => allCols.includes(c)));
       }
@@ -292,6 +314,40 @@ export const Reports: React.FC = () => {
       setCustomFilters(newF);
   };
 
+  // Lógica de Autocomplete para Filtros
+  const loadFilterSuggestions = async (fullPath: string) => {
+      setFilterSuggestions([]);
+      const type = getFieldType(fullPath);
+      // Apenas sugere para Strings para evitar peso desnecessário e formatação de datas
+      if (type !== 'string') return;
+
+      const parts = fullPath.split('.');
+      const field = parts.pop() || '';
+      const prefix = parts.join('.'); // Ex: "Vaga.Lotacao" ou "Pessoa"
+
+      let targetEntity = customEntity;
+
+      // Descobrir a Entidade baseada no Prefixo do Caminho
+      if (prefix !== customEntity) {
+          // O prefixo "Display" (Capitalizado) precisa ser mapeado de volta para a entidade
+          // Varremos os availableJoins para achar quem tem esse caminho
+          const foundJoin = availableJoins.find(join => {
+              const displayPath = join.path.split('.').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('.');
+              return displayPath === prefix;
+          });
+          if (foundJoin) targetEntity = foundJoin.entity;
+      }
+
+      if (targetEntity && field) {
+          try {
+              const values = await api.getUniqueValues(targetEntity, field);
+              setFilterSuggestions(values);
+          } catch (e) {
+              console.warn("Falha ao carregar sugestões", e);
+          }
+      }
+  };
+
   const handleGenerateCustom = async () => {
       if (!customEntity) return;
       setLoading(true);
@@ -299,19 +355,74 @@ export const Reports: React.FC = () => {
           // Envia os paths selecionados (ex: ['vaga', 'vaga.lotacao'])
           let rawData = await api.generateCustomReport(customEntity, selectedJoins);
 
-          // Filtragem Client-Side
+          // Filtragem Client-Side Avançada
           if (customFilters.length > 0) {
               rawData = rawData.filter((item: any) => {
                   return customFilters.every(filter => {
-                      const itemValue = String(item[filter.field] || '').toLowerCase();
-                      const filterValue = filter.value.toLowerCase();
+                      const type = getFieldType(filter.field);
+                      const rawValue = item[filter.field];
+                      const filterValue = filter.value;
                       
-                      switch (filter.operator) {
-                          case 'contains': return itemValue.includes(filterValue);
-                          case 'equals': return itemValue === filterValue;
-                          case 'starts': return itemValue.startsWith(filterValue);
-                          case 'ends': return itemValue.endsWith(filterValue);
-                          default: return true;
+                      if (rawValue === null || rawValue === undefined) return false;
+
+                      // Conversão e Comparação por Tipo
+                      if (type === 'date') {
+                           // Normaliza para comparação de data (ignorando tempo se for yyyy-mm-dd vs iso)
+                           const itemDate = new Date(rawValue).setHours(0,0,0,0);
+                           // Input type="date" sempre manda YYYY-MM-DD, que o Date() interpreta como UTC,
+                           // mas precisamos garantir que estamos comparando maçãs com maçãs.
+                           // Vamos assumir string comparison para datas simples ou timestamp para completas.
+                           const filterDate = new Date(filterValue).setHours(0,0,0,0);
+                           
+                           if (isNaN(itemDate) || isNaN(filterDate)) return false;
+
+                           switch (filter.operator) {
+                               case 'equals': return itemDate === filterDate;
+                               case 'not_equals': return itemDate !== filterDate;
+                               case 'greater': return itemDate > filterDate;
+                               case 'less': return itemDate < filterDate;
+                               case 'greater_equal': return itemDate >= filterDate;
+                               case 'less_equal': return itemDate <= filterDate;
+                               default: return false;
+                           }
+                      } else if (type === 'number') {
+                          // Remove símbolos de moeda se houver, ou espaços
+                          const cleanRaw = String(rawValue).replace(/[^\d.-]/g, '');
+                          const itemNum = parseFloat(cleanRaw);
+                          const filterNum = parseFloat(filterValue);
+                          
+                          if (isNaN(itemNum) || isNaN(filterNum)) return false;
+
+                          switch (filter.operator) {
+                              case 'equals': return itemNum === filterNum;
+                              case 'not_equals': return itemNum !== filterNum;
+                              case 'greater': return itemNum > filterNum;
+                              case 'less': return itemNum < filterNum;
+                              case 'greater_equal': return itemNum >= filterNum;
+                              case 'less_equal': return itemNum <= filterNum;
+                              default: return false;
+                          }
+                      } else if (type === 'boolean') {
+                          // Tratamento de booleano (pode vir como bool, 'Sim'/'Não', ou 0/1)
+                          let boolItem = !!rawValue;
+                          if (typeof rawValue === 'string') boolItem = rawValue === 'Sim' || rawValue === 'true';
+                          
+                          const boolFilter = filterValue === 'true' || filterValue === 'Sim';
+                          
+                          return boolItem === boolFilter;
+                      } else {
+                          // String (Default)
+                          const itemStr = String(rawValue).toLowerCase();
+                          const filterStr = filterValue.toLowerCase();
+
+                          switch (filter.operator) {
+                              case 'contains': return itemStr.includes(filterStr);
+                              case 'equals': return itemStr === filterStr;
+                              case 'not_equals': return itemStr !== filterStr;
+                              case 'starts': return itemStr.startsWith(filterStr);
+                              case 'ends': return itemStr.endsWith(filterStr);
+                              default: return true;
+                          }
                       }
                   });
               });
@@ -333,6 +444,8 @@ export const Reports: React.FC = () => {
           selectedColumns.map(col => {
               let val = row[col];
               if (val === null || val === undefined) return '';
+              const type = getFieldType(col);
+              if (type === 'date') val = new Date(val).toLocaleDateString('pt-BR');
               return String(val).replace(/;/g, ',').replace(/\n/g, ' '); 
           }).join(';')
       );
@@ -357,7 +470,12 @@ export const Reports: React.FC = () => {
       doc.setFontSize(10);
       doc.text(`Gerado em: ${today} - ${customResults.length} registros`, 14, 22);
 
-      const tableRows = customResults.map(row => selectedColumns.map(col => row[col] || ''));
+      const tableRows = customResults.map(row => selectedColumns.map(col => {
+          let val = row[col];
+          if (val === null || val === undefined) return '';
+          if (getFieldType(col) === 'date') return new Date(val).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
+          return String(val);
+      }));
 
       autoTable(doc, {
           startY: 25,
@@ -382,7 +500,6 @@ export const Reports: React.FC = () => {
   const renderJoinSelector = () => {
     if (availableJoins.length === 0) return <div className="h-full flex items-center justify-center text-xs text-gray-400 italic">Nenhuma relação direta encontrada.</div>;
 
-    // Ordenar para que filhos fiquem abaixo dos pais
     const displayList = [...availableJoins].sort((a, b) => a.path.localeCompare(b.path));
 
     return (
@@ -391,7 +508,6 @@ export const Reports: React.FC = () => {
                 const isSelected = selectedJoins.includes(join.path);
                 const isParentSelected = join.parentPath === '' || selectedJoins.includes(join.parentPath);
                 
-                // Só mostrar se o pai estiver selecionado (Cascata visual)
                 if (!isParentSelected) return null;
 
                 return (
@@ -430,6 +546,10 @@ export const Reports: React.FC = () => {
   const renderCustomBuilder = () => {
       const availableEntities = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && ENTITY_CONFIGS[k].title).sort();
       
+      const currentFieldType = newFilter.field ? getFieldType(newFilter.field) : 'string';
+      const currentOperators = OPERATORS_BY_TYPE[currentFieldType] || OPERATORS_BY_TYPE['string'];
+      const inputType = currentFieldType === 'date' ? 'date' : (currentFieldType === 'number' ? 'number' : 'text');
+
       return (
           <div className="space-y-6 animate-fade-in">
               {/* MAIN BUILDER BOX - Layout fixo de Split Pane */}
@@ -495,7 +615,13 @@ export const Reports: React.FC = () => {
                                       const prefix = parts.join(' > ');
                                       const isPrimary = parts[0] === customEntity;
                                       const label = getColumnLabel(col);
+                                      const type = getFieldType(col);
                                       
+                                      let icon = 'fa-font';
+                                      if (type === 'date') icon = 'fa-calendar';
+                                      if (type === 'number') icon = 'fa-hashtag';
+                                      if (type === 'boolean') icon = 'fa-toggle-on';
+
                                       return (
                                           <label key={col} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer hover:bg-simas-cyan/5 p-2 rounded-lg border border-transparent hover:border-simas-cyan/20 transition-all select-none group">
                                               <div className="relative flex items-center mt-0.5">
@@ -512,9 +638,12 @@ export const Reports: React.FC = () => {
                                                       {selectedColumns.includes(col) && <i className="fas fa-check text-[8px] text-white"></i>}
                                                   </div>
                                               </div>
-                                              <div className="flex flex-col overflow-hidden">
+                                              <div className="flex flex-col overflow-hidden min-w-0">
                                                   <span className={`font-bold truncate ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{prefix}</span>
-                                                  <span className="text-gray-500 truncate">{label}</span>
+                                                  <div className="flex items-center gap-1.5 text-gray-500 truncate">
+                                                      <i className={`fas ${icon} text-[9px] opacity-70`}></i>
+                                                      <span>{label}</span>
+                                                  </div>
                                               </div>
                                           </label>
                                       );
@@ -574,7 +703,14 @@ export const Reports: React.FC = () => {
                                        <select 
                                            className="w-1/2 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
                                            value={newFilter.field} 
-                                           onChange={e => setNewFilter({...newFilter, field: e.target.value})}
+                                           onChange={e => {
+                                               const field = e.target.value;
+                                               const type = getFieldType(field);
+                                               // Reset operator to default for type and clear value when field changes
+                                               const defaultOp = OPERATORS_BY_TYPE[type][0].value;
+                                               setNewFilter({ field, operator: defaultOp, value: '' });
+                                               loadFilterSuggestions(field);
+                                           }}
                                        >
                                            <option value="">Campo...</option>
                                            {availableColumns.map(col => <option key={col} value={col}>{getColumnLabel(col)}</option>)}
@@ -583,21 +719,44 @@ export const Reports: React.FC = () => {
                                            className="w-1/2 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
                                            value={newFilter.operator} 
                                            onChange={e => setNewFilter({...newFilter, operator: e.target.value})}
+                                           disabled={!newFilter.field}
                                        >
-                                           <option value="contains">Contém</option>
-                                           <option value="equals">Igual</option>
-                                           <option value="starts">Inicia</option>
+                                           {currentOperators.map(op => (
+                                               <option key={op.value} value={op.value}>{op.label}</option>
+                                           ))}
                                        </select>
                                    </div>
                                    <div className="flex gap-2">
-                                       <input 
-                                           type="text" 
-                                           placeholder="Valor..." 
-                                           className="flex-1 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
-                                           value={newFilter.value} 
-                                           onChange={e => setNewFilter({...newFilter, value: e.target.value})}
-                                           onKeyPress={(e) => e.key === 'Enter' && handleAddFilter()}
-                                       />
+                                       {currentFieldType === 'boolean' ? (
+                                           <select 
+                                                className="flex-1 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
+                                                value={newFilter.value}
+                                                onChange={e => setNewFilter({...newFilter, value: e.target.value})}
+                                           >
+                                               <option value="">Selecione...</option>
+                                               <option value="true">Verdadeiro / Sim</option>
+                                               <option value="false">Falso / Não</option>
+                                           </select>
+                                       ) : (
+                                           <>
+                                              <input 
+                                                  type={inputType}
+                                                  placeholder={currentFieldType === 'date' ? '' : "Valor..."}
+                                                  className="flex-1 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
+                                                  value={newFilter.value} 
+                                                  onChange={e => setNewFilter({...newFilter, value: e.target.value})}
+                                                  onKeyPress={(e) => e.key === 'Enter' && handleAddFilter()}
+                                                  list={filterSuggestions.length > 0 ? "filter-suggestions" : undefined}
+                                              />
+                                              {filterSuggestions.length > 0 && (
+                                                  <datalist id="filter-suggestions">
+                                                      {filterSuggestions.map((sug, i) => (
+                                                          <option key={i} value={sug} />
+                                                      ))}
+                                                  </datalist>
+                                              )}
+                                           </>
+                                       )}
                                        <button 
                                            onClick={handleAddFilter} 
                                            disabled={!newFilter.field || !newFilter.value}
@@ -649,11 +808,18 @@ export const Reports: React.FC = () => {
                                   ) : (
                                       customResults.map((row, idx) => (
                                           <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                                              {selectedColumns.map(col => (
-                                                  <td key={`${idx}-${col}`} className="px-6 py-3 whitespace-nowrap text-gray-600 border-r border-gray-50 last:border-0 text-xs font-medium">
-                                                      {String(row[col] === null || row[col] === undefined ? '' : row[col])}
-                                                  </td>
-                                              ))}
+                                              {selectedColumns.map(col => {
+                                                  const val = row[col];
+                                                  const type = getFieldType(col);
+                                                  let displayVal = val;
+                                                  if (type === 'date' && val) displayVal = new Date(val).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
+                                                  
+                                                  return (
+                                                      <td key={`${idx}-${col}`} className="px-6 py-3 whitespace-nowrap text-gray-600 border-r border-gray-50 last:border-0 text-xs font-medium">
+                                                          {String(val === null || val === undefined ? '' : displayVal)}
+                                                      </td>
+                                                  );
+                                              })}
                                           </tr>
                                       ))
                                   )}
