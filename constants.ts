@@ -14,16 +14,12 @@ const formatDate = (val: any) => {
 };
 
 export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
-  'GPRGP': ['painelVagas', 'contratosAtivos'],
-  'GGT': ['quadroLotacaoServidores'],
-  'GDEP': ['adesaoFrequencia'],
+  'GPRGP': ['painelVagas'],
+  'GGT': [],
+  'GDEP': [],
   'COORDENAÇÃO': [
-    'painelVagas', 'contratosAtivos',
-    'quadroLotacaoServidores',
-    'adesaoFrequencia',
-    'dashboardPessoal', 'analiseCustos',
-    'perfilDemografico',
-    'atividadeUsuarios'
+    'painelVagas',
+    'dashboardPessoal'
   ]
 };
 

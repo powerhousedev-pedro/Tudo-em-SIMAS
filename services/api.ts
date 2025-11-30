@@ -1,6 +1,8 @@
 
 
+
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
+import { validation } from '../utils/validation';
 
 // CONFIGURAÇÃO
 const API_BASE_URL = 'https://tudoemsimas.powerhouseapp.de/api';
@@ -177,7 +179,7 @@ export const api = {
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
       return request('/Exercicio', 'POST', { 
-          ID_EXERCICIO: 'EXE' + Date.now(), 
+          ID_EXERCICIO: validation.generateLegacyId('EXE'), 
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
       });
@@ -251,7 +253,7 @@ export const api = {
           await request('/Servidor/inativar', 'POST', data);
       } else if (atd.TIPO_DE_ACAO === 'EDITAR' && targetEntity === 'Contrato') {
           await request('/Contrato/arquivar', 'POST', { CPF: data.CPF, MOTIVO: atd.TIPO_PEDIDO });
-          if (!data.ID_CONTRATO) data.ID_CONTRATO = 'CTT' + Date.now();
+          if (!data.ID_CONTRATO) data.ID_CONTRATO = validation.generateLegacyId('CTT');
           await api.createRecord('Contrato', data);
       } else if (atd.TIPO_DE_ACAO === 'CRIAR') {
           await api.createRecord(atd.ENTIDADE_ALVO, data);
