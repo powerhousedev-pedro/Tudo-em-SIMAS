@@ -90,12 +90,23 @@ export const Reports: React.FC = () => {
       return relations;
   };
 
-  // Helper para verificar se a coluna deve ser exibida (oculta PKs técnicas)
+  // Helper para verificar se a coluna deve ser exibida (oculta PKs técnicas e FKs)
   const isColumnSelectable = (entity: string, field: string) => {
       const config = ENTITY_CONFIGS[entity];
       if (!config) return true;
-      // Se for PK e NÃO for manual (ex: CPF, Matricula são manuais, ID_VAGA é auto), esconde.
+      
+      // 1. Ocultar PKs Técnicas (não manuais)
+      // Ex: ID_CONTRATO (oculta), CPF (mantém se estiver em Pessoa)
       if (field === config.pk && !config.manualPk) return false;
+
+      // 2. Ocultar Foreign Keys (FKs)
+      // Se o campo for uma FK que aponta para outra tabela, escondemos para forçar o uso do Join.
+      // Ex: ID_VAGA em Contrato (Oculta).
+      // Ex: CPF em Contrato (Oculta, pois aponta para Pessoa).
+      // Ex: CPF em Pessoa (Mantém, pois aponta para si mesma/é a PK).
+      const targetEntity = FK_MAPPING[field];
+      if (targetEntity && targetEntity !== entity) return false;
+
       return true;
   };
 
@@ -112,7 +123,6 @@ export const Reports: React.FC = () => {
       }
 
       // Nível 0 (Colunas da tabela principal)
-      // Filtra PKs automáticas
       const primaryFields = (DATA_MODEL[customEntity] || [])
           .filter(f => isColumnSelectable(customEntity, f))
           .map(f => `${customEntity}.${f}`);
@@ -172,9 +182,6 @@ export const Reports: React.FC = () => {
           // Remover dos selecionados e remover recursivamente os filhos dependentes
           const pathsToRemove = newSelected.filter(p => p === path || p.startsWith(path + '.'));
           newSelected = newSelected.filter(p => !pathsToRemove.includes(p));
-          
-          // Opcional: Limpar opções disponíveis que dependiam deste path para não poluir a UI
-          // newAvailable = newAvailable.filter(opt => !opt.path.startsWith(path + '.'));
       }
 
       setSelectedJoins(newSelected);
@@ -185,7 +192,7 @@ export const Reports: React.FC = () => {
   useEffect(() => {
       if (!customEntity) return;
       
-      // Filtra PKs automáticas da entidade principal
+      // Filtra PKs e FKs automáticas da entidade principal
       const primaryFields = (DATA_MODEL[customEntity] || [])
         .filter(f => isColumnSelectable(customEntity, f))
         .map(f => `${customEntity}.${f}`);
@@ -207,7 +214,7 @@ export const Reports: React.FC = () => {
                   return p.charAt(0).toUpperCase() + p.slice(1);
               }).join('.');
 
-              // Filtra PKs automáticas das entidades relacionadas
+              // Filtra PKs e FKs das entidades relacionadas
               const validFields = fields.filter(f => isColumnSelectable(option.entity, f));
 
               joinFields = [...joinFields, ...validFields.map(f => `${displayPrefix}.${f}`)];
