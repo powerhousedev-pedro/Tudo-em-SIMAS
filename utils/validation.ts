@@ -21,11 +21,11 @@ export const validation = {
     return true;
   },
 
-  // --- ID GENERATION (Legacy Style) ---
+  // --- ID GENERATION (Standardized) ---
   
   generateLegacyId: (prefix: string) => {
-      // Replicates Utilities.getUuid().substring(0, 8).toUpperCase() behavior
-      // Using random alphanumeric string of 8 chars
+      // Standard ID: 3 char prefix + 8 random alphanumeric characters (Total 11)
+      // Includes lowercase, uppercase and numbers.
       const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       let result = '';
       for (let i = 0; i < 8; i++) {

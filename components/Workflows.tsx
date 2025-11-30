@@ -1,10 +1,13 @@
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import { Button } from './Button';
 import { UserSession, RecordData, AppContextProps } from '../types';
 import { ENTITY_CONFIGS, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, DATA_MODEL } from '../constants';
 import { businessLogic } from '../utils/businessLogic';
-import { Card } from './Card'; // Reusing Card for consistency, but we might style it differently
+import { Card } from './Card'; 
+import { validation } from '../utils/validation';
 
 interface WorkflowsProps extends AppContextProps {}
 
@@ -250,7 +253,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
               }
           } else {
               // Create new
-              payload['ID_ATENDIMENTO'] = `ATD${Math.floor(Math.random() * 1000000)}`;
+              payload['ID_ATENDIMENTO'] = validation.generateLegacyId('ATD');
               payload['DATA_ENTRADA'] = new Date().toISOString(); // Simulate server-side setting
 
               const metadata = businessLogic.calculateAtendimentoMetadata(payload);

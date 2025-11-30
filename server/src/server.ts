@@ -1,3 +1,5 @@
+
+
 import express, { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -61,12 +63,25 @@ const cleanData = (data: any) => {
     return cleaned;
 };
 
+// Standard ID Generation (Matches Frontend Logic)
+const generateId = (prefix: string) => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < 8; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `${prefix}${result}`;
+};
+
 const getModel = (modelName: string) => {
     // Tratamento para nomes compostos que podem vir do frontend
     let name = modelName.charAt(0).toLowerCase() + modelName.slice(1);
     if (name === 'solicitacaoPesquisa') name = 'solicitacaoPesquisa'; 
     if (name === 'cargoComissionado') name = 'cargoComissionado';
     if (name === 'relatorioSalvo') name = 'relatorioSalvo';
+    if (name === 'contratoHistorico') name = 'contratoHistorico';
+    if (name === 'alocacaoHistorico') name = 'alocacaoHistorico';
+    if (name === 'inativo') name = 'inativo';
     return (prisma as any)[name];
 };
 
@@ -135,7 +150,7 @@ const auditAction = async (
     try {
         await prismaClient.auditoria.create({
             data: {
-                ID_LOG: `LOG${Date.now()}${Math.floor(Math.random()*1000)}`,
+                ID_LOG: generateId('LOG'),
                 DATA_HORA: new Date(),
                 USUARIO: usuario,
                 ACAO: acao,
@@ -202,6 +217,186 @@ app.post('/api/auth/login', async (req: any, res: any) => {
         console.error("Login error (DB Connection or Query):", e);
         // Em caso de erro 500 (DB fora do ar), retornamos mensagem amigável, sem vazar a stack
         res.status(500).json({ message: 'O servidor encontrou um erro ao processar o login. Tente novamente mais tarde.' });
+    }
+});
+
+// --- BUSINESS LOGIC ROUTES ---
+
+// 1. Arquivamento de Contrato
+app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { CPF, MOTIVO } = req.body;
+    const usuario = req.user?.usuario || 'Desconhecido';
+
+    if (!CPF || !MOTIVO) return res.status(400).json({ message: 'CPF e Motivo são obrigatórios.' });
+
+    try {
+        await prisma.$transaction(async (tx) => {
+            const contratoAtivo = await tx.contrato.findFirst({ where: { CPF } });
+            
+            if (contratoAtivo) {
+                // Criar Histórico
+                const idHistorico = generateId('HCT');
+                const historicoData = {
+                    ID_HISTORICO_CONTRATO: idHistorico,
+                    ID_CONTRATO_ORIGINAL: contratoAtivo.ID_CONTRATO,
+                    ID_VAGA: contratoAtivo.ID_VAGA,
+                    CPF: contratoAtivo.CPF,
+                    DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
+                    ID_FUNCAO: contratoAtivo.ID_FUNCAO,
+                    DATA_ARQUIVAMENTO: new Date(),
+                    MOTIVO_ARQUIVAMENTO: MOTIVO
+                };
+                
+                await tx.contratoHistorico.create({ data: historicoData });
+                await auditAction(usuario, 'CRIAR', 'ContratoHistorico', idHistorico, null, historicoData, tx);
+
+                // Deletar Ativo
+                await tx.contrato.delete({ where: { ID_CONTRATO: contratoAtivo.ID_CONTRATO } });
+                await auditAction(usuario, 'EXCLUIR', 'Contrato', contratoAtivo.ID_CONTRATO, contratoAtivo, null, tx);
+            }
+        });
+
+        res.json({ success: true, message: 'Contrato anterior arquivado com sucesso.' });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+// 2. Inativação de Servidor
+app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { MATRICULA, MOTIVO } = req.body; // Aceita payload com matricula ou CPF no form (o frontend manda todos campos)
+    const usuario = req.user?.usuario || 'Desconhecido';
+    
+    // Frontend pode mandar CPF, mas PK é matricula. Se não vier matricula, tentamos achar.
+    let matriculaFinal = MATRICULA;
+    
+    try {
+        await prisma.$transaction(async (tx) => {
+            // Se não veio matrícula, tenta achar pelo CPF do payload
+            if (!matriculaFinal && req.body.CPF) {
+                const s = await tx.servidor.findFirst({ where: { CPF: req.body.CPF }});
+                if (s) matriculaFinal = s.MATRICULA;
+            }
+
+            if (!matriculaFinal) throw new Error('Matrícula não fornecida e servidor não encontrado.');
+
+            const servidor = await tx.servidor.findUnique({ where: { MATRICULA: matriculaFinal } });
+            if (!servidor) throw new Error('Servidor não encontrado.');
+
+            // Criar registro em Inativos
+            const idInativo = generateId('INA');
+            const inativoData = {
+                ID_INATIVO: idInativo,
+                MATRICULA_ORIGINAL: servidor.MATRICULA,
+                CPF: servidor.CPF,
+                ID_CARGO: servidor.ID_CARGO,
+                DATA_MATRICULA: servidor.DATA_MATRICULA,
+                VINCULO_ANTERIOR: servidor.VINCULO,
+                PREFIXO_ANTERIOR: servidor.PREFIXO_MATRICULA,
+                DATA_INATIVACAO: new Date(),
+                MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
+            };
+
+            await tx.inativo.create({ data: inativoData });
+            await auditAction(usuario, 'CRIAR', 'Inativo', idInativo, null, inativoData, tx);
+
+            // Remover Alocação Ativa se houver
+            const alocacao = await tx.alocacao.findFirst({ where: { MATRICULA: matriculaFinal } });
+            if (alocacao) {
+                await tx.alocacao.delete({ where: { ID_ALOCACAO: alocacao.ID_ALOCACAO } });
+                await auditAction(usuario, 'EXCLUIR', 'Alocacao', alocacao.ID_ALOCACAO, alocacao, null, tx);
+            }
+
+            // Remover Servidor
+            await tx.servidor.delete({ where: { MATRICULA: matriculaFinal } });
+            await auditAction(usuario, 'EXCLUIR', 'Servidor', matriculaFinal, servidor, null, tx);
+        });
+
+        res.json({ success: true, message: 'Servidor inativado com sucesso.' });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+// 3. Criação de Alocação com Histórico Automático
+app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const usuario = req.user?.usuario || 'Desconhecido';
+    let data = cleanData(req.body);
+
+    if (!data.MATRICULA) return res.status(400).json({ message: 'Matrícula é obrigatória.' });
+
+    try {
+        await prisma.$transaction(async (tx) => {
+            // Verifica alocação existente
+            const alocacaoExistente = await tx.alocacao.findFirst({ where: { MATRICULA: data.MATRICULA } });
+
+            if (alocacaoExistente) {
+                // Move para histórico
+                const idHistorico = generateId('HAL');
+                const historicoData = {
+                    ID_HISTORICO_ALOCACAO: idHistorico,
+                    MATRICULA: alocacaoExistente.MATRICULA,
+                    ID_LOTACAO: alocacaoExistente.ID_LOTACAO,
+                    ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
+                    DATA_INICIO: alocacaoExistente.DATA_INICIO,
+                    DATA_ARQUIVAMENTO: new Date()
+                };
+                await tx.alocacaoHistorico.create({ data: historicoData });
+                await auditAction(usuario, 'CRIAR', 'AlocacaoHistorico', idHistorico, null, historicoData, tx);
+
+                // Remove a antiga
+                await tx.alocacao.delete({ where: { ID_ALOCACAO: alocacaoExistente.ID_ALOCACAO } });
+                await auditAction(usuario, 'EXCLUIR', 'Alocacao', alocacaoExistente.ID_ALOCACAO, alocacaoExistente, null, tx);
+            }
+
+            // Cria a nova
+            const result = await tx.alocacao.create({ data });
+            await auditAction(usuario, 'CRIAR', 'Alocacao', result.ID_ALOCACAO, null, result, tx);
+            
+            // Retorna resultado para o frontend (compatibilidade com createRecord)
+            return result; 
+        }).then(result => {
+             res.json({ success: true, data: result });
+        });
+
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+// 4. Upsert de Exercício (1 Vaga = 1 Exercício)
+app.post('/api/Exercicio', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const usuario = req.user?.usuario || 'Desconhecido';
+    let data = cleanData(req.body);
+
+    if (!data.ID_VAGA) return res.status(400).json({ message: 'ID da Vaga é obrigatório.' });
+
+    try {
+        const result = await prisma.$transaction(async (tx) => {
+            // Verifica se já existe exercício para essa vaga
+            const exercicioExistente = await tx.exercicio.findFirst({ where: { ID_VAGA: data.ID_VAGA } });
+
+            if (exercicioExistente) {
+                // Atualiza
+                const updated = await tx.exercicio.update({
+                    where: { ID_EXERCICIO: exercicioExistente.ID_EXERCICIO },
+                    data: { ID_LOTACAO: data.ID_LOTACAO } // Atualiza apenas a lotação
+                });
+                await auditAction(usuario, 'EDITAR', 'Exercicio', updated.ID_EXERCICIO, exercicioExistente, updated, tx);
+                return updated;
+            } else {
+                // Cria
+                // Garante ID se não vier
+                if (!data.ID_EXERCICIO) data.ID_EXERCICIO = generateId('EXE');
+                const created = await tx.exercicio.create({ data });
+                await auditAction(usuario, 'CRIAR', 'Exercicio', created.ID_EXERCICIO, null, created, tx);
+                return created;
+            }
+        });
+
+        res.json({ success: true, data: result });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
@@ -328,7 +523,7 @@ app.post('/api/reports/saved', authenticateToken, async (req: AuthenticatedReque
     try {
         const newReport = await prisma.relatorioSalvo.create({
             data: {
-                ID_RELATORIO: `REP${Date.now()}`,
+                ID_RELATORIO: generateId('REP'),
                 NOME: name,
                 USUARIO: req.user?.usuario || 'Sistema', // Fixed TS Error: Ensure string
                 CONFIGURACAO: JSON.stringify(config),
@@ -476,6 +671,9 @@ app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res
 
 app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { entity } = req.params;
+    // Intercept Alocacao/Exercicio requests to specialized handlers if they somehow fall through (though Express matches first)
+    // However, since we defined specialized handlers ABOVE this generic one, we are good.
+    
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
     
