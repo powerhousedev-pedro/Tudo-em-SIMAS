@@ -1,14 +1,14 @@
 declare module '@tanstack/react-query' {
   export class QueryClient {
-    constructor(options?: any);
-    invalidateQueries(filters?: any, options?: any): Promise<void>;
+    constructor(config?: any);
+    invalidateQueries(filters?: any): Promise<void>;
     clear(): void;
   }
   export const QueryClientProvider: any;
-  export const useQuery: (options: any) => any;
-  export const useMutation: (options: any) => any;
-  export const useQueryClient: () => QueryClient;
-  export const useQueries: (options: any) => any;
+  export const useQuery: any;
+  export const useMutation: any;
+  export const useQueryClient: any;
+  export const useQueries: any;
 }
 
 declare module 'recharts' {
