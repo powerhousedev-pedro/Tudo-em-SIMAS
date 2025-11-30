@@ -527,8 +527,18 @@ app.post('/api/Atendimento', authenticateToken, async (req: AuthenticatedRequest
 
 // --- BUSINESS INTELLIGENCE & ALERTS ---
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
+    const alerts: any[] = [];
+    
+    // Helper para executar verificações individualmente sem quebrar a requisição inteira
+    const runCheck = async (name: string, fn: () => Promise<void>) => {
+        try {
+            await fn();
+        } catch (error) {
+            console.warn(`[Alerts] Falha na verificação '${name}':`, error);
+        }
+    };
+
     try {
-        const alerts: any[] = [];
         const today = new Date();
         const sevenDaysAgo = new Date(today);
         sevenDaysAgo.setDate(today.getDate() - 7);
@@ -536,81 +546,94 @@ app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
         twoYearsAgo.setFullYear(today.getFullYear() - 2);
 
         // 1. Stagnant Workflows (Aguardando > 7 dias)
-        const stagnant = await prisma.atendimento.findMany({
-            where: {
-                STATUS_PEDIDO: 'Aguardando',
-                DATA_ENTRADA: { lt: sevenDaysAgo }
-            }
-        });
-        stagnant.forEach((a: any) => {
-            alerts.push({
-                id: `stale_${a.ID_ATENDIMENTO}`,
-                type: 'STAGNATION',
-                severity: 'medium',
-                title: 'Atendimento Estagnado',
-                message: `O pedido ${a.TIPO_PEDIDO} de ${a.REMETENTE} está aguardando há mais de 7 dias.`,
-                entityId: a.ID_ATENDIMENTO,
-                date: a.DATA_ENTRADA
+        await runCheck('Stagnant', async () => {
+            const stagnant = await prisma.atendimento.findMany({
+                where: {
+                    STATUS_PEDIDO: 'Aguardando',
+                    DATA_ENTRADA: { lt: sevenDaysAgo }
+                }
+            });
+            stagnant.forEach((a: any) => {
+                alerts.push({
+                    id: `stale_${a.ID_ATENDIMENTO}`,
+                    type: 'STAGNATION',
+                    severity: 'medium',
+                    title: 'Atendimento Estagnado',
+                    message: `O pedido ${a.TIPO_PEDIDO} de ${a.REMETENTE} está aguardando há mais de 7 dias.`,
+                    entityId: a.ID_ATENDIMENTO,
+                    date: a.DATA_ENTRADA
+                });
             });
         });
 
         // 2. Orphan Servers (Servidor sem Alocação)
-        const servers = await prisma.servidor.findMany({
-            include: { alocacao: true },
-            where: {
-                alocacao: { none: {} } // Prisma feature: returns records with no related records
-            }
-        });
-        servers.forEach((s: any) => {
-            alerts.push({
-                id: `orphan_${s.MATRICULA}`,
-                type: 'INTEGRITY',
-                severity: 'high',
-                title: 'Servidor sem Alocação',
-                message: `O servidor ${s.MATRICULA} está ativo mas não possui lotação definida.`,
-                entityId: s.MATRICULA,
-                date: s.DATA_MATRICULA
+        await runCheck('Orphans', async () => {
+            // Buscamos todos e filtramos em memória para evitar erros de sintaxe Prisma (none vs null)
+            const servers = await prisma.servidor.findMany({
+                include: { alocacao: true }
+            });
+            
+            servers.forEach((s: any) => {
+                // Verifica se alocacao é vazio (array ou null)
+                const hasAlocacao = Array.isArray(s.alocacao) ? s.alocacao.length > 0 : !!s.alocacao;
+                
+                if (!hasAlocacao) {
+                    alerts.push({
+                        id: `orphan_${s.MATRICULA}`,
+                        type: 'INTEGRITY',
+                        severity: 'high',
+                        title: 'Servidor sem Alocação',
+                        message: `O servidor ${s.MATRICULA} está ativo mas não possui lotação definida.`,
+                        entityId: s.MATRICULA,
+                        date: s.DATA_MATRICULA
+                    });
+                }
             });
         });
 
         // 3. Blocked Vacancies
-        const blockedVagas = await prisma.vaga.findMany({
-            where: { BLOQUEADA: true },
-            include: { cargo: true, lotacao: true }
-        });
-        blockedVagas.forEach((v: any) => {
-            alerts.push({
-                id: `blocked_${v.ID_VAGA}`,
-                type: 'BLOCKED',
-                severity: 'low',
-                title: 'Vaga Bloqueada',
-                message: `Vaga de ${v.cargo?.NOME_CARGO} em ${v.lotacao?.LOTACAO} está bloqueada.`,
-                entityId: v.ID_VAGA,
-                date: new Date()
+        await runCheck('Blocked', async () => {
+            const blockedVagas = await prisma.vaga.findMany({
+                where: { BLOQUEADA: true },
+                include: { cargo: true, lotacao: true }
+            });
+            blockedVagas.forEach((v: any) => {
+                alerts.push({
+                    id: `blocked_${v.ID_VAGA}`,
+                    type: 'BLOCKED',
+                    severity: 'low',
+                    title: 'Vaga Bloqueada',
+                    message: `Vaga de ${v.cargo?.NOME_CARGO || 'Cargo N/A'} em ${v.lotacao?.LOTACAO || 'Lotação N/A'} está bloqueada.`,
+                    entityId: v.ID_VAGA,
+                    date: new Date()
+                });
             });
         });
 
         // 4. Old Contracts (Potential Expiration > 2 years)
-        const oldContracts = await prisma.contrato.findMany({
-            where: { DATA_DO_CONTRATO: { lt: twoYearsAgo } },
-            include: { pessoa: true }
-        });
-        oldContracts.forEach((c: any) => {
-            alerts.push({
-                id: `expire_${c.ID_CONTRATO}`,
-                type: 'EXPIRATION',
-                severity: 'medium',
-                title: 'Contrato Antigo',
-                message: `O contrato de ${c.pessoa?.NOME} tem mais de 2 anos. Verifique renovação/término.`,
-                entityId: c.ID_CONTRATO,
-                date: c.DATA_DO_CONTRATO
+        await runCheck('OldContracts', async () => {
+            const oldContracts = await prisma.contrato.findMany({
+                where: { DATA_DO_CONTRATO: { lt: twoYearsAgo } },
+                include: { pessoa: true }
+            });
+            oldContracts.forEach((c: any) => {
+                alerts.push({
+                    id: `expire_${c.ID_CONTRATO}`,
+                    type: 'EXPIRATION',
+                    severity: 'medium',
+                    title: 'Contrato Antigo',
+                    message: `O contrato de ${c.pessoa?.NOME || 'Desconhecido'} tem mais de 2 anos. Verifique renovação/término.`,
+                    entityId: c.ID_CONTRATO,
+                    date: c.DATA_DO_CONTRATO
+                });
             });
         });
 
         res.json(alerts);
     } catch (e: any) {
-        console.error("Alerts Error:", e);
-        res.status(500).json({ message: 'Erro ao gerar alertas' });
+        console.error("Alerts Fatal Error:", e);
+        // Em caso de erro fatal, retorna array vazio para não quebrar o frontend
+        res.json([]);
     }
 });
 
