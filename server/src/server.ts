@@ -336,7 +336,6 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
                         ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
                         DATA_INICIO: alocacaoExistente.DATA_INICIO,
                         DATA_ARQUIVAMENTO: new Date(), // Nome correto do campo
-                        MOTIVO_MUDANCA: "Nova alocação criada"
                     }
                 });
 
@@ -425,7 +424,11 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
 
                 } else if (log.TABELA_AFETADA === 'Servidor') {
                     // O ID do log é a MATRICULA
-                    const inativo = await tx.inativo.findFirst({ where: { MATRICULA: log.ID_REGISTRO_AFETADO } });
+                    const oldData = JSON.parse(log.VALOR_ANTIGO || '{}');
+                    // Workaround: Buscar por CPF e filtrar em memória, pois MATRICULA pode não estar no WhereInput
+                    const candidates = await tx.inativo.findMany({ where: { CPF: oldData.CPF } });
+                    const inativo = candidates.find((c: any) => c.MATRICULA === log.ID_REGISTRO_AFETADO);
+                    
                     if (!inativo) throw new Error("Registro não encontrado na tabela de inativos.");
 
                     dataToRestore = { ...inativo };
