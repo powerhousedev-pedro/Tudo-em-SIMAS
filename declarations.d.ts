@@ -24,7 +24,7 @@ declare module 'recharts' {
 
 declare module 'jspdf' {
   export default class jsPDF {
-    constructor(options?: any);
+    constructor(orientation?: any, unit?: any, format?: any);
     text(text: string, x: number, y: number, options?: any): any;
     rect(x: number, y: number, w: number, h: number, style?: string): any;
     setFillColor(r: number, g: number, b: number): any;
