@@ -1,19 +1,19 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { queryClient } from '../lib/queryClient';
-import { Login } from './Login';
-import { Dashboard } from './Dashboard';
-import { Reports } from './Reports';
-import { Workflows } from './Workflows';
-import { History } from './History';
-import { ToastContainer, ToastMessage } from './Toast';
-import { UserAdminModal } from './UserAdminModal';
-import { ActionExecutionModal } from './ActionExecutionModal';
-import { NotificationCenter } from './NotificationCenter';
-import { UserSession, AppRoute } from '../types';
-import { Logo } from './Logo';
-import { usePendingReviews, useSystemAlerts } from '../hooks/useSimasData';
+import { queryClient } from './lib/queryClient';
+import { Login } from './components/Login';
+import { Dashboard } from './components/Dashboard';
+import { Reports } from './components/Reports';
+import { Workflows } from './components/Workflows';
+import { History } from './components/History';
+import { ToastContainer, ToastMessage } from './components/Toast';
+import { UserAdminModal } from './components/UserAdminModal';
+import { ActionExecutionModal } from './components/ActionExecutionModal';
+import { NotificationCenter } from './components/NotificationCenter';
+import { UserSession, AppRoute } from './types';
+import { Logo } from './components/Logo';
+import { usePendingReviews, useSystemAlerts } from './hooks/useSimasData';
 
 // Separate component to use Hooks inside Provider
 const MainLayout: React.FC<{ 
@@ -149,7 +149,7 @@ const MainLayout: React.FC<{
             {showNotificationCenter && (
                 <NotificationCenter 
                     onClose={() => setShowNotificationCenter(false)}
-                    onSelectAction={(id) => { 
+                    onSelectAction={(id: string) => { 
                         setShowNotificationCenter(false);
                         setActionAtendimentoId(id);
                     }}
