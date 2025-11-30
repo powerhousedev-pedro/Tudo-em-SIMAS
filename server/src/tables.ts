@@ -20,6 +20,7 @@ export const TABLES = {
   PESQUISA: 'Pesquisa',
   PESSOA: 'Pessoa',
   PROTOCOLO: 'Protocolo',
+  RELATORIO_SALVO: 'RelatorioSalvo',
   RESERVA: 'Reserva',
   SERVIDOR: 'Servidor',
   SOLICITACAO_PESQUISA: 'SolicitacaoPesquisa',

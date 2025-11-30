@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -85,6 +86,12 @@ export const Reports: React.FC = () => {
   // Estado temporário para adicionar novo filtro
   const [newFilter, setNewFilter] = useState({ field: '', operator: 'contains', value: '' });
   const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
+
+  // Estados para Salvar/Carregar Relatórios
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [reportName, setReportName] = useState('');
+  const [savedReportsModalOpen, setSavedReportsModalOpen] = useState(false);
+  const [savedReportsList, setSavedReportsList] = useState<any[]>([]);
 
   // Carregar dados dos relatórios fixos
   useEffect(() => {
@@ -177,14 +184,11 @@ export const Reports: React.FC = () => {
   };
 
   // Inicializar Joins Nível 1 quando a entidade principal muda
+  // Refatorado para NÃO limpar estado se ele já estiver sendo carregado (via selectedJoins)
   useEffect(() => {
       if (!customEntity) {
           setAvailableJoins([]);
-          setSelectedJoins([]);
           setAvailableColumns([]);
-          setSelectedColumns([]);
-          setCustomResults([]);
-          setGenerated(false);
           return;
       }
 
@@ -193,9 +197,10 @@ export const Reports: React.FC = () => {
           .filter(f => isColumnSelectable(customEntity, f))
           .map(f => `${customEntity}.${f}`);
       
-      setAvailableColumns(primaryFields);
-      setSelectedColumns(primaryFields.slice(0, 5));
-
+      // Se acabamos de mudar a entidade (estado limpo) ou carregamos (estado preenchido)
+      // Precisamos garantir que as colunas da entidade principal estejam disponíveis
+      // Mas NÃO resetamos selectedColumns aqui, isso é feito no onChange do select ou load
+      
       // Nível 1 (Relações diretas)
       const directRelations = getRelationsForEntity(customEntity);
       const initialJoins: JoinOption[] = directRelations.map(rel => ({
@@ -207,11 +212,7 @@ export const Reports: React.FC = () => {
       }));
 
       setAvailableJoins(initialJoins);
-      setSelectedJoins([]);
-      setCustomFilters([]);
-      setCustomResults([]);
-      setGenerated(false);
-      setFilterSuggestions([]);
+      // NÃO limpamos selectedJoins ou selectedColumns aqui para permitir load
   }, [customEntity]);
 
   // --- LÓGICA RECURSIVA DE JOINS COM PREVENÇÃO DE REDUNDÂNCIA ---
@@ -261,6 +262,59 @@ export const Reports: React.FC = () => {
       setAvailableJoins(newAvailable);
   };
 
+  // Quando selectedJoins muda (seja por clique ou LOAD), precisamos reconstruir availableJoins recursivamente
+  // para que a árvore de opções reflita o que foi carregado
+  useEffect(() => {
+      if (!customEntity || selectedJoins.length === 0) return;
+
+      // Reconstrução simplificada: vamos iterar sobre os selectedJoins ordenados por profundidade
+      // e simular a "expansão" da árvore
+      const sortedSelected = [...selectedJoins].sort((a, b) => a.length - b.length);
+      
+      // Precisamos começar do base state (Nivel 1 já setado pelo useEffect[customEntity])
+      // Mas como React state updates são async, melhor manipular cópias locais
+      let currentAvailable = [...availableJoins];
+      if(currentAvailable.length === 0) return; // Espera o efeito inicial rodar
+
+      sortedSelected.forEach(path => {
+          // Acha a opção correspondente ao path atual
+          const option = currentAvailable.find(opt => opt.path === path);
+          if (option) {
+              // Simula a lógica de expansão
+              const entity = option.entity;
+              
+              // Prevenção de redundância
+              const entitiesAlreadyOption = new Set<string>();
+              entitiesAlreadyOption.add(customEntity); 
+              currentAvailable.forEach(opt => entitiesAlreadyOption.add(opt.entity));
+
+              const childRelations = getRelationsForEntity(entity);
+              
+              childRelations.forEach(rel => {
+                  const childPath = `${path}.${rel.entity.toLowerCase()}`;
+                  
+                  if (entitiesAlreadyOption.has(rel.entity)) return;
+
+                  if (!currentAvailable.some(opt => opt.path === childPath)) {
+                      currentAvailable.push({
+                          label: `${ENTITY_CONFIGS[rel.entity]?.title || rel.entity} (via ${ENTITY_CONFIGS[entity]?.title})`,
+                          entity: rel.entity,
+                          path: childPath,
+                          parentPath: path,
+                          depth: (path.split('.').length)
+                      });
+                      entitiesAlreadyOption.add(rel.entity);
+                  }
+              });
+          }
+      });
+      
+      // Atualiza apenas se mudou (para evitar loop infinito se useEffect dependesse de availableJoins)
+      if (currentAvailable.length > availableJoins.length) {
+          setAvailableJoins(currentAvailable);
+      }
+  }, [selectedJoins, customEntity]); // Note: availableJoins removido das deps para evitar loop
+
   // Atualizar Colunas Disponíveis baseado nos Joins Selecionados
   useEffect(() => {
       if (!customEntity) return;
@@ -291,15 +345,27 @@ export const Reports: React.FC = () => {
 
       setAvailableColumns([...primaryFields, ...joinFields]);
       
+      // Auto-selecionar padrão apenas se estiver vazio E não for load
+      // (Se selectedColumns estiver vazio, assume-se novo relatório)
       if (selectedColumns.length === 0) {
           setSelectedColumns(primaryFields.slice(0, 5));
-      } else {
-          const allCols = [...primaryFields, ...joinFields];
-          setSelectedColumns(prev => prev.filter(c => allCols.includes(c)));
-      }
+      } 
   }, [selectedJoins, availableJoins, customEntity]);
 
   // --- ACTIONS ---
+
+  const handleEntityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const newEntity = e.target.value;
+      setCustomEntity(newEntity);
+      
+      // Resetar estado explicitamente apenas quando o usuário muda manualmente
+      setSelectedJoins([]);
+      setSelectedColumns([]); // O useEffect vai repopular o padrão
+      setCustomFilters([]);
+      setCustomResults([]);
+      setGenerated(false);
+      setFilterSuggestions([]);
+  };
 
   const handleAddFilter = () => {
       if (newFilter.field && newFilter.value) {
@@ -495,6 +561,77 @@ export const Reports: React.FC = () => {
     generateReportPDF(currentReport, reportLabel, data, vagasView);
   };
 
+  // --- SAVE & LOAD REPORT LOGIC ---
+
+  const handleSaveReport = async () => {
+      if (!customEntity || !reportName) return;
+      setLoading(true);
+      try {
+          const config = {
+              entity: customEntity,
+              joins: selectedJoins,
+              columns: selectedColumns,
+              filters: customFilters
+          };
+          
+          await api.saveReportConfig(reportName, config);
+          setSaveModalOpen(false);
+          setReportName('');
+          alert('Relatório salvo com sucesso!');
+      } catch (e) {
+          console.error(e);
+          alert('Erro ao salvar relatório.');
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleOpenLoadModal = async () => {
+      setLoading(true);
+      try {
+          const reports = await api.getSavedReports();
+          setSavedReportsList(reports);
+          setSavedReportsModalOpen(true);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleLoadReport = (savedConfigStr: string) => {
+      try {
+          const config = JSON.parse(savedConfigStr);
+          
+          // 1. Set Entity (Trigger initial load via useEffect, but we override it)
+          setCustomEntity(config.entity);
+          
+          // 2. Set State
+          setSelectedJoins(config.joins || []);
+          setSelectedColumns(config.columns || []);
+          setCustomFilters(config.filters || []);
+          
+          // 3. Reset Results
+          setCustomResults([]);
+          setGenerated(false);
+          setSavedReportsModalOpen(false);
+      } catch (e) {
+          console.error("Error parsing config", e);
+          alert("Configuração inválida.");
+      }
+  };
+
+  const handleDeleteSavedReport = async (id: string) => {
+      if (!confirm('Tem certeza?')) return;
+      try {
+          await api.deleteSavedReport(id);
+          const reports = await api.getSavedReports();
+          setSavedReportsList(reports);
+      } catch (e) {
+          console.error(e);
+      }
+  };
+
   // --- RENDERIZADORES ---
 
   const renderJoinSelector = () => {
@@ -552,6 +689,18 @@ export const Reports: React.FC = () => {
 
       return (
           <div className="space-y-6 animate-fade-in">
+              {/* TOP BAR ACTIONS */}
+              <div className="flex justify-end gap-3 mb-2">
+                  <Button variant="secondary" icon="fas fa-folder-open" onClick={handleOpenLoadModal} className="text-xs py-2 h-9">
+                      Meus Relatórios
+                  </Button>
+                  {customEntity && (
+                      <Button variant="secondary" icon="fas fa-save" onClick={() => setSaveModalOpen(true)} className="text-xs py-2 h-9">
+                          Salvar Modelo
+                      </Button>
+                  )}
+              </div>
+
               {/* MAIN BUILDER BOX - Layout fixo de Split Pane */}
               <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden flex flex-col md:flex-row h-[600px]">
                   
@@ -569,7 +718,7 @@ export const Reports: React.FC = () => {
                                <select 
                                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-simas-cyan/20 outline-none transition-all text-sm font-medium text-simas-dark shadow-sm appearance-none cursor-pointer hover:border-simas-cyan"
                                    value={customEntity}
-                                   onChange={(e) => setCustomEntity(e.target.value)}
+                                   onChange={handleEntityChange}
                                >
                                    <option value="">Selecione a tabela principal...</option>
                                    {availableEntities.map(key => (
@@ -652,7 +801,7 @@ export const Reports: React.FC = () => {
                            </div>
                       </div>
 
-                      {/* Step 4: Filters (50% Height) */}
+                      {/* Step 4: Filters (50% Height) - Button integrated here */}
                       <div className="flex-1 flex flex-col min-h-0 bg-gray-50/20 h-1/2">
                            <div className="p-3 px-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
                                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
@@ -696,7 +845,7 @@ export const Reports: React.FC = () => {
                                </div>
                            </div>
 
-                           {/* Add Filter Form */}
+                           {/* Add Filter Form & Generate Button Footer */}
                            <div className="p-3 bg-white border-t border-gray-100 shadow-[0_-5px_15px_-10px_rgba(0,0,0,0.05)] z-10">
                                <div className="flex flex-col gap-2">
                                    <div className="flex gap-2">
@@ -765,17 +914,17 @@ export const Reports: React.FC = () => {
                                            OK
                                        </button>
                                    </div>
+                                   
+                                   {/* ACTION BUTTON INTEGRATED HERE */}
+                                   <div className="mt-2 pt-2 border-t border-gray-100 flex justify-end">
+                                        <Button onClick={handleGenerateCustom} disabled={!customEntity || selectedColumns.length === 0} isLoading={loading} icon="fas fa-bolt" className="w-full justify-center shadow-simas-blue/20">
+                                            Gerar Relatório
+                                        </Button>
+                                   </div>
                                </div>
                            </div>
                       </div>
                   </div>
-              </div>
-
-              {/* ACTION BUTTON */}
-              <div className="flex justify-end pt-2">
-                  <Button onClick={handleGenerateCustom} disabled={!customEntity || selectedColumns.length === 0} isLoading={loading} icon="fas fa-bolt" className="px-8 py-4 text-sm shadow-xl shadow-simas-blue/20">
-                      Gerar Relatório
-                  </Button>
               </div>
 
               {/* RESULTADOS */}
@@ -984,6 +1133,65 @@ export const Reports: React.FC = () => {
                 )}
             </div>
         </div>
+
+        {/* MODAL SALVAR RELATÓRIO */}
+        {saveModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 border border-white/20 animate-slide-in">
+                    <h3 className="text-lg font-bold text-simas-dark mb-4">Salvar Modelo</h3>
+                    <input 
+                        type="text" 
+                        placeholder="Nome do relatório..." 
+                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl mb-4 focus:bg-white focus:border-simas-cyan outline-none"
+                        value={reportName}
+                        onChange={(e) => setReportName(e.target.value)}
+                        autoFocus
+                    />
+                    <div className="flex gap-2 justify-end">
+                        <Button variant="secondary" onClick={() => setSaveModalOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleSaveReport} disabled={!reportName.trim()}>Salvar</Button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* MODAL MEUS RELATÓRIOS */}
+        {savedReportsModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-slide-in flex flex-col max-h-[80vh]">
+                    <div className="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-simas-dark">Meus Relatórios</h3>
+                        <button onClick={() => setSavedReportsModalOpen(false)} className="text-gray-400 hover:text-gray-600"><i className="fas fa-times"></i></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                        {savedReportsList.length === 0 ? (
+                            <p className="text-center text-gray-400 italic py-8">Nenhum relatório salvo.</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {savedReportsList.map(rep => (
+                                    <div key={rep.ID_RELATORIO} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl hover:shadow-md transition-shadow group">
+                                        <button 
+                                            onClick={() => handleLoadReport(rep.CONFIGURACAO)}
+                                            className="flex-1 text-left flex flex-col"
+                                        >
+                                            <span className="font-bold text-simas-dark text-sm group-hover:text-simas-cyan transition-colors">{rep.NOME}</span>
+                                            <span className="text-[10px] text-gray-400">Criado em: {new Date(rep.DATA_CRIACAO).toLocaleDateString()}</span>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleDeleteSavedReport(rep.ID_RELATORIO)}
+                                            className="w-8 h-8 rounded-full hover:bg-red-50 hover:text-red-500 text-gray-300 flex items-center justify-center transition-colors"
+                                            title="Excluir"
+                                        >
+                                            <i className="fas fa-trash text-xs"></i>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
     </div>
   );
 };
