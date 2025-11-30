@@ -9,6 +9,15 @@ import { generateReportPDF } from '../utils/pdfGenerator';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// Definição de tipo para o Join com Caminho
+interface JoinOption {
+    label: string;
+    entity: string;
+    path: string; // Ex: "vaga", "vaga.lotacao"
+    parentPath: string; // Ex: "", "vaga"
+    depth: number;
+}
+
 export const Reports: React.FC = () => {
   const getSession = (): UserSession => {
       const stored = localStorage.getItem('simas_user_session');
@@ -23,7 +32,9 @@ export const Reports: React.FC = () => {
   const validReports = [
       { id: 'dashboardPessoal', label: 'Dashboard de Pessoal', category: 'Gerencial' },
       { id: 'painelVagas', label: 'Painel de Vagas', category: 'Operacional' },
-      { id: 'customGenerator', label: 'Gerador Personalizado', category: 'Ferramentas' }
+      { id: 'analiseCustos', label: 'Análise de Custos', category: 'Gerencial' },
+      { id: 'atividadeUsuarios', label: 'Atividade de Usuários', category: 'Administrativo' },
+      { id: 'customGenerator', label: 'Gerador Personalizado (BI)', category: 'Ferramentas' }
   ];
 
   const [currentReport, setCurrentReport] = useState(validReports[0].id);
@@ -33,8 +44,11 @@ export const Reports: React.FC = () => {
 
   // --- ESTADO DO GERADOR PERSONALIZADO ---
   const [customEntity, setCustomEntity] = useState<string>('');
-  const [availableJoins, setAvailableJoins] = useState<string[]>([]);
-  const [selectedJoins, setSelectedJoins] = useState<string[]>([]);
+  
+  // Joins Disponíveis e Selecionados (Agora baseados em caminhos)
+  const [availableJoins, setAvailableJoins] = useState<JoinOption[]>([]);
+  const [selectedJoins, setSelectedJoins] = useState<string[]>([]); // Array de paths: ['vaga', 'vaga.lotacao']
+
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [customFilters, setCustomFilters] = useState<{ field: string, operator: string, value: string }[]>([]);
@@ -62,7 +76,30 @@ export const Reports: React.FC = () => {
     load();
   }, [currentReport]);
 
-  // Identificar Joins Disponíveis (Baseado em DATA_MODEL e FK_MAPPING)
+  // Função auxiliar para encontrar relações de uma entidade
+  const getRelationsForEntity = (entity: string): { entity: string, field: string }[] => {
+      const fields = DATA_MODEL[entity] || [];
+      const relations: { entity: string, field: string }[] = [];
+      
+      fields.forEach(f => {
+          const targetEntity = FK_MAPPING[f];
+          if (targetEntity && targetEntity !== entity) {
+              relations.push({ entity: targetEntity, field: f });
+          }
+      });
+      return relations;
+  };
+
+  // Helper para verificar se a coluna deve ser exibida (oculta PKs técnicas)
+  const isColumnSelectable = (entity: string, field: string) => {
+      const config = ENTITY_CONFIGS[entity];
+      if (!config) return true;
+      // Se for PK e NÃO for manual (ex: CPF, Matricula são manuais, ID_VAGA é auto), esconde.
+      if (field === config.pk && !config.manualPk) return false;
+      return true;
+  };
+
+  // Inicializar Joins Nível 1 quando a entidade principal muda
   useEffect(() => {
       if (!customEntity) {
           setAvailableJoins([]);
@@ -74,50 +111,123 @@ export const Reports: React.FC = () => {
           return;
       }
 
-      // Identificar relacionamentos possíveis onde a tabela atual tem a FK
-      const currentFields = DATA_MODEL[customEntity] || [];
-      const potentialJoins = currentFields
-        .map(field => FK_MAPPING[field])
-        .filter(entity => entity && entity !== customEntity);
-
-      setAvailableJoins([...new Set(potentialJoins)]);
-      setSelectedJoins([]);
+      // Nível 0 (Colunas da tabela principal)
+      // Filtra PKs automáticas
+      const primaryFields = (DATA_MODEL[customEntity] || [])
+          .filter(f => isColumnSelectable(customEntity, f))
+          .map(f => `${customEntity}.${f}`);
       
-      // Carregar colunas iniciais (só da tabela principal)
-      const cols = currentFields.map(f => `${customEntity}.${f}`);
-      setAvailableColumns(cols);
-      setSelectedColumns(cols.slice(0, 5));
+      setAvailableColumns(primaryFields);
+      setSelectedColumns(primaryFields.slice(0, 5));
+
+      // Nível 1 (Relações diretas)
+      const directRelations = getRelationsForEntity(customEntity);
+      const initialJoins: JoinOption[] = directRelations.map(rel => ({
+          label: `${ENTITY_CONFIGS[rel.entity]?.title || rel.entity}`,
+          entity: rel.entity,
+          path: rel.entity.toLowerCase(), // Usamos camelCase para paths no backend
+          parentPath: '',
+          depth: 0
+      }));
+
+      setAvailableJoins(initialJoins);
+      setSelectedJoins([]);
       setCustomFilters([]);
       setCustomResults([]);
       setGenerated(false);
   }, [customEntity]);
 
-  // Atualizar Colunas quando Joins mudam
+  // --- LÓGICA RECURSIVA DE JOINS ---
+
+  const handleJoinToggle = (path: string, entity: string, isChecked: boolean) => {
+      let newSelected = [...selectedJoins];
+      let newAvailable = [...availableJoins];
+
+      if (isChecked) {
+          // Adicionar aos selecionados
+          if (!newSelected.includes(path)) newSelected.push(path);
+
+          // DESCOBRIR NOVAS RELAÇÕES (NÍVEL N+1)
+          const childRelations = getRelationsForEntity(entity);
+          
+          childRelations.forEach(rel => {
+              const childPath = `${path}.${rel.entity.toLowerCase()}`;
+              
+              // Evitar ciclos (não adicionar se o caminho já contém a entidade ou volta pra principal)
+              if (path.includes(rel.entity.toLowerCase()) || rel.entity === customEntity) return;
+
+              // Evitar duplicatas na lista de disponíveis
+              if (!newAvailable.some(opt => opt.path === childPath)) {
+                  newAvailable.push({
+                      label: `${ENTITY_CONFIGS[rel.entity]?.title || rel.entity} (via ${ENTITY_CONFIGS[entity]?.title})`,
+                      entity: rel.entity,
+                      path: childPath,
+                      parentPath: path,
+                      depth: (path.split('.').length)
+                  });
+              }
+          });
+
+      } else {
+          // Remover dos selecionados e remover recursivamente os filhos dependentes
+          const pathsToRemove = newSelected.filter(p => p === path || p.startsWith(path + '.'));
+          newSelected = newSelected.filter(p => !pathsToRemove.includes(p));
+          
+          // Opcional: Limpar opções disponíveis que dependiam deste path para não poluir a UI
+          // newAvailable = newAvailable.filter(opt => !opt.path.startsWith(path + '.'));
+      }
+
+      setSelectedJoins(newSelected);
+      setAvailableJoins(newAvailable);
+  };
+
+  // Atualizar Colunas Disponíveis baseado nos Joins Selecionados
   useEffect(() => {
       if (!customEntity) return;
       
-      const primaryFields = (DATA_MODEL[customEntity] || []).map(f => `${customEntity}.${f}`);
+      // Filtra PKs automáticas da entidade principal
+      const primaryFields = (DATA_MODEL[customEntity] || [])
+        .filter(f => isColumnSelectable(customEntity, f))
+        .map(f => `${customEntity}.${f}`);
+
       let joinFields: string[] = [];
 
-      selectedJoins.forEach(joinEntity => {
-          const fields = DATA_MODEL[joinEntity] || [];
-          // Prefix columns with Joined Entity Name
-          joinFields = [...joinFields, ...fields.map(f => `${joinEntity}.${f}`)];
+      // Ordenar selects para manter consistência visual
+      const sortedJoins = [...selectedJoins].sort();
+
+      sortedJoins.forEach(path => {
+          // Encontrar qual entidade corresponde a este path
+          const option = availableJoins.find(opt => opt.path === path);
+          if (option) {
+              const fields = DATA_MODEL[option.entity] || [];
+              // Prefixo da coluna agora usa o Path completo para evitar ambiguidade
+              // Ex: vaga.lotacao.NOME
+              const displayPrefix = path.split('.').map(p => {
+                  // Tentar deixar mais bonito: vaga -> Vaga
+                  return p.charAt(0).toUpperCase() + p.slice(1);
+              }).join('.');
+
+              // Filtra PKs automáticas das entidades relacionadas
+              const validFields = fields.filter(f => isColumnSelectable(option.entity, f));
+
+              joinFields = [...joinFields, ...validFields.map(f => `${displayPrefix}.${f}`)];
+          }
       });
 
       setAvailableColumns([...primaryFields, ...joinFields]);
-      // Não reseta selectedColumns se já tiver algo, apenas adiciona se estiver vazio
+      
+      // Se não tiver colunas selecionadas, pega as 5 primeiras
       if (selectedColumns.length === 0) {
           setSelectedColumns(primaryFields.slice(0, 5));
       }
-  }, [selectedJoins, customEntity]);
+  }, [selectedJoins, availableJoins, customEntity]);
 
-  // --- LÓGICA DO GERADOR ---
+  // --- ACTIONS ---
 
   const handleAddFilter = () => {
       if (newFilter.field && newFilter.value) {
           setCustomFilters([...customFilters, newFilter]);
-          setNewFilter({ ...newFilter, value: '' }); // Limpa valor
+          setNewFilter({ ...newFilter, value: '' });
       }
   };
 
@@ -131,14 +241,14 @@ export const Reports: React.FC = () => {
       if (!customEntity) return;
       setLoading(true);
       try {
-          // Busca dados brutos com Joins no servidor
+          // Envia os paths selecionados (ex: ['vaga', 'vaga.lotacao'])
           let rawData = await api.generateCustomReport(customEntity, selectedJoins);
 
-          // Aplica Filtros no Cliente (Client-side filtering para flexibilidade)
+          // Filtragem Client-Side
           if (customFilters.length > 0) {
               rawData = rawData.filter((item: any) => {
                   return customFilters.every(filter => {
-                      // O filtro agora precisa lidar com chaves achatadas 'Entity.Field'
+                      // Normalização do valor para comparação
                       const itemValue = String(item[filter.field] || '').toLowerCase();
                       const filterValue = filter.value.toLowerCase();
                       
@@ -147,8 +257,6 @@ export const Reports: React.FC = () => {
                           case 'equals': return itemValue === filterValue;
                           case 'starts': return itemValue.startsWith(filterValue);
                           case 'ends': return itemValue.endsWith(filterValue);
-                          case 'gt': return parseFloat(itemValue) > parseFloat(filterValue);
-                          case 'lt': return parseFloat(itemValue) < parseFloat(filterValue);
                           default: return true;
                       }
                   });
@@ -166,13 +274,12 @@ export const Reports: React.FC = () => {
 
   const exportCustomCSV = () => {
       if (customResults.length === 0) return;
-      
       const headers = selectedColumns.join(';');
       const rows = customResults.map(row => 
           selectedColumns.map(col => {
               let val = row[col];
               if (val === null || val === undefined) return '';
-              return String(val).replace(/;/g, ','); // Escape semi-colons
+              return String(val).replace(/;/g, ',').replace(/\n/g, ' '); 
           }).join(';')
       );
       
@@ -188,11 +295,11 @@ export const Reports: React.FC = () => {
 
   const exportCustomPDF = () => {
       if (customResults.length === 0) return;
-      const doc = new jsPDF('l', 'mm', 'a4'); // Landscape
+      const doc = new jsPDF('l', 'mm', 'a4');
       const today = new Date().toLocaleDateString('pt-BR');
       
       doc.setFontSize(14);
-      doc.text(`Relatório Personalizado: ${ENTITY_CONFIGS[customEntity]?.title || customEntity}`, 14, 15);
+      doc.text(`Relatório: ${ENTITY_CONFIGS[customEntity]?.title || customEntity}`, 14, 15);
       doc.setFontSize(10);
       doc.text(`Gerado em: ${today} - ${customResults.length} registros`, 14, 22);
 
@@ -200,10 +307,10 @@ export const Reports: React.FC = () => {
 
       autoTable(doc, {
           startY: 25,
-          head: [selectedColumns],
+          head: [selectedColumns.map(c => c.split('.').pop() || c)], // Header simplificado
           body: tableRows,
           theme: 'grid',
-          styles: { fontSize: 8, cellPadding: 2 },
+          styles: { fontSize: 7, cellPadding: 1 },
           headStyles: { fillColor: [19, 51, 90] }
       });
       
@@ -218,107 +325,46 @@ export const Reports: React.FC = () => {
 
   // --- RENDERIZADORES ---
 
-  const renderQuantitativoGrouped = (items: QuantitativoItem[]) => {
-      const grouped = items.reduce((acc, item) => {
-          if (!acc[item.VINCULACAO]) acc[item.VINCULACAO] = {};
-          if (!acc[item.VINCULACAO][item.LOTACAO]) acc[item.VINCULACAO][item.LOTACAO] = [];
-          acc[item.VINCULACAO][item.LOTACAO].push(item);
-          return acc;
-      }, {} as Record<string, Record<string, QuantitativoItem[]>>);
+  const renderJoinSelector = () => {
+    if (availableJoins.length === 0) return <p className="text-xs text-gray-400 italic">Nenhuma relação direta encontrada.</p>;
 
-      return (
-          <div className="space-y-6">
-              {Object.entries(grouped).map(([vinculacao, lotacoes]) => (
-                  <div key={vinculacao} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                      <div className="bg-simas-blue/10 px-6 py-4 border-b border-simas-blue/20">
-                          <h3 className="font-bold text-lg text-simas-dark">{vinculacao}</h3>
-                      </div>
-                      <div className="p-6 space-y-6">
-                          {Object.entries(lotacoes).map(([lotacao, cargos]) => (
-                              <div key={lotacao} className="border-l-4 border-simas-cyan pl-4">
-                                  <h4 className="font-semibold text-simas-blue mb-2">{lotacao}</h4>
-                                  <ul className="space-y-2">
-                                      {cargos.map((item, idx) => (
-                                          <li key={idx} className="flex justify-between items-center text-sm bg-gray-50 p-3 rounded-lg">
-                                              <span className="font-medium text-gray-700">{item.CARGO}</span>
-                                              <span className="text-gray-500 font-light">{item.DETALHES}</span>
-                                          </li>
-                                      ))}
-                                  </ul>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-              ))}
-          </div>
-      );
-  };
+    // Ordenar para que filhos fiquem abaixo dos pais
+    const displayList = [...availableJoins].sort((a, b) => a.path.localeCompare(b.path));
 
-  const renderFixedReport = () => {
-      if (!data) return null;
+    return (
+        <div className="flex flex-col gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
+            {displayList.map((join) => {
+                const isSelected = selectedJoins.includes(join.path);
+                const isParentSelected = join.parentPath === '' || selectedJoins.includes(join.parentPath);
+                
+                // Só mostrar se o pai estiver selecionado (Cascata visual)
+                if (!isParentSelected) return null;
 
-      if (currentReport === 'painelVagas') {
-          return (
-              <div className="space-y-6">
-                  <div className="flex gap-2 bg-white p-2 rounded-lg shadow-sm border border-gray-100 w-fit">
-                      <button onClick={() => setVagasView('quantitativo')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vagasView === 'quantitativo' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-list-ol mr-2"></i> Quantitativo</button>
-                      <button onClick={() => setVagasView('panorama')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vagasView === 'panorama' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-table mr-2"></i> Panorama</button>
-                  </div>
-                  {vagasView === 'quantitativo' && data.quantitativo ? renderQuantitativoGrouped(data.quantitativo) : null}
-                  {vagasView === 'panorama' && data.panorama ? (
-                      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 overflow-x-auto">
-                          <table className="w-full text-sm text-left whitespace-nowrap">
-                              <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
-                                  <tr><th className="px-6 py-3">Ocupante</th><th className="px-6 py-3">Vinculação</th><th className="px-6 py-3">Lotação</th><th className="px-6 py-3">Cargo</th><th className="px-6 py-3">Status</th></tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                  {data.panorama.map((row: any, i: number) => (
-                                      <tr key={i} className="hover:bg-gray-50/50">
-                                          <td className="px-6 py-3 font-bold">{row.OCUPANTE}</td><td className="px-6 py-3">{row.VINCULACAO}</td><td className="px-6 py-3">{row.LOTACAO_OFICIAL}</td><td className="px-6 py-3">{row.NOME_CARGO}</td>
-                                          <td className="px-6 py-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${row.STATUS === 'Disponível' ? 'bg-green-100 text-green-800' : row.STATUS === 'Ocupada' ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800'}`}>{row.STATUS}</span></td>
-                                      </tr>
-                                  ))}
-                              </tbody>
-                          </table>
-                      </div>
-                  ) : null}
-              </div>
-          );
-      }
-
-      return (
-          <div className="space-y-8">
-              {data.totais && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      {Object.entries(data.totais).map(([key, val]) => (
-                          <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
-                              <h3 className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">{key}</h3>
-                              <p className="text-4xl font-extrabold text-simas-dark">{val as React.ReactNode}</p>
-                          </div>
-                      ))}
-                  </div>
-              )}
-              {data.graficos && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {Object.entries(data.graficos).map(([key, chartData]) => (
-                          <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[400px]">
-                              <h4 className="text-sm font-bold text-gray-500 mb-4 uppercase">{key === 'vinculo' ? 'Por Vínculo' : 'Por Lotação'}</h4>
-                              <ResponsiveContainer width="100%" height="100%">
-                                  <BarChart data={chartData}>
-                                      <CartesianGrid strokeDasharray="3 3" />
-                                      <XAxis dataKey="name" />
-                                      <YAxis />
-                                      <Tooltip cursor={{fill: '#f3f4f6'}} />
-                                      <Legend />
-                                      <Bar dataKey="value" fill="#2a688f" radius={[4, 4, 0, 0]} />
-                                  </BarChart>
-                              </ResponsiveContainer>
-                          </div>
-                      ))}
-                  </div>
-              )}
-          </div>
-      );
+                return (
+                    <label 
+                        key={join.path} 
+                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all border text-xs
+                            ${isSelected ? 'bg-white border-simas-blue shadow-sm' : 'bg-transparent border-transparent hover:bg-white hover:border-gray-200'}
+                        `}
+                        style={{ marginLeft: `${join.depth * 20}px` }}
+                    >
+                        <input 
+                            type="checkbox" 
+                            checked={isSelected}
+                            onChange={(e) => handleJoinToggle(join.path, join.entity, e.target.checked)}
+                            className="text-simas-blue rounded focus:ring-simas-blue w-4 h-4"
+                        />
+                        <div className="flex flex-col">
+                            <span className={`font-bold ${isSelected ? 'text-simas-blue' : 'text-gray-600'}`}>
+                                {ENTITY_CONFIGS[join.entity]?.title || join.entity}
+                            </span>
+                            {join.depth > 0 && <span className="text-[9px] text-gray-400">Via {join.parentPath.split('.').pop()}</span>}
+                        </div>
+                    </label>
+                );
+            })}
+        </div>
+    );
   };
 
   const renderCustomBuilder = () => {
@@ -326,55 +372,40 @@ export const Reports: React.FC = () => {
       
       return (
           <div className="space-y-6 animate-fade-in">
-              {/* CONFIGURAÇÃO DO RELATÓRIO */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-6">
                   
                   {/* ETAPA 1: TABELA PRINCIPAL */}
-                  <div>
-                      <div className="flex items-center gap-2 mb-2">
-                          <span className="w-6 h-6 rounded-full bg-simas-dark text-white flex items-center justify-center text-xs font-bold">1</span>
-                          <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Fonte de Dados Principal</label>
+                  <div className="flex flex-col md:flex-row gap-6">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="w-6 h-6 rounded-full bg-simas-dark text-white flex items-center justify-center text-xs font-bold">1</span>
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Fonte de Dados</label>
+                        </div>
+                        <select 
+                            className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none transition-all focus:ring-2 focus:ring-simas-light/20"
+                            value={customEntity}
+                            onChange={(e) => setCustomEntity(e.target.value)}
+                        >
+                            <option value="">Selecione uma tabela...</option>
+                            {availableEntities.map(key => (
+                                <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
+                            ))}
+                        </select>
                       </div>
-                      <select 
-                        className="w-full md:w-1/2 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none transition-all focus:ring-2 focus:ring-simas-light/20"
-                        value={customEntity}
-                        onChange={(e) => setCustomEntity(e.target.value)}
-                      >
-                          <option value="">Selecione uma tabela...</option>
-                          {availableEntities.map(key => (
-                              <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
-                          ))}
-                      </select>
-                  </div>
 
-                  {/* ETAPA 2: CRUZAMENTO DE DADOS (JOINS) */}
-                  {customEntity && availableJoins.length > 0 && (
-                      <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                          <div className="flex items-center gap-2 mb-3">
+                       {/* ETAPA 2: JOINS RECURSIVOS */}
+                       <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
                               <span className="w-6 h-6 rounded-full bg-simas-blue text-white flex items-center justify-center text-xs font-bold">2</span>
-                              <label className="text-xs font-bold text-blue-700 uppercase tracking-widest">Cruzar dados com (Joins)</label>
+                              <label className="text-xs font-bold text-blue-700 uppercase tracking-widest">Cruzar Dados (Joins)</label>
                           </div>
-                          <div className="flex flex-wrap gap-3">
-                              {availableJoins.map(joinEntity => (
-                                  <label key={joinEntity} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border ${selectedJoins.includes(joinEntity) ? 'bg-white border-simas-blue shadow-sm' : 'bg-transparent border-transparent hover:bg-white hover:border-gray-200'}`}>
-                                      <input 
-                                          type="checkbox" 
-                                          checked={selectedJoins.includes(joinEntity)}
-                                          onChange={(e) => {
-                                              if (e.target.checked) setSelectedJoins([...selectedJoins, joinEntity]);
-                                              else setSelectedJoins(selectedJoins.filter(j => j !== joinEntity));
-                                          }}
-                                          className="text-simas-blue rounded focus:ring-simas-blue"
-                                      />
-                                      <span className="text-sm font-medium text-gray-700">{ENTITY_CONFIGS[joinEntity]?.title || joinEntity}</span>
-                                  </label>
-                              ))}
+                          <div className="bg-blue-50/30 p-3 rounded-xl border border-blue-100 min-h-[100px]">
+                              {customEntity ? renderJoinSelector() : <p className="text-xs text-gray-400 p-2">Selecione uma fonte primeiro.</p>}
                           </div>
-                          <p className="text-[10px] text-blue-400 mt-2 italic">* Apenas tabelas relacionadas diretamente disponíveis.</p>
-                      </div>
-                  )}
+                       </div>
+                  </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-50">
                       {/* ETAPA 3: COLUNAS */}
                       <div>
                           <div className="flex items-center gap-2 mb-2">
@@ -383,9 +414,12 @@ export const Reports: React.FC = () => {
                           </div>
                           <div className="w-full h-48 border border-gray-200 rounded-xl bg-gray-50 overflow-y-auto p-2 custom-scrollbar">
                               {availableColumns.map(col => {
-                                  // Separar Tabela.Coluna para visualização melhor
-                                  const [table, field] = col.split('.');
-                                  const isPrimary = table === customEntity;
+                                  // Separar Hierarquia
+                                  const parts = col.split('.');
+                                  const field = parts.pop();
+                                  const prefix = parts.join(' > ');
+                                  
+                                  const isPrimary = parts[0] === customEntity;
                                   
                                   return (
                                       <label key={col} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100 p-1.5 rounded border-b border-gray-100 last:border-0">
@@ -396,10 +430,10 @@ export const Reports: React.FC = () => {
                                                 if (e.target.checked) setSelectedColumns([...selectedColumns, col]);
                                                 else setSelectedColumns(selectedColumns.filter(c => c !== col));
                                             }}
-                                            className="text-simas-cyan rounded"
+                                            className="text-simas-cyan rounded focus:ring-simas-cyan"
                                           />
-                                          <span className={`font-bold ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{table}</span>
-                                          <span className="text-gray-400">/</span>
+                                          <span className={`font-bold ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{prefix}</span>
+                                          <span className="text-gray-300">/</span>
                                           <span>{field}</span>
                                       </label>
                                   );
@@ -429,16 +463,16 @@ export const Reports: React.FC = () => {
                                     </div>
                                   </div>
                                   <div className="flex gap-2 mt-auto">
-                                      <select className="flex-1 p-2 rounded-lg border border-gray-200 text-xs" value={newFilter.field} onChange={e => setNewFilter({...newFilter, field: e.target.value})}>
+                                      <select className="flex-1 p-2 rounded-lg border border-gray-200 text-xs outline-none" value={newFilter.field} onChange={e => setNewFilter({...newFilter, field: e.target.value})}>
                                           <option value="">Campo...</option>
                                           {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
                                       </select>
-                                      <select className="w-24 p-2 rounded-lg border border-gray-200 text-xs" value={newFilter.operator} onChange={e => setNewFilter({...newFilter, operator: e.target.value})}>
+                                      <select className="w-24 p-2 rounded-lg border border-gray-200 text-xs outline-none" value={newFilter.operator} onChange={e => setNewFilter({...newFilter, operator: e.target.value})}>
                                           <option value="contains">Contém</option>
                                           <option value="equals">Igual</option>
                                           <option value="starts">Começa</option>
                                       </select>
-                                      <input type="text" placeholder="Valor..." className="flex-1 p-2 rounded-lg border border-gray-200 text-xs" value={newFilter.value} onChange={e => setNewFilter({...newFilter, value: e.target.value})} />
+                                      <input type="text" placeholder="Valor..." className="flex-1 p-2 rounded-lg border border-gray-200 text-xs outline-none" value={newFilter.value} onChange={e => setNewFilter({...newFilter, value: e.target.value})} />
                                       <Button onClick={handleAddFilter} disabled={!newFilter.field || !newFilter.value} variant="secondary" className="px-3 py-1 text-xs">OK</Button>
                                   </div>
                               </div>
@@ -472,7 +506,7 @@ export const Reports: React.FC = () => {
                                   <tr>
                                       {selectedColumns.map(col => (
                                           <th key={col} className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">
-                                              {col}
+                                              {col.split('.').pop()}
                                           </th>
                                       ))}
                                   </tr>
@@ -500,16 +534,131 @@ export const Reports: React.FC = () => {
       );
   };
 
+  // Funções de renderização de relatórios fixos (Dashboard Pessoal, Painel de Vagas)
+  const renderFixedReport = () => {
+      if (!data) return null;
+      if (currentReport === 'dashboardPessoal') {
+          return (
+             <div className="space-y-8 animate-fade-in">
+                  {data.totais && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {Object.entries(data.totais).map(([key, val]) => (
+                              <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
+                                  <h3 className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">{key.replace(/_/g, ' ')}</h3>
+                                  <p className="text-4xl font-extrabold text-simas-dark">{val as React.ReactNode}</p>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+                  {data.graficos && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {Object.entries(data.graficos).map(([key, chartData]) => (
+                              <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[400px]">
+                                  <h4 className="text-sm font-bold text-gray-500 mb-4 uppercase">{key === 'vinculo' ? 'Distribuição por Vínculo' : 'Top Lotações'}</h4>
+                                  <ResponsiveContainer width="100%" height="100%">
+                                      <BarChart data={chartData} layout={key === 'lotacao' ? 'vertical' : 'horizontal'}>
+                                          <CartesianGrid strokeDasharray="3 3" />
+                                          {key === 'lotacao' ? <XAxis type="number" /> : <XAxis dataKey="name" />}
+                                          {key === 'lotacao' ? <YAxis dataKey="name" type="category" width={100} style={{fontSize: '10px'}} /> : <YAxis />}
+                                          <Tooltip cursor={{fill: '#f3f4f6'}} />
+                                          <Bar dataKey="value" fill="#2a688f" radius={[4, 4, 4, 4]} barSize={30} />
+                                      </BarChart>
+                                  </ResponsiveContainer>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+             </div>
+          );
+      }
+      if (currentReport === 'painelVagas') {
+          return (
+              <div className="space-y-6 animate-fade-in">
+                  <div className="flex gap-2 bg-white p-1.5 rounded-lg shadow-sm border border-gray-100 w-fit">
+                      <button onClick={() => setVagasView('quantitativo')} className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${vagasView === 'quantitativo' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-list-ol mr-2"></i> Quantitativo</button>
+                      <button onClick={() => setVagasView('panorama')} className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${vagasView === 'panorama' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-table mr-2"></i> Panorama</button>
+                  </div>
+                  {vagasView === 'quantitativo' && data.quantitativo ? (
+                      <div className="space-y-6">
+                          {/* Group by Vinculacao */}
+                          {Object.entries(data.quantitativo.reduce((acc: any, item: any) => {
+                              if (!acc[item.VINCULACAO]) acc[item.VINCULACAO] = [];
+                              acc[item.VINCULACAO].push(item);
+                              return acc;
+                          }, {})).map(([vinculo, items]: any) => (
+                              <div key={vinculo} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                  <div className="bg-gray-50 px-6 py-4 border-b border-gray-100">
+                                      <h3 className="font-bold text-simas-dark">{vinculo}</h3>
+                                  </div>
+                                  <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                      {items.map((item: any, i: number) => (
+                                          <div key={i} className="border border-gray-100 rounded-lg p-3 hover:shadow-md transition-shadow">
+                                              <div className="text-xs font-bold text-gray-400 uppercase mb-1">{item.LOTACAO}</div>
+                                              <div className="font-bold text-simas-blue mb-1">{item.CARGO}</div>
+                                              <div className="text-xs text-gray-600">{item.DETALHES}</div>
+                                          </div>
+                                      ))}
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  ) : null}
+                  {vagasView === 'panorama' && data.panorama ? (
+                      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 overflow-x-auto">
+                          <table className="w-full text-sm text-left whitespace-nowrap">
+                              <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
+                                  <tr><th className="px-6 py-3">Status</th><th className="px-6 py-3">Lotação</th><th className="px-6 py-3">Cargo</th><th className="px-6 py-3">Ocupante/Reserva</th></tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                  {data.panorama.map((row: any, i: number) => (
+                                      <tr key={i} className="hover:bg-gray-50">
+                                          <td className="px-6 py-3"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${row.STATUS === 'Disponível' ? 'bg-green-100 text-green-800' : row.STATUS === 'Ocupada' ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800'}`}>{row.STATUS}</span></td>
+                                          <td className="px-6 py-3">{row.LOTACAO_OFICIAL}</td>
+                                          <td className="px-6 py-3 font-medium">{row.NOME_CARGO}</td>
+                                          <td className="px-6 py-3 text-gray-500">{row.RESERVADA_PARA || row.OCUPANTE || '-'}</td>
+                                      </tr>
+                                  ))}
+                              </tbody>
+                          </table>
+                      </div>
+                  ) : null}
+              </div>
+          );
+      }
+      // Outros relatórios genéricos
+      if (data.tabela || (data.colunas && data.linhas)) {
+          const cols = data.colunas || data.tabela?.colunas || [];
+          const rows = data.linhas || data.tabela?.linhas || [];
+          return (
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 overflow-x-auto animate-fade-in">
+                  <table className="w-full text-sm text-left whitespace-nowrap">
+                      <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
+                          <tr>{cols.map((c: string) => <th key={c} className="px-6 py-3">{c}</th>)}</tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                          {rows.map((row: any[], i: number) => (
+                              <tr key={i} className="hover:bg-gray-50">
+                                  {row.map((val: any, j: number) => <td key={j} className="px-6 py-3">{val}</td>)}
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          );
+      }
+      return null;
+  };
+
   return (
     <div className="flex h-full overflow-hidden">
-        {/* SIDEBAR DE RELATÓRIOS */}
+        {/* SIDEBAR */}
         <div className="w-64 bg-white border-r border-gray-200 flex flex-col overflow-y-auto flex-none z-10">
             <div className="p-6 border-b border-gray-100">
                 <h2 className="text-xl font-extrabold text-simas-dark tracking-tight">Relatórios</h2>
                 <p className="text-xs text-gray-400 mt-1">Selecione uma visão</p>
             </div>
             <div className="p-4 space-y-6">
-                {['Gerencial', 'Operacional', 'Ferramentas'].map(cat => {
+                {['Gerencial', 'Operacional', 'Administrativo', 'Ferramentas'].map(cat => {
                     const catReports = validReports.filter(r => r.category === cat);
                     if (catReports.length === 0) return null;
                     return (
@@ -535,12 +684,12 @@ export const Reports: React.FC = () => {
 
         {/* ÁREA PRINCIPAL */}
         <div className="flex-1 overflow-y-auto bg-gray-50/50 p-8">
-            <div className="max-w-7xl mx-auto animate-slide-in pb-10">
+            <div className="max-w-7xl mx-auto pb-10">
                 <header className="mb-8 flex justify-between items-center">
                     <div>
                         <h1 className="text-3xl font-bold text-simas-dark">{validReports.find(r => r.id === currentReport)?.label}</h1>
                         <p className="text-gray-500 mt-2">
-                            {currentReport === 'customGenerator' ? 'Crie consultas personalizadas cruzando dados do sistema.' : 'Visualização atualizada do sistema.'}
+                            {currentReport === 'customGenerator' ? 'Business Intelligence: Crie consultas complexas cruzando tabelas.' : 'Visualização atualizada do sistema.'}
                         </p>
                     </div>
                     {currentReport !== 'customGenerator' && (
