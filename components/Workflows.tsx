@@ -14,14 +14,16 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'PENDING' | 'COMPLETED'>('ALL');
   const [columnSearchTerms, setColumnSearchTerms] = useState<Record<string, string>>({});
   
-  // New Request Modal State
-  const [showNewModal, setShowNewModal] = useState(false);
+  // New/Edit Request Modal State
+  const [showModal, setShowModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<RecordData>({});
   const [submitting, setSubmitting] = useState(false);
   
   // Lookup Data for the Form
   const [people, setPeople] = useState<any[]>([]);
   const [vagas, setVagas] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]); // List of system users for delegation
   
   // Validations for form logic (replicated from Dashboard/Legacy)
   const [contracts, setContracts] = useState<any[]>([]);
@@ -68,16 +70,18 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
   const loadLookups = async () => {
       try {
-          const [pData, vData, cData, sData] = await Promise.all([
+          const [pData, vData, cData, sData, uData] = await Promise.all([
               api.fetchEntity('PESSOA'),
               api.fetchEntity('VAGAS'),
               api.fetchEntity('CONTRATO'),
-              api.fetchEntity('SERVIDOR')
+              api.fetchEntity('SERVIDOR'),
+              api.getUsers()
           ]);
           setPeople(pData);
           setVagas(vData);
           setContracts(cData);
           setServers(sData);
+          setUsers(uData);
       } catch (e) {
           console.error("Failed to load lookups", e);
       }
@@ -103,9 +107,16 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
               if (struct.GERAL.includes(type)) isVisibleForRole = true;
           }
 
-          // Force visibility if the user is the creator (Responsavel)
+          // Force visibility if the user is the creator or responsible
           if (req.RESPONSAVEL === session.usuario) {
               isVisibleForRole = true;
+          }
+          
+          // Force visibility if user is manager of the creator's sector (Simplified check)
+          if (session.isGerente && !isVisibleForRole) {
+              // Assuming same sector visibility logic applied above covers basic cases.
+              // Managers should see tasks assigned to anyone in their sector?
+              // Current logic uses task TYPE to determine sector, which is correct.
           }
 
           if (!isVisibleForRole) return false;
@@ -118,28 +129,47 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
           
           return true;
       });
-  }, [requests, filterStatus, session.papel, session.usuario]);
+  }, [requests, filterStatus, session.papel, session.usuario, session.isGerente]);
 
   // --- FORM LOGIC ---
 
-  const resetForm = () => {
-      setFormData({
-          ID_ATENDIMENTO: '',
-          CPF: '',
-          TIPO_PEDIDO: '',
-          STATUS_PEDIDO: 'Aguardando', // Default
-          REMETENTE: session.papel === 'GGT' ? 'Prefeitura' : '',
-          RESPONSAVEL: session.usuario,
-          DESCRICAO: '',
-          JUSTIFICATIVA: '',
-          DATA_AGENDAMENTO: '',
-          ID_VAGA: '' // Special field for 'Reserva de Vaga'
-      });
+  const getEligibleAssignees = () => {
+      // COORDENAÇÃO: Pode delegar para todos
+      if (session.papel === 'COORDENAÇÃO') return users;
+      
+      // GERENTE: Pode delegar para usuários do mesmo papel
+      if (session.isGerente) return users.filter(u => u.papel === session.papel);
+      
+      // USUÁRIO COMUM: Apenas ele mesmo
+      return users.filter(u => u.usuario === session.usuario);
   };
 
-  const handleOpenNew = () => {
-      resetForm();
-      setShowNewModal(true);
+  const resetForm = (existingData?: any) => {
+      if (existingData) {
+          // Editing Mode
+          setFormData({ ...existingData });
+          setIsEditing(true);
+      } else {
+          // Creation Mode
+          setFormData({
+              ID_ATENDIMENTO: '',
+              CPF: '',
+              TIPO_PEDIDO: '',
+              STATUS_PEDIDO: 'Aguardando', // Default
+              REMETENTE: session.papel === 'GGT' ? 'Prefeitura' : '',
+              RESPONSAVEL: session.usuario, // Default to self
+              DESCRICAO: '',
+              JUSTIFICATIVA: '',
+              DATA_AGENDAMENTO: '',
+              ID_VAGA: '' // Special field for 'Reserva de Vaga'
+          });
+          setIsEditing(false);
+      }
+  };
+
+  const handleOpenModal = (req?: any) => {
+      resetForm(req);
+      setShowModal(true);
   };
 
   const getFilteredOptions = (field: string): string[] => {
@@ -175,23 +205,26 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
       e.preventDefault();
       
       // --- Business Logic Validations ---
-      const typesRequiringContract = ["Demissão", "Promoção (Contratado)", "Mudança (Contratado)"];
-      const typesRequiringServer = ["Exoneração de Cargo Comissionado", "Exoneração do Serviço Público", "Mudança de Alocação (Servidor)"];
-      
-      if (typesRequiringContract.includes(formData.TIPO_PEDIDO)) {
-          const hasContract = contracts.some(c => c.CPF === formData.CPF);
-          if (!hasContract) {
-              showToast('error', `Ação não permitida. A pessoa não possui um contrato ativo.`);
-              return;
+      if (!isEditing) {
+          const typesRequiringContract = ["Demissão", "Promoção (Contratado)", "Mudança (Contratado)"];
+          const typesRequiringServer = ["Exoneração de Cargo Comissionado", "Exoneração do Serviço Público", "Mudança de Alocação (Servidor)"];
+          
+          if (typesRequiringContract.includes(formData.TIPO_PEDIDO)) {
+              const hasContract = contracts.some(c => c.CPF === formData.CPF);
+              if (!hasContract) {
+                  showToast('error', `Ação não permitida. A pessoa não possui um contrato ativo.`);
+                  return;
+              }
+          }
+          if (typesRequiringServer.includes(formData.TIPO_PEDIDO)) {
+              const hasServer = servers.some(c => c.CPF === formData.CPF);
+              if (!hasServer) {
+                  showToast('error', `Ação não permitida. A pessoa não é um servidor ativo.`);
+                  return;
+              }
           }
       }
-      if (typesRequiringServer.includes(formData.TIPO_PEDIDO)) {
-          const hasServer = servers.some(c => c.CPF === formData.CPF);
-          if (!hasServer) {
-              showToast('error', `Ação não permitida. A pessoa não é um servidor ativo.`);
-              return;
-          }
-      }
+
       if (formData.TIPO_PEDIDO === 'Reserva de Vaga' && !formData.ID_VAGA) {
           showToast('error', 'Selecione uma vaga para realizar a reserva.');
           return;
@@ -200,20 +233,37 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
       setSubmitting(true);
       try {
           let payload = { ...formData };
-          payload['ID_ATENDIMENTO'] = `ATD${Math.floor(Math.random() * 1000000)}`;
-          payload['DATA_ENTRADA'] = new Date().toISOString(); // Simulate server-side setting
+          
+          if (isEditing) {
+              // Update existing
+              // Recalculate metadata in case status changed
+              const metadata = businessLogic.calculateAtendimentoMetadata(payload);
+              payload = { ...payload, ...metadata };
 
-          // Calculate metadata (Action Type, Target Entity)
-          const metadata = businessLogic.calculateAtendimentoMetadata(payload);
-          payload = { ...payload, ...metadata };
-
-          const res = await api.createRecord('ATENDIMENTO', payload);
-          if (res.success) {
-              showToast('success', 'Fluxo iniciado com sucesso!');
-              setShowNewModal(false);
-              loadRequests();
+              const res = await api.updateRecord('ATENDIMENTO', 'ID_ATENDIMENTO', payload.ID_ATENDIMENTO, payload);
+              if (res.success) {
+                  showToast('success', 'Fluxo atualizado!');
+                  setShowModal(false);
+                  loadRequests();
+              } else {
+                  showToast('error', res.message || 'Erro ao atualizar fluxo.');
+              }
           } else {
-              showToast('error', res.message || 'Erro ao criar fluxo.');
+              // Create new
+              payload['ID_ATENDIMENTO'] = `ATD${Math.floor(Math.random() * 1000000)}`;
+              payload['DATA_ENTRADA'] = new Date().toISOString(); // Simulate server-side setting
+
+              const metadata = businessLogic.calculateAtendimentoMetadata(payload);
+              payload = { ...payload, ...metadata };
+
+              const res = await api.createRecord('ATENDIMENTO', payload);
+              if (res.success) {
+                  showToast('success', 'Fluxo iniciado com sucesso!');
+                  setShowModal(false);
+                  loadRequests();
+              } else {
+                  showToast('error', res.message || 'Erro ao criar fluxo.');
+              }
           }
       } catch (e) {
           showToast('error', 'Erro de conexão.');
@@ -262,14 +312,18 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                           const isFutureItem = isFuture(req.DATA_AGENDAMENTO);
                           
                           return (
-                            <div key={req.ID_ATENDIMENTO} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group relative">
+                            <div 
+                                key={req.ID_ATENDIMENTO} 
+                                onClick={() => handleOpenModal(req)}
+                                className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group relative hover:border-simas-cyan/30"
+                            >
                                 {/* Status Stripe */}
                                 <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-full bg-${color}-400`}></div>
                                 
                                 <div className="pl-3">
                                     <div className="flex justify-between items-start mb-1">
                                         <h4 className="font-medium text-simas-dark text-sm truncate pr-2 uppercase" title={req.TIPO_PEDIDO}>{req.TIPO_PEDIDO}</h4>
-                                        <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{req.ID_ATENDIMENTO}</span>
+                                        <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100 group-hover:bg-simas-cyan group-hover:text-white transition-colors">{req.ID_ATENDIMENTO}</span>
                                     </div>
                                     
                                     <p className="text-sm text-gray-600 mb-2 font-normal">{req.NOME_PESSOA || req.CPF}</p>
@@ -290,15 +344,15 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
 
                                     <div className="flex justify-between items-center border-t border-gray-50 pt-2 mt-2">
                                         <div className="flex items-center gap-1">
-                                            <div className="w-5 h-5 rounded-full bg-gray-200 text-[10px] flex items-center justify-center text-gray-600 font-bold">
+                                            <div className="w-5 h-5 rounded-full bg-gray-200 text-[10px] flex items-center justify-center text-gray-600 font-bold uppercase">
                                                 {(req.RESPONSAVEL || '?').substring(0,1)}
                                             </div>
-                                            <span className="text-[10px] text-gray-500 truncate max-w-[80px]">{req.RESPONSAVEL}</span>
+                                            <span className="text-[10px] text-gray-500 truncate max-w-[80px] font-medium">{req.RESPONSAVEL}</span>
                                         </div>
                                         
                                         {req.STATUS_PEDIDO === 'Acatado' && req.STATUS_AGENDAMENTO === 'Pendente' && !isFutureItem && (
                                             <span className="flex items-center gap-1 text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full animate-pulse border border-green-100">
-                                                <i className="fas fa-play-circle"></i> Pronto p/ Executar
+                                                <i className="fas fa-play-circle"></i> Executar
                                             </span>
                                         )}
 
@@ -318,6 +372,9 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
       );
   };
 
+  const eligibleAssignees = getEligibleAssignees();
+  const canDelegate = session.isGerente || session.papel === 'COORDENAÇÃO';
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
         {/* Header */}
@@ -332,7 +389,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                     <button onClick={() => setFilterStatus('PENDING')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterStatus === 'PENDING' ? 'bg-white shadow text-simas-dark' : 'text-gray-500 hover:text-gray-700'}`}>Pendentes</button>
                     <button onClick={() => setFilterStatus('COMPLETED')} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${filterStatus === 'COMPLETED' ? 'bg-white shadow text-simas-dark' : 'text-gray-500 hover:text-gray-700'}`}>Finalizados</button>
                 </div>
-                <Button onClick={handleOpenNew} icon="fas fa-plus">Novo Atendimento</Button>
+                <Button onClick={() => handleOpenModal()} icon="fas fa-plus">Novo Atendimento</Button>
             </div>
         </div>
 
@@ -373,13 +430,16 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
             </div>
         </div>
 
-        {/* New Request Modal */}
-        {showNewModal && (
+        {/* Request Modal (Create/Edit) */}
+        {showModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-slide-in">
                 <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                     <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                        <h3 className="font-bold text-xl text-simas-dark uppercase">Iniciar Novo Fluxo</h3>
-                        <button onClick={() => setShowNewModal(false)} className="text-gray-400 hover:text-red-500"><i className="fas fa-times"></i></button>
+                        <div>
+                            <h3 className="font-bold text-xl text-simas-dark uppercase">{isEditing ? 'Editar Fluxo' : 'Iniciar Novo Fluxo'}</h3>
+                            {isEditing && <span className="text-xs bg-simas-cyan/10 text-simas-cyan px-2 py-0.5 rounded font-bold uppercase">{formData.ID_ATENDIMENTO}</span>}
+                        </div>
+                        <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-red-500"><i className="fas fa-times"></i></button>
                     </div>
                     
                     <div className="flex-1 overflow-y-auto p-8">
@@ -390,9 +450,10 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                 <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Pessoa</label>
                                 <select 
                                     required 
-                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
+                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none disabled:bg-gray-100"
                                     value={formData.CPF}
                                     onChange={(e) => setFormData({...formData, CPF: e.target.value})}
+                                    disabled={isEditing} // Cannot change person once flow starts
                                 >
                                     <option value="">Selecione uma pessoa...</option>
                                     {people.map(p => <option key={p.CPF} value={p.CPF}>{p.NOME} ({p.CPF})</option>)}
@@ -428,6 +489,30 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                 </div>
                             </div>
 
+                            {/* DELEGATION (Responsible) */}
+                            <div>
+                                <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2 flex items-center justify-between">
+                                    <span>Responsável (Atribuído a)</span>
+                                    {!canDelegate && <span className="text-[10px] text-gray-300 italic">Somente Gerência pode delegar</span>}
+                                </label>
+                                <div className="relative">
+                                    <i className="fas fa-user-check absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan"></i>
+                                    <select 
+                                        required 
+                                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none disabled:bg-gray-100 disabled:text-gray-500 cursor-pointer disabled:cursor-not-allowed"
+                                        value={formData.RESPONSAVEL}
+                                        onChange={(e) => setFormData({...formData, RESPONSAVEL: e.target.value})}
+                                        disabled={!canDelegate}
+                                    >
+                                        {eligibleAssignees.map(u => (
+                                            <option key={u.id || u.usuario} value={u.usuario}>
+                                                {u.usuario} {u.usuario === session.usuario ? '(Você)' : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
                             {/* Conditional Vaga for Reserva */}
                             {formData.TIPO_PEDIDO === 'Reserva de Vaga' && (
                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
@@ -449,16 +534,16 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                             {/* Status & Justification */}
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Status Inicial</label>
+                                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Status do Fluxo</label>
                                     <select 
                                         required 
                                         className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
                                         value={formData.STATUS_PEDIDO}
                                         onChange={(e) => setFormData({...formData, STATUS_PEDIDO: e.target.value})}
                                     >
-                                        <option value="Aguardando">Aguardando</option>
-                                        <option value="Acatado">Acatado (Executar)</option>
-                                        <option value="Declinado">Declinado</option>
+                                        <option value="Aguardando">Aguardando Análise</option>
+                                        <option value="Acatado">Acatado (Aprovar)</option>
+                                        <option value="Declinado">Declinado (Rejeitar)</option>
                                     </select>
                                 </div>
                                 
@@ -484,7 +569,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                             type="date"
                                             required
                                             className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none"
-                                            value={formData.DATA_AGENDAMENTO}
+                                            value={formData.DATA_AGENDAMENTO ? new Date(formData.DATA_AGENDAMENTO).toISOString().split('T')[0] : ''}
                                             onChange={(e) => setFormData({...formData, DATA_AGENDAMENTO: e.target.value})}
                                         />
                                     </div>
@@ -496,7 +581,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                 <textarea 
                                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-simas-light/30 outline-none h-24 resize-none"
                                     placeholder="Detalhes adicionais..."
-                                    value={formData.DESCRICAO}
+                                    value={formData.DESCRICAO || ''}
                                     onChange={(e) => setFormData({...formData, DESCRICAO: e.target.value})}
                                 ></textarea>
                             </div>
@@ -505,8 +590,8 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                     </div>
 
                     <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
-                        <Button variant="secondary" onClick={() => setShowNewModal(false)} disabled={submitting}>Cancelar</Button>
-                        <Button onClick={handleSubmit} isLoading={submitting}>Criar Fluxo</Button>
+                        <Button variant="secondary" onClick={() => setShowModal(false)} disabled={submitting}>Cancelar</Button>
+                        <Button onClick={handleSubmit} isLoading={submitting}>{isEditing ? 'Salvar Alterações' : 'Criar Fluxo'}</Button>
                     </div>
                 </div>
             </div>

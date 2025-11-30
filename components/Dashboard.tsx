@@ -262,7 +262,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const renderInput = (field: string) => {
     const config = ENTITY_CONFIGS[activeTab];
     const isPK = field === config.pk;
-    const isFK = FK_MAPPING[field] !== undefined;
+    // CRITICAL FIX: Only treat as FK if it maps to a different table than the current one
+    const isFK = FK_MAPPING[field] !== undefined && FK_MAPPING[field] !== activeTab;
     const isCalculated = field === 'PREFIXO_MATRICULA';
 
     if ((isPK && !isEditing && !config.manualPk) || 
@@ -334,16 +335,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       );
     }
 
-    const isReadOnly = (isPK && isEditing) || isCalculated;
+    // Force FKs to be strictly read-only for text input.
+    // PKs are read-only if editing (unless manual PK is handled differently, but generally PKs don't change).
+    // isCalculated fields are also read-only.
+    const isReadOnly = (isPK && isEditing) || isCalculated || isFK;
+    
     const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
     const type = isDateField ? 'date' : 'text';
+
+    // Placeholder logic: 
+    // If it is an FK (link), say "Selecione na lista..."
+    // If it is a manual PK (like CPF in Pessoa) or standard field, say "Digite aqui..."
+    const placeholderText = isFK ? "Selecione na lista..." : "Digite aqui...";
 
     return (
       <div key={field} className="relative group">
         <label className="block text-[10px] font-medium text-simas-dark/70 uppercase tracking-widest mb-2 ml-1">{field.replace(/_/g, ' ')}</label>
         <div className="relative">
             {isFK && <div className="absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan"><i className="fas fa-link text-xs"></i></div>}
-            <input type={type} name={field} value={formData[field] || ''} onChange={handleInputChange} className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} readOnly={isReadOnly} placeholder={isFK ? "Selecione na lista..." : "Digite aqui..."} maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)} />
+            <input 
+                type={type} 
+                name={field} 
+                value={formData[field] || ''} 
+                onChange={handleInputChange} 
+                className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} 
+                readOnly={isReadOnly} 
+                placeholder={placeholderText} 
+                maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)} 
+            />
         </div>
       </div>
     );
