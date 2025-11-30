@@ -164,40 +164,17 @@ app.post('/api/auth/login', async (req: any, res: any) => {
     const { usuario, senha } = req.body;
     
     try {
-        let user: any = null;
-        let dbError: any = null;
-
         // Tenta buscar no banco
-        try {
-            user = await prisma.usuario.findFirst({
-                where: { usuario }
-            });
-        } catch (e) {
-            dbError = e;
-            console.warn("Database unavailable during login. Checking fallback credentials.", e);
-        }
-
-        // Se falhou o banco OU não achou usuário, verifica credenciais de fallback (admin/admin)
-        // Isso permite acessar o sistema em modo de desenvolvimento/demo mesmo sem DB
-        if ((!user || dbError) && usuario === 'admin' && senha === 'admin') {
-            console.log("Using fallback admin credentials");
-            user = {
-                id: 'fallback-admin',
-                usuario: 'admin',
-                senha: 'admin', // Plain text handled below
-                papel: 'COORDENAÇÃO',
-                isGerente: true
-            };
-        } else if (dbError) {
-            // Se não for admin/admin e deu erro no banco, repassa o erro
-            throw dbError;
-        }
+        const user = await prisma.usuario.findFirst({
+            where: { usuario }
+        });
 
         if (!user) {
-            return res.status(401).json({ message: 'Usuário não encontrado' });
+            return res.status(404).json({ message: 'Usuário não encontrado.' });
         }
 
         let isValid = false;
+        // Suporte a senhas legacy (texto plano) e novas (bcrypt)
         if (user.senha && user.senha.startsWith('$2')) {
             isValid = await bcrypt.compare(senha, user.senha);
         } else {
@@ -205,7 +182,7 @@ app.post('/api/auth/login', async (req: any, res: any) => {
         }
 
         if (!isValid) {
-            return res.status(401).json({ message: 'Senha incorreta' });
+            return res.status(401).json({ message: 'Senha incorreta.' });
         }
 
         const token = jwt.sign(
@@ -222,8 +199,9 @@ app.post('/api/auth/login', async (req: any, res: any) => {
         });
 
     } catch (e: any) {
-        console.error("Login error:", e);
-        res.status(500).json({ message: `Erro interno: ${e.message}` });
+        console.error("Login error (DB Connection or Query):", e);
+        // Em caso de erro 500 (DB fora do ar), retornamos mensagem amigável, sem vazar a stack
+        res.status(500).json({ message: 'O servidor encontrou um erro ao processar o login. Tente novamente mais tarde.' });
     }
 });
 

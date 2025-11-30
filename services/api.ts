@@ -50,26 +50,57 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
     
-    if (response.status === 401 || (method === 'GET' && response.status === 403)) {
+    // Ignore session expiration check for login endpoint
+    if (endpoint !== '/auth/login' && (response.status === 401 || (method === 'GET' && response.status === 403))) {
          localStorage.removeItem(TOKEN_KEY);
          window.location.href = '#/login';
          throw new Error('Sessão expirada. Faça login novamente.');
     }
 
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        let errorMessage = errorData.message || errorData.error || response.statusText;
+        // Tenta ler o JSON de erro
+        let errorData = {};
+        let errorMessage = '';
+
+        try {
+            // Verifica o Content-Type para saber se é JSON
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                errorData = await response.json();
+                errorMessage = (errorData as any).message || (errorData as any).error;
+            } else {
+                // Se não for JSON (ex: HTML de erro do proxy/nginx), pega texto mas não exibe cru
+                const text = await response.text();
+                // Verifica se parece ser HTML (erro genérico de servidor web)
+                if (text.trim().startsWith('<')) {
+                     errorMessage = 'O servidor está temporariamente indisponível. (Erro de Gateway/Proxy)';
+                } else {
+                     errorMessage = text;
+                }
+            }
+        } catch (e) {
+            errorMessage = 'Erro desconhecido ao processar resposta do servidor.';
+        }
+
+        // Fallback se não conseguiu extrair nada
+        if (!errorMessage) {
+            errorMessage = response.statusText;
+        }
+
+        // Tratamento específico para erros 500 (Internal Server Error)
+        if (response.status === 500) {
+            // Se a mensagem vier do nosso backend (JSON 'message'), usamos ela.
+            // Se for HTML ou vazia, usamos mensagem genérica.
+            if (!errorMessage || errorMessage.includes('<!DOCTYPE') || errorMessage.includes('Internal Server Error')) {
+                 errorMessage = 'Erro interno no servidor. Por favor, contate o suporte ou tente mais tarde.';
+            }
+        }
         
-        // Hide only technical Prisma/Internal Server errors that don't have custom messages
-        // But allow "Erro interno:" pass through if it contains specific details
+        // Hide technical Prisma/Internal Server errors only if they weren't already sanitized by backend
         if (errorMessage.includes('Prisma') || errorMessage.includes('invocation')) {
              if (!errorMessage.includes('Erro interno:')) {
                  errorMessage = 'Ocorreu um erro técnico no servidor. Tente novamente mais tarde.';
              }
-        }
-        
-        if (errorMessage.includes('<!DOCTYPE html>')) {
-             errorMessage = 'Servidor temporariamente indisponível.';
         }
 
         throw new Error(errorMessage);
@@ -80,9 +111,11 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
     if (error.name === 'AbortError') throw error;
     
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-        throw new Error('Não foi possível conectar ao servidor. Verifique sua internet.');
+        throw new Error('Não foi possível conectar ao servidor. Verifique sua conexão com a internet.');
     }
 
+    // Se o erro já foi tratado acima, ele é repassado.
+    // O backend agora deve retornar erros limpos.
     const isClientError = error.message && (error.message.includes('Senha incorreta') || error.message.includes('Usuário'));
     if (!isClientError) {
         console.warn(`API Error (${method} ${endpoint}):`, error);
