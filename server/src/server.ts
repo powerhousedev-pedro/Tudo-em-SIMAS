@@ -303,6 +303,38 @@ app.post('/api/reports/custom', authenticateToken, async (req: AuthenticatedRequ
     }
 });
 
+// --- AUTOCOMPLETE UNIQUE VALUES ---
+
+app.get('/api/:entity/unique/:field', authenticateToken, async (req: any, res: any) => {
+    const { entity, field } = req.params;
+    const model = getModel(entity);
+    
+    if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
+
+    try {
+        // Tenta buscar valores únicos para o autocomplete
+        // Limita a 100 sugestões para performance
+        const results = await model.findMany({
+            select: { [field]: true },
+            distinct: [field],
+            take: 100,
+            orderBy: { [field]: 'asc' }
+        });
+
+        // Extrai apenas os valores e remove nulos
+        const values = results
+            .map((item: any) => item[field])
+            .filter((val: any) => val !== null && val !== '')
+            .map(String);
+
+        res.json(values);
+    } catch (e: any) {
+        // Se o campo não existir ou der erro, retorna array vazio sem quebrar
+        console.warn(`Erro ao buscar autocomplete para ${entity}.${field}:`, e.message);
+        res.json([]); 
+    }
+});
+
 // --- GENERIC CRUD ROUTES ---
 
 app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {

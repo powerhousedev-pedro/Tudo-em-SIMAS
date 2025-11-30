@@ -1,3 +1,4 @@
+
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
@@ -233,5 +234,10 @@ export const api = {
   // Novo método para o Gerador Personalizado com Joins
   generateCustomReport: async (primaryEntity: string, joins: string[]) => {
       return request('/reports/custom', 'POST', { primaryEntity, joins });
+  },
+
+  // Novo método para Autocomplete de valores únicos
+  getUniqueValues: async (entity: string, field: string) => {
+      return request(`/${entity}/unique/${field}`);
   }
 };
