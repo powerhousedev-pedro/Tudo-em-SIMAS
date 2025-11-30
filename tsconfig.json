@@ -27,7 +27,10 @@
     "types.ts",
     "components",
     "services",
-    "utils"
+    "utils",
+    "hooks",
+    "lib",
+    "declarations.d.ts"
   ],
   "exclude": ["node_modules", "dist", "server", "src", "vite.config.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]

@@ -1,11 +1,14 @@
-
 declare module '@tanstack/react-query' {
-  export * from '@tanstack/react-query/build/modern/index';
-  // Fallback types in case the specific build path above is not found in the environment
-  export const useQuery: any;
-  export const useMutation: any;
-  export const useQueryClient: any;
-  export const useQueries: any;
-  export const QueryClient: any;
+  export const useQuery: (options: any) => any;
+  export const useMutation: (options: any) => any;
+  export const useQueryClient: () => any;
+  export const useQueries: (options: any) => any;
+  
+  export class QueryClient {
+    constructor(options?: any);
+    invalidateQueries(filters?: any, options?: any): Promise<void>;
+    clear(): void;
+  }
+  
   export const QueryClientProvider: any;
 }
