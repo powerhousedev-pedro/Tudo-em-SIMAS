@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -689,7 +688,7 @@ export const Reports: React.FC = () => {
       return (
           <div className="space-y-6 animate-fade-in">
               {/* MAIN BUILDER BOX - Layout fixo de Split Pane */}
-              <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden flex flex-col md:flex-row h-[600px]">
+              <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden flex flex-col md:flex-row h-[80vh] min-h-[600px]">
                   
                   {/* LEFT COLUMN: SOURCE & JOINS (40%) */}
                   <div className="w-full md:w-5/12 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col bg-gray-50/30">
