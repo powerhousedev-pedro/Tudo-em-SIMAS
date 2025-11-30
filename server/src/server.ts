@@ -625,6 +625,12 @@ app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest,
         // Fetch Old Value for Audit
         const oldRecord = await model.findUnique({ where: { [pkField]: id } });
 
+        // Logic for Password Reset (Phase 2)
+        if (entity === 'Usuario' && data.senha) {
+            const salt = await bcrypt.genSalt(10);
+            data.senha = await bcrypt.hash(data.senha, salt);
+        }
+
         const result = await model.update({
             where: { [pkField]: id },
             data: data
