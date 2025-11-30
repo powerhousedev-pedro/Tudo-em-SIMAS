@@ -102,7 +102,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // FETCH DATA IN PARALLEL
   const queries = useDashboardData(columnsToRender);
-  const loadingData = queries.some(q => q.isLoading);
+  const loadingData = queries.some((q: any) => q.isLoading);
 
   // --- MUTATIONS ---
   const { create: createMutation, update: updateMutation, remove: deleteMutation } = useMutateEntity(activeTab);
@@ -304,7 +304,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
              <div key={field} className="relative group mb-1">
                  <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-2 ml-1">{field.replace(/_/g, ' ')} <span className="text-red-400 font-bold">*</span></label>
                  <div className="flex gap-2 w-full">
-                     {options.map((opt) => {
+                     {options.map((opt: string) => {
                          const isSelected = formData[field] === opt;
                          let label = opt;
                          if (field === 'SEXO') { if (opt === 'M') label = 'Masculino'; if (opt === 'F') label = 'Feminino'; }
@@ -325,7 +325,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
           <div className="relative">
             <select name={field} value={formData[field] || ''} onChange={handleInputChange} className={`${inputCommonClass} appearance-none cursor-pointer`}>
               <option value="">Selecione...</option>
-              {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              {options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
             </select>
             <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><i className="fas fa-chevron-down text-xs"></i></div>
           </div>
@@ -422,7 +422,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
              const searchTerm = (deferredSearchTerms[entity] || '').toLowerCase();
              const entityFilters = activeFilters[entity] || [];
              
-             const filteredData = Array.isArray(rawData) ? rawData.filter(item => {
+             const filteredData = Array.isArray(rawData) ? rawData.filter((item: any) => {
                  const display = config.cardDisplay(item);
                  const textMatch = !searchTerm || `${display.title} ${display.subtitle} ${display.details || ''}`.toLowerCase().includes(searchTerm);
                  const filterMatch = entityFilters.length === 0 || (config.filterBy && entityFilters.includes(item[config.filterBy]));
