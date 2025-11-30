@@ -10,7 +10,7 @@
 
 body {
   font-family: var(--font-body), 'Inter', sans-serif;
-  background-color: #f0f2f5;
+  background-color: #eceded; /* Updated Cloud Color */
   color: #13335a;
   /* Cera Pro Regular para textos longos, espaçamento normal */
   font-weight: 400;

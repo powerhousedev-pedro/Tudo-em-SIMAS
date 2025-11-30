@@ -11,7 +11,7 @@ export default {
           dark: '#13335a',    /* Navy */
           cyan: '#42b9eb',    /* Cyan */
           blue: '#2a688f',    /* Blue */
-          cloud: '#f0f2f5',   /* Cloud - Slightly brighter */
+          cloud: '#eceded',   /* Cloud - Updated to correct tone */
           surface: '#ffffff', /* Branco */
           danger: '#ef4444',
           warning: '#f59e0b',
