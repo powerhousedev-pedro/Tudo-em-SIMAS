@@ -396,20 +396,49 @@ app.get('/api/:entity/unique/:field', authenticateToken, async (req: any, res: a
 
 // --- GENERIC CRUD ROUTES ---
 
-app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {
+app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { entity } = req.params;
     const model = getModel(entity);
     
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
 
     try {
-        const query = req.query.search ? {
+        const query: any = req.query.search ? {
             where: {
                 OR: [
                     { [getEntityPk(entity)]: { contains: req.query.search } }
                 ]
             }
-        } : {};
+        } : { where: {} };
+
+        // --- LÓGICA DE SEGURANÇA PARA AUDITORIA ---
+        if (entity === 'Auditoria') {
+            const userRole = req.user?.papel;
+            const isCoord = userRole === 'COORDENAÇÃO';
+            const isGerente = req.user?.isGerente;
+
+            // 1. Apenas Gerentes e Coordenação podem acessar
+            if (!isCoord && !isGerente) {
+                return res.status(403).json({ message: 'Acesso negado. Apenas gerentes podem visualizar a auditoria.' });
+            }
+
+            // 2. Gerentes (não Coordenação) só veem logs do próprio departamento
+            if (!isCoord && isGerente && userRole) {
+                // Busca todos os usuários que pertencem ao mesmo papel/departamento
+                const teamUsers = await prisma.usuario.findMany({
+                    where: { papel: userRole },
+                    select: { usuario: true }
+                });
+                
+                const teamUsernames = teamUsers.map((u: any) => u.usuario);
+                
+                // Filtra logs onde o autor da ação (USUARIO) está na lista do time
+                query.where = {
+                    ...query.where,
+                    USUARIO: { in: teamUsernames }
+                };
+            }
+        }
         
         const inclusions: any = {};
         if (entity === 'Vaga') inclusions.include = { lotacao: true, cargo: true, edital: true };

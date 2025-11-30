@@ -24,6 +24,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const queryClient = useQueryClient();
 
+  // --- PERMISSIONS ---
+  const canDelete = session.papel === 'COORDENAÇÃO' || session.isGerente;
+
   // --- COMPUTED VALUES (Role Filtering) ---
   const tabs = useMemo(() => {
       const allKeys = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && k !== 'Atendimento');
@@ -522,7 +525,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                              <>
                                {entity === 'Pessoa' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
                                {entity === 'Vaga' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
-                               {entity !== 'Auditoria' && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDeleteRequest(e, item, entity)} />}
+                               {entity !== 'Auditoria' && canDelete && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDeleteRequest(e, item, entity)} />}
                              </>
                            }
                          />
