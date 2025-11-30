@@ -15,6 +15,9 @@ interface DashboardProps {
   showToast: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
+// Entidades que possuem fluxo de arquivamento/inativação em vez de exclusão direta
+const ARCHIVABLE_ENTITIES = ['Contrato', 'Servidor', 'Alocacao'];
+
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // --- SESSION ---
   const session: UserSession = useMemo(() => {
@@ -237,12 +240,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     if (!itemToDelete) return;
     const { entity, item } = itemToDelete;
     const config = ENTITY_CONFIGS[entity];
+    const isArchivable = ARCHIVABLE_ENTITIES.includes(entity);
     
     try {
       await genericRemove.mutateAsync(item[config.pk]);
-      showToast('info', 'Registro excluído.');
+      showToast('info', isArchivable ? 'Registro arquivado com sucesso.' : 'Registro excluído.');
     } catch(err) { 
-      showToast('error', 'Erro ao excluir.'); 
+      showToast('error', 'Erro ao processar solicitação.'); 
     } finally {
       setItemToDelete(null);
     }
@@ -505,6 +509,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        const isSelected = selectedItems[entity] === pkValue;
                        const isOcupada = item.STATUS_VAGA === 'Ocupada';
                        
+                       // Lógica de Permissão de Exclusão/Arquivamento
+                       const isArchivable = ARCHIVABLE_ENTITIES.includes(entity);
+                       const canAct = canDelete || isArchivable;
+
                        let exerciseData = undefined;
                        if (entity === 'Vaga') {
                            exerciseData = { label: item.NOME_LOTACAO_EXERCICIO || 'Sem exercício definido', onEdit: () => setExerciseVagaId(pkValue) };
@@ -525,7 +533,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                              <>
                                {entity === 'Pessoa' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
                                {entity === 'Vaga' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
-                               {entity !== 'Auditoria' && canDelete && <Button variant="icon" icon="fas fa-trash" className="text-red-300 hover:text-red-500 hover:bg-red-50" onClick={(e) => handleDeleteRequest(e, item, entity)} />}
+                               
+                               {entity !== 'Auditoria' && canAct && (
+                                   <Button 
+                                        variant="icon" 
+                                        icon={isArchivable ? "fas fa-file-import" : "fas fa-trash"} 
+                                        className={isArchivable ? "text-orange-400 hover:text-orange-600 hover:bg-orange-50" : "text-red-300 hover:text-red-500 hover:bg-red-50"} 
+                                        title={isArchivable ? "Arquivar" : "Excluir"}
+                                        onClick={(e) => handleDeleteRequest(e, item, entity)} 
+                                   />
+                               )}
                              </>
                            }
                          />
@@ -540,7 +557,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
       {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); queryClient.invalidateQueries({ queryKey: ['entity', 'Vaga'] }); }} showToast={showToast} />}
-      {itemToDelete && <ConfirmModal title="Confirmar Exclusão" message={`Tem certeza que deseja excluir este registro de ${ENTITY_CONFIGS[itemToDelete.entity].title}?`} onConfirm={handleConfirmDelete} onCancel={() => setItemToDelete(null)} isLoading={deleteMutation.isPending} />}
+      {itemToDelete && (
+          <ConfirmModal 
+            title={ARCHIVABLE_ENTITIES.includes(itemToDelete.entity) ? "Confirmar Arquivamento" : "Confirmar Exclusão"} 
+            message={ARCHIVABLE_ENTITIES.includes(itemToDelete.entity) 
+                ? "Deseja arquivar este registro? Ele será movido para o histórico e removido da listagem ativa." 
+                : `Tem certeza que deseja excluir este registro de ${ENTITY_CONFIGS[itemToDelete.entity].title}?`
+            }
+            onConfirm={handleConfirmDelete} 
+            onCancel={() => setItemToDelete(null)} 
+            isLoading={deleteMutation.isPending} 
+          />
+      )}
     </div>
   );
 };

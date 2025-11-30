@@ -1,6 +1,3 @@
-
-
-
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 import { validation } from '../utils/validation';
 
@@ -168,6 +165,11 @@ export const api = {
   deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
     const endpoint = getEndpoint(entityName);
     return request(`${endpoint}/${pkValue}`, 'DELETE');
+  },
+  
+  restoreFromHistory: async (entityName: string, id: string) => {
+      const endpoint = getEndpoint(entityName);
+      return request(`${endpoint}/${id}/restaurar`, 'POST');
   },
 
   getUsers: async () => request('/Usuario'),

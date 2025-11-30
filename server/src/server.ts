@@ -77,6 +77,7 @@ const getModel = (modelName: string) => {
     if (name === 'solicitacaoPesquisa') name = 'solicitacaoPesquisa'; 
     if (name === 'cargoComissionado') name = 'cargoComissionado';
     if (name === 'relatorioSalvo') name = 'relatorioSalvo';
+    // Mapeamento correto para tabelas históricas
     if (name === 'contratoHistorico') name = 'contratoHistorico';
     if (name === 'alocacaoHistorico') name = 'alocacaoHistorico';
     if (name === 'inativo') name = 'inativo';
@@ -88,7 +89,6 @@ function getEntityPk(entity: string): string {
         'Pessoa': 'CPF',
         'Servidor': 'MATRICULA',
         'Usuario': 'id',
-        'Inativo': 'MATRICULA',
         'Alocacao': 'ID_ALOCACAO',
         'Contrato': 'ID_CONTRATO',
         'Vaga': 'ID_VAGA',
@@ -106,17 +106,17 @@ const getFriendlyErrorMessage = (error: any): string => {
 
     // Prisma Unique Constraint (P2002)
     if (msg.includes('Unique constraint') || error.code === 'P2002') {
-        return 'Já existe um registro com estes dados (CPF, Matrícula ou ID duplicado).';
+        return 'Já existe um registro com estes dados (CPF, Matrícula ou ID duplicado) na tabela ativa.';
     }
 
     // Prisma Foreign Key Constraint (P2003)
     if (msg.includes('Foreign key constraint') || error.code === 'P2003') {
-        return 'Não é possível excluir ou alterar este registro pois ele está vinculado a outros dados no sistema.';
+        return 'Não é possível processar: O registro depende de dados que não existem mais (Ex: Vaga ou Pessoa excluída).';
     }
 
     // Prisma Record Not Found (P2025)
     if (msg.includes('Record to delete does not exist') || msg.includes('Record to update not found') || error.code === 'P2025') {
-        return 'O registro solicitado não foi encontrado no banco de dados. Pode ter sido excluído anteriormente.';
+        return 'O registro solicitado não foi encontrado no banco de dados.';
     }
 
     // Prisma Invalid Field/Column
@@ -138,7 +138,7 @@ const getFriendlyErrorMessage = (error: any): string => {
 
 const auditAction = async (
     usuario: string, 
-    acao: 'CRIAR' | 'EDITAR' | 'EXCLUIR', 
+    acao: 'CRIAR' | 'EDITAR' | 'EXCLUIR' | 'ARQUIVAR' | 'INATIVAR' | 'RESTAURAR', 
     tabela: string, 
     idRegistro: string, 
     oldVal: any = null, 
@@ -167,8 +167,7 @@ const auditAction = async (
 // --- CRON JOBS (DAILY ROUTINES) ---
 
 cron.schedule('0 0 * * *', async () => {
-    // console.log('--- Iniciando rotina diária ---');
-    // Implementação mantida, suprimida para brevidade nesta atualização
+    // Rotinas diárias...
 });
 
 // --- AUTH ROUTES ---
@@ -177,7 +176,6 @@ app.post('/api/auth/login', async (req: any, res: any) => {
     const { usuario, senha } = req.body;
     
     try {
-        // Tenta buscar no banco
         const user = await prisma.usuario.findFirst({
             where: { usuario }
         });
@@ -187,7 +185,6 @@ app.post('/api/auth/login', async (req: any, res: any) => {
         }
 
         let isValid = false;
-        // Suporte a senhas legacy (texto plano) e novas (bcrypt)
         if (user.senha && user.senha.startsWith('$2')) {
             isValid = await bcrypt.compare(senha, user.senha);
         } else {
@@ -213,12 +210,11 @@ app.post('/api/auth/login', async (req: any, res: any) => {
 
     } catch (e: any) {
         console.error("Login error (DB Connection or Query):", e);
-        // Em caso de erro 500 (DB fora do ar), retornamos mensagem amigável, sem vazar a stack
         res.status(500).json({ message: 'O servidor encontrou um erro ao processar o login. Tente novamente mais tarde.' });
     }
 });
 
-// --- BUSINESS LOGIC ROUTES ---
+// --- CENTRALIZED ARCHIVING ROUTES (PHYSICAL TABLES + AUDIT) ---
 
 // 1. Arquivamento de Contrato
 app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
@@ -232,29 +228,31 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
             const contratoAtivo = await tx.contrato.findFirst({ where: { CPF } });
             
             if (contratoAtivo) {
-                // Criar Histórico
-                const idHistorico = generateId('HCT');
-                const historicoData = {
-                    ID_HISTORICO_CONTRATO: idHistorico, // PK do Histórico
-                    ID_CONTRATO: contratoAtivo.ID_CONTRATO, // Referência ao contrato original
-                    ID_VAGA: contratoAtivo.ID_VAGA,
+                // 1. Prepara dados para a tabela histórica física
+                const dadosParaHistorico = {
+                    ID_CONTRATO: contratoAtivo.ID_CONTRATO,
                     CPF: contratoAtivo.CPF,
-                    DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
+                    ID_VAGA: contratoAtivo.ID_VAGA,
                     ID_FUNCAO: contratoAtivo.ID_FUNCAO,
+                    DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
                     DATA_ARQUIVAMENTO: new Date(),
                     MOTIVO_ARQUIVAMENTO: MOTIVO
                 };
                 
-                await tx.contratoHistorico.create({ data: historicoData });
-                await auditAction(usuario, 'CRIAR', 'ContratoHistorico', idHistorico, null, historicoData, tx);
+                // 2. Insere na Tabela Histórica
+                await tx.contratoHistorico.create({ data: dadosParaHistorico });
 
-                // Deletar Ativo
+                // 3. Cria Log na Auditoria (ARQUIVAR) com os dados originais
+                await auditAction(usuario, 'ARQUIVAR', 'Contrato', contratoAtivo.ID_CONTRATO, contratoAtivo, null, tx);
+                
+                // 4. Deleta da Tabela Ativa
                 await tx.contrato.delete({ where: { ID_CONTRATO: contratoAtivo.ID_CONTRATO } });
-                await auditAction(usuario, 'EXCLUIR', 'Contrato', contratoAtivo.ID_CONTRATO, contratoAtivo, null, tx);
+            } else {
+                throw new Error("Contrato ativo não encontrado para este CPF.");
             }
         });
 
-        res.json({ success: true, message: 'Contrato anterior arquivado com sucesso.' });
+        res.json({ success: true, message: 'Contrato arquivado com sucesso.' });
     } catch (e: any) {
         res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
@@ -262,15 +260,13 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
 
 // 2. Inativação de Servidor
 app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    const { MATRICULA, MOTIVO } = req.body; // Aceita payload com matricula ou CPF no form (o frontend manda todos campos)
+    const { MATRICULA, MOTIVO } = req.body;
     const usuario = req.user?.usuario || 'Desconhecido';
     
-    // Frontend pode mandar CPF, mas PK é matricula. Se não vier matricula, tentamos achar.
     let matriculaFinal = MATRICULA;
     
     try {
         await prisma.$transaction(async (tx) => {
-            // Se não veio matrícula, tenta achar pelo CPF do payload
             if (!matriculaFinal && req.body.CPF) {
                 const s = await tx.servidor.findFirst({ where: { CPF: req.body.CPF }});
                 if (s) matriculaFinal = s.MATRICULA;
@@ -281,33 +277,33 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
             const servidor = await tx.servidor.findUnique({ where: { MATRICULA: matriculaFinal } });
             if (!servidor) throw new Error('Servidor não encontrado.');
 
-            // Criar registro em Inativos
-            const idInativo = generateId('INA');
-            const inativoData = {
-                ID_INATIVO: idInativo,
-                MATRICULA_ORIGINAL: servidor.MATRICULA,
-                CPF: servidor.CPF,
-                ID_CARGO: servidor.ID_CARGO,
-                DATA_MATRICULA: servidor.DATA_MATRICULA,
-                VINCULO_ANTERIOR: servidor.VINCULO,
-                PREFIXO_ANTERIOR: servidor.PREFIXO_MATRICULA,
-                DATA_INATIVACAO: new Date(),
-                MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
-            };
-
-            await tx.inativo.create({ data: inativoData });
-            await auditAction(usuario, 'CRIAR', 'Inativo', idInativo, null, inativoData, tx);
-
-            // Remover Alocação Ativa se houver
+            // Remove alocação ativa se houver
             const alocacao = await tx.alocacao.findFirst({ where: { MATRICULA: matriculaFinal } });
             if (alocacao) {
                 await tx.alocacao.delete({ where: { ID_ALOCACAO: alocacao.ID_ALOCACAO } });
                 await auditAction(usuario, 'EXCLUIR', 'Alocacao', alocacao.ID_ALOCACAO, alocacao, null, tx);
             }
 
-            // Remover Servidor
+            // 1. Prepara dados para a tabela Inativo
+            const dadosInativo = {
+                MATRICULA: servidor.MATRICULA,
+                CPF: servidor.CPF,
+                ID_CARGO: servidor.ID_CARGO,
+                DATA_MATRICULA: servidor.DATA_MATRICULA,
+                VINCULO: servidor.VINCULO,
+                PREFIXO_MATRICULA: servidor.PREFIXO_MATRICULA,
+                DATA_INATIVACAO: new Date(),
+                MOTIVO: MOTIVO || 'Inativação'
+            };
+
+            // 2. Insere na Tabela Inativo
+            await tx.inativo.create({ data: dadosInativo });
+
+            // 3. Log na Auditoria
+            await auditAction(usuario, 'INATIVAR', 'Servidor', matriculaFinal, servidor, null, tx);
+            
+            // 4. Remove da tabela ativa
             await tx.servidor.delete({ where: { MATRICULA: matriculaFinal } });
-            await auditAction(usuario, 'EXCLUIR', 'Servidor', matriculaFinal, servidor, null, tx);
         });
 
         res.json({ success: true, message: 'Servidor inativado com sucesso.' });
@@ -316,7 +312,7 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
     }
 });
 
-// 3. Criação de Alocação com Histórico Automático
+// 3. Alocação (Arquivamento ao Mover)
 app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const usuario = req.user?.usuario || 'Desconhecido';
     let data = cleanData(req.body);
@@ -325,34 +321,32 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
 
     try {
         await prisma.$transaction(async (tx) => {
-            // Verifica alocação existente
             const alocacaoExistente = await tx.alocacao.findFirst({ where: { MATRICULA: data.MATRICULA } });
 
             if (alocacaoExistente) {
-                // Move para histórico
-                const idHistorico = generateId('HAL');
-                const historicoData = {
-                    ID_HISTORICO_ALOCACAO: idHistorico, // PK do Histórico
-                    ID_ALOCACAO: alocacaoExistente.ID_ALOCACAO, // ID da alocação original
-                    MATRICULA: alocacaoExistente.MATRICULA,
-                    ID_LOTACAO: alocacaoExistente.ID_LOTACAO,
-                    ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
-                    DATA_INICIO: alocacaoExistente.DATA_INICIO,
-                    DATA_ARQUIVAMENTO: new Date()
-                };
-                await tx.alocacaoHistorico.create({ data: historicoData });
-                await auditAction(usuario, 'CRIAR', 'AlocacaoHistorico', idHistorico, null, historicoData, tx);
+                // 1. Insere na tabela Histórica
+                await tx.alocacaoHistorico.create({
+                    data: {
+                        ID_ALOCACAO: alocacaoExistente.ID_ALOCACAO,
+                        MATRICULA: alocacaoExistente.MATRICULA,
+                        ID_LOTACAO: alocacaoExistente.ID_LOTACAO,
+                        ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
+                        DATA_INICIO: alocacaoExistente.DATA_INICIO,
+                        DATA_FIM: new Date(),
+                        MOTIVO_MUDANCA: "Nova alocação criada"
+                    }
+                });
 
-                // Remove a antiga
+                // 2. Log na Auditoria
+                await auditAction(usuario, 'ARQUIVAR', 'Alocacao', alocacaoExistente.ID_ALOCACAO, alocacaoExistente, null, tx);
+                
+                // 3. Remove a antiga
                 await tx.alocacao.delete({ where: { ID_ALOCACAO: alocacaoExistente.ID_ALOCACAO } });
-                await auditAction(usuario, 'EXCLUIR', 'Alocacao', alocacaoExistente.ID_ALOCACAO, alocacaoExistente, null, tx);
             }
 
             // Cria a nova
             const result = await tx.alocacao.create({ data });
             await auditAction(usuario, 'CRIAR', 'Alocacao', result.ID_ALOCACAO, null, result, tx);
-            
-            // Retorna resultado para o frontend (compatibilidade com createRecord)
             return result; 
         }).then(result => {
              res.json({ success: true, data: result });
@@ -363,7 +357,7 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
     }
 });
 
-// 4. Upsert de Exercício (1 Vaga = 1 Exercício)
+// 4. Upsert de Exercício
 app.post('/api/Exercicio', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const usuario = req.user?.usuario || 'Desconhecido';
     let data = cleanData(req.body);
@@ -372,68 +366,132 @@ app.post('/api/Exercicio', authenticateToken, async (req: AuthenticatedRequest, 
 
     try {
         const result = await prisma.$transaction(async (tx) => {
-            // Verifica se já existe exercício para essa vaga
             const exercicioExistente = await tx.exercicio.findFirst({ where: { ID_VAGA: data.ID_VAGA } });
 
             if (exercicioExistente) {
-                // Atualiza
                 const updated = await tx.exercicio.update({
                     where: { ID_EXERCICIO: exercicioExistente.ID_EXERCICIO },
-                    data: { ID_LOTACAO: data.ID_LOTACAO } // Atualiza apenas a lotação
+                    data: { ID_LOTACAO: data.ID_LOTACAO }
                 });
                 await auditAction(usuario, 'EDITAR', 'Exercicio', updated.ID_EXERCICIO, exercicioExistente, updated, tx);
                 return updated;
             } else {
-                // Cria
-                // Garante ID se não vier
                 if (!data.ID_EXERCICIO) data.ID_EXERCICIO = generateId('EXE');
                 const created = await tx.exercicio.create({ data });
                 await auditAction(usuario, 'CRIAR', 'Exercicio', created.ID_EXERCICIO, null, created, tx);
                 return created;
             }
         });
-
         res.json({ success: true, data: result });
     } catch (e: any) {
         res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
 
-// --- CUSTOM REPORT GENERATION WITH NESTED JOINS ---
+
+// --- RESTAURAR VIA AUDITORIA (Lógica Inversa) ---
+
+app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { id } = req.params; // ID_LOG
+    const usuario = req.user?.usuario || 'Desconhecido';
+
+    try {
+        const log = await prisma.auditoria.findUnique({ where: { ID_LOG: id } });
+        if (!log) return res.status(404).json({ message: 'Log não encontrado.' });
+        
+        // --- LOGICA DE RESTAURAÇÃO DE ARQUIVAMENTO (Tabelas Físicas) ---
+        if (log.ACAO === 'ARQUIVAR' || log.ACAO === 'INATIVAR') {
+             await prisma.$transaction(async (tx) => {
+                let dataToRestore: any = null;
+
+                if (log.TABELA_AFETADA === 'Contrato') {
+                    // Busca na tabela histórica física
+                    const historico = await tx.contratoHistorico.findUnique({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
+                    if (!historico) throw new Error("Registro não encontrado na tabela de histórico.");
+
+                    // Limpa dados de controle do histórico
+                    dataToRestore = { ...historico };
+                    delete dataToRestore.DATA_ARQUIVAMENTO;
+                    delete dataToRestore.MOTIVO_ARQUIVAMENTO;
+
+                    // Insere na ativa
+                    await tx.contrato.create({ data: dataToRestore });
+                    // Remove da histórica
+                    await tx.contratoHistorico.delete({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
+
+                } else if (log.TABELA_AFETADA === 'Servidor') {
+                    // O ID do log é a MATRICULA
+                    const inativo = await tx.inativo.findUnique({ where: { MATRICULA: log.ID_REGISTRO_AFETADO } });
+                    if (!inativo) throw new Error("Registro não encontrado na tabela de inativos.");
+
+                    dataToRestore = { ...inativo };
+                    delete dataToRestore.DATA_INATIVACAO;
+                    delete dataToRestore.MOTIVO; // ou MOTIVO_INATIVACAO dependendo do schema
+                    delete dataToRestore.PROCESSO;
+                    delete dataToRestore.DATA_PUBLICACAO;
+
+                    await tx.servidor.create({ data: dataToRestore });
+                    await tx.inativo.delete({ where: { MATRICULA: log.ID_REGISTRO_AFETADO } });
+
+                } else if (log.TABELA_AFETADA === 'Alocacao') {
+                    const hist = await tx.alocacaoHistorico.findUnique({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
+                    if (!hist) throw new Error("Registro histórico de alocação não encontrado.");
+
+                    dataToRestore = { ...hist };
+                    delete dataToRestore.DATA_FIM;
+                    delete dataToRestore.MOTIVO_MUDANCA;
+
+                    await tx.alocacao.create({ data: dataToRestore });
+                    await tx.alocacaoHistorico.delete({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
+                } else {
+                    throw new Error(`Restauração de arquivamento não suportada para ${log.TABELA_AFETADA}`);
+                }
+
+                // Cria log de Restauração
+                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, dataToRestore, tx);
+                
+                // Opcional: Remover o log original de arquivamento para evitar confusão ou duplicidade de ações
+                // Mas geralmente auditoria é imutável. Vamos manter o log original, mas o front saberá que já voltou.
+             });
+
+        } 
+        // --- LOGICA DE RESTAURAÇÃO DE EXCLUSÃO SIMPLES (Baseada no JSON) ---
+        else if (log.ACAO === 'EXCLUIR') {
+            const model = getModel(log.TABELA_AFETADA);
+            const savedData = JSON.parse(log.VALOR_ANTIGO || '{}');
+            
+            if (!model) throw new Error('Modelo inválido para restauração.');
+            
+            await model.create({ data: savedData });
+            await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, savedData);
+        }
+        else {
+             throw new Error('Tipo de ação não permite restauração automática.');
+        }
+
+        res.json({ success: true, message: 'Registro restaurado com sucesso.' });
+    } catch (e: any) { 
+        res.status(500).json({ message: getFriendlyErrorMessage(e) }); 
+    }
+});
+
+// --- REPORT ROUTES (Custom & Saved) ---
 
 // Função auxiliar para construir o objeto include do Prisma recursivamente
 const buildPrismaInclude = (paths: string[]) => {
     const includeObj: any = {};
-
     paths.forEach(path => {
-        // Exemplo path: "vaga.lotacao" -> parts: ["vaga", "lotacao"]
         const parts = path.split('.');
-        
         let currentLevel = includeObj;
-        
         parts.forEach((part, index) => {
-            // Se não existe a chave, cria com true (para inclusão simples) ou objeto vazio se tiver filhos
-            if (!currentLevel[part]) {
-                // Se for o último elemento, marca como true (include simples)
-                // A menos que já tenha sido criado como objeto por um caminho mais profundo processado antes
-                currentLevel[part] = true;
-            }
-
-            // Se ainda não é o último, precisamos garantir que seja um objeto com 'include'
+            if (!currentLevel[part]) currentLevel[part] = true;
             if (index < parts.length - 1) {
-                if (currentLevel[part] === true) {
-                    currentLevel[part] = { include: {} };
-                }
-                // Se já existe mas não tem include (ex: foi criado por outra lógica), inicializa
-                if (!currentLevel[part].include) {
-                     currentLevel[part] = { include: {} };
-                }
-                // Avança o ponteiro para o próximo nível
+                if (currentLevel[part] === true) currentLevel[part] = { include: {} };
+                if (!currentLevel[part].include) currentLevel[part] = { include: {} };
                 currentLevel = currentLevel[part].include;
             }
         });
     });
-
     return Object.keys(includeObj).length > 0 ? includeObj : undefined;
 };
 
@@ -441,23 +499,15 @@ const buildPrismaInclude = (paths: string[]) => {
 const flattenObject = (obj: any, prefix = '', res: any = {}) => {
     for (const key in obj) {
         if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
-        
         const val = obj[key];
         const newKey = prefix ? `${prefix}.${key}` : key;
-        
-        // Capitaliza para ficar bonito no Frontend: vaga.lotacao -> Vaga.Lotacao
         const formattedKey = newKey.split('.').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join('.');
 
         if (typeof val === 'object' && val !== null && !(val instanceof Date)) {
              if (Array.isArray(val)) {
-                 // Array (One-to-Many): Apenas conta ou pega o primeiro para não explodir linhas
                  res[`${formattedKey}.COUNT`] = val.length;
-                 if(val.length > 0) {
-                     // Achata o primeiro item como exemplo
-                     flattenObject(val[0], newKey, res); 
-                 }
+                 if(val.length > 0) flattenObject(val[0], newKey, res); 
              } else {
-                 // Objeto (One-to-One / Many-to-One): Recursão
                  flattenObject(val, newKey, res);
              }
         } else {
@@ -469,37 +519,22 @@ const flattenObject = (obj: any, prefix = '', res: any = {}) => {
 
 app.post('/api/reports/custom', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { primaryEntity, joins } = req.body; 
-    // primaryEntity: "Contrato"
-    // joins: ["vaga", "vaga.lotacao"]
-    
     const model = getModel(primaryEntity);
-    
     if (!model) return res.status(400).json({ message: `Entidade ${primaryEntity} inválida` });
 
     try {
         const queryOptions: any = {};
-        
         if (joins && Array.isArray(joins) && joins.length > 0) {
             const prismaInclude = buildPrismaInclude(joins);
-            if (prismaInclude) {
-                queryOptions.include = prismaInclude;
-            }
+            if (prismaInclude) queryOptions.include = prismaInclude;
         }
-
         const data = await model.findMany(queryOptions);
-
-        // Flatten Result recursivamente
         const flattenedData = data.map((item: any) => flattenObject(item, primaryEntity));
-
         res.json(flattenedData);
-
     } catch (e: any) {
-        console.error('Custom Report Error:', e);
         res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
-
-// --- SAVED REPORTS ROUTES ---
 
 app.get('/api/reports/saved', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     try {
@@ -509,29 +544,25 @@ app.get('/api/reports/saved', authenticateToken, async (req: AuthenticatedReques
         });
         res.json(reports);
     } catch (e: any) {
-        console.error('Error fetching saved reports:', e);
         res.status(500).json({ message: 'Erro ao buscar relatórios salvos.' });
     }
 });
 
 app.post('/api/reports/saved', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { name, config } = req.body;
-    
     if (!name || !config) return res.status(400).json({ message: 'Dados inválidos.' });
-
     try {
         const newReport = await prisma.relatorioSalvo.create({
             data: {
                 ID_RELATORIO: generateId('REP'),
                 NOME: name,
-                USUARIO: req.user?.usuario || 'Sistema', // Fixed TS Error: Ensure string
+                USUARIO: req.user?.usuario || 'Sistema',
                 CONFIGURACAO: JSON.stringify(config),
                 DATA_CRIACAO: new Date()
             }
         });
         res.json({ success: true, data: newReport });
     } catch (e: any) {
-        console.error('Error saving report:', e);
         res.status(500).json({ message: 'Erro ao salvar relatório.' });
     }
 });
@@ -539,59 +570,37 @@ app.post('/api/reports/saved', authenticateToken, async (req: AuthenticatedReque
 app.delete('/api/reports/saved/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { id } = req.params;
     try {
-        // Verifica se pertence ao usuário
         const report = await prisma.relatorioSalvo.findUnique({ where: { ID_RELATORIO: id } });
         if (!report) return res.status(404).json({ message: 'Relatório não encontrado.' });
-        
-        if (report.USUARIO !== req.user?.usuario && !req.user?.isGerente) {
-            return res.status(403).json({ message: 'Sem permissão.' });
-        }
-
+        if (report.USUARIO !== req.user?.usuario && !req.user?.isGerente) return res.status(403).json({ message: 'Sem permissão.' });
         await prisma.relatorioSalvo.delete({ where: { ID_RELATORIO: id } });
         res.json({ success: true });
     } catch (e: any) {
-        console.error('Error deleting report:', e);
         res.status(500).json({ message: 'Erro ao excluir relatório.' });
     }
 });
 
-
-// --- AUTOCOMPLETE UNIQUE VALUES ---
+// --- AUTOCOMPLETE & ALERTS ---
 
 app.get('/api/:entity/unique/:field', authenticateToken, async (req: any, res: any) => {
     const { entity, field } = req.params;
     const model = getModel(entity);
-    
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
-
     try {
-        // Tenta buscar valores únicos para o autocomplete
-        // Limita a 100 sugestões para performance
         const results = await model.findMany({
             select: { [field]: true },
             distinct: [field],
             take: 100,
             orderBy: { [field]: 'asc' }
         });
-
-        // Extrai apenas os valores e remove nulos
-        const values = results
-            .map((item: any) => item[field])
-            .filter((val: any) => val !== null && val !== '')
-            .map(String);
-
+        const values = results.map((item: any) => item[field]).filter((val: any) => val !== null && val !== '').map(String);
         res.json(values);
     } catch (e: any) {
-        // Se o campo não existir ou der erro, retorna array vazio sem quebrar
-        console.warn(`Erro ao buscar autocomplete para ${entity}.${field}:`, e.message);
         res.json([]); 
     }
 });
 
-// --- SPECIFIC ROUTES (New Alerts Endpoint) ---
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
-    // Retorna lista vazia para evitar erro 400 no frontend
-    // Futuramente, aqui será implementada a lógica de alertas
     res.json([]);
 });
 
@@ -600,44 +609,29 @@ app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
 app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { entity } = req.params;
     const model = getModel(entity);
-    
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
 
     try {
-        const query: any = req.query.search ? {
-            where: {
-                OR: [
-                    { [getEntityPk(entity)]: { contains: req.query.search } }
-                ]
+        if (entity === 'Auditoria') {
+            const userRole = req.user?.papel;
+            const isGerente = req.user?.isGerente;
+            if (userRole !== 'COORDENAÇÃO' && !isGerente) {
+                return res.status(403).json({ message: 'Acesso negado.' });
             }
+        }
+
+        const query: any = req.query.search ? {
+            where: { OR: [{ [getEntityPk(entity)]: { contains: req.query.search } }] }
         } : { where: {} };
 
-        // --- LÓGICA DE SEGURANÇA PARA AUDITORIA ---
         if (entity === 'Auditoria') {
             const userRole = req.user?.papel;
             const isCoord = userRole === 'COORDENAÇÃO';
             const isGerente = req.user?.isGerente;
-
-            // 1. Apenas Gerentes e Coordenação podem acessar
-            if (!isCoord && !isGerente) {
-                return res.status(403).json({ message: 'Acesso negado. Apenas gerentes podem visualizar a auditoria.' });
-            }
-
-            // 2. Gerentes (não Coordenação) só veem logs do próprio departamento
             if (!isCoord && isGerente && userRole) {
-                // Busca todos os usuários que pertencem ao mesmo papel/departamento
-                const teamUsers = await prisma.usuario.findMany({
-                    where: { papel: userRole },
-                    select: { usuario: true }
-                });
-                
+                const teamUsers = await prisma.usuario.findMany({ where: { papel: userRole }, select: { usuario: true } });
                 const teamUsernames = teamUsers.map((u: any) => u.usuario);
-                
-                // Filtra logs onde o autor da ação (USUARIO) está na lista do time
-                query.where = {
-                    ...query.where,
-                    USUARIO: { in: teamUsernames }
-                };
+                query.where = { ...query.where, USUARIO: { in: teamUsernames } };
             }
         }
         
@@ -649,7 +643,6 @@ app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res
 
         const data = await model.findMany({ ...query, ...inclusions });
         
-        // Flattening for Frontend compatibility (Legacy List View)
         const flatData = data.map((item: any) => {
             const flat = { ...item };
             if (entity === 'Vaga') {
@@ -677,14 +670,9 @@ app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res
 
 app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { entity } = req.params;
-    // Intercept Alocacao/Exercicio requests to specialized handlers if they somehow fall through (though Express matches first)
-    // However, since we defined specialized handlers ABOVE this generic one, we are good.
-    
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
-    
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
-
     try {
         let data = cleanData(req.body);
         if (entity === 'Usuario' && data.senha) {
@@ -706,9 +694,7 @@ app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest,
     const { entity, id } = req.params;
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
-    
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
-
     try {
         const { editToken, ...rawData } = req.body;
         const data = cleanData(rawData);
@@ -747,7 +733,7 @@ app.delete('/api/:entity/:id', authenticateToken, async (req: AuthenticatedReque
     }
 });
 
-// [Endpoints Específicos como Vaga Toggle, Restore Audit, etc mantidos]
+// [Endpoints de relatórios, toggle lock, etc. mantidos...]
 app.post('/api/Vaga/:id/toggle-lock', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { id } = req.params;
     const usuario = req.user?.usuario || 'Desconhecido';
@@ -758,27 +744,6 @@ app.post('/api/Vaga/:id/toggle-lock', authenticateToken, async (req: Authenticat
         const updated = await prisma.vaga.update({ where: { ID_VAGA: id }, data: { BLOQUEADA: newStatus } });
         await auditAction(usuario, 'EDITAR', 'Vaga', id, vaga, updated);
         res.json(newStatus);
-    } catch (e: any) { res.status(500).json({ message: getFriendlyErrorMessage(e) }); }
-});
-
-app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    const { id } = req.params;
-    try {
-        const log = await prisma.auditoria.findUnique({ where: { ID_LOG: id } });
-        if (!log) return res.status(404).json({ message: 'Log não encontrado.' });
-        const model = getModel(log.TABELA_AFETADA);
-        if (!model) return res.status(400).json({ message: 'Tabela não suportada.' });
-        const pk = getEntityPk(log.TABELA_AFETADA);
-        const oldVal = JSON.parse(log.VALOR_ANTIGO || '{}');
-        if (log.ACAO === 'EXCLUIR') {
-            await model.create({ data: oldVal });
-        } else if (log.ACAO === 'CRIAR') {
-            await model.delete({ where: { [pk]: log.ID_REGISTRO_AFETADO } });
-        } else if (log.ACAO === 'EDITAR') {
-            await model.update({ where: { [pk]: log.ID_REGISTRO_AFETADO }, data: oldVal });
-        }
-        await prisma.auditoria.delete({ where: { ID_LOG: id } });
-        res.json({ success: true, message: 'Restaurado.' });
     } catch (e: any) { res.status(500).json({ message: getFriendlyErrorMessage(e) }); }
 });
 
@@ -800,7 +765,6 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
             const lotacaoData = Object.entries(lotacaoCounts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
             result = { totais: { contratados: totalContratos, servidores: totalServidores, total: totalContratos + totalServidores }, graficos: { vinculo: vinculoData, lotacao: lotacaoData } };
         } else if (reportName === 'painelVagas') {
-            // Lógica do Painel de Vagas (Mantida)
             const vagas = await prisma.vaga.findMany({ include: { lotacao: true, cargo: true, edital: true } });
             const activeReservations = await prisma.reserva.findMany({ where: { STATUS: 'Ativa' } });
             const activeResMap = new Map(activeReservations.map((r: any) => [r.ID_VAGA, r.ID_ATENDIMENTO]));
@@ -841,18 +805,14 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
                 return { VINCULACAO: vinculacao, LOTACAO: lotacao, CARGO: cargo, DETALHES: detailsParts.join(', ') };
             });
             result = { panorama, quantitativo };
-        } else {
-            return res.status(404).json({ message: 'Relatório não implementado' });
         }
         res.json(result);
     } catch (e: any) {
-        console.error(`Erro report ${reportName}:`, e);
         res.status(500).json({ message: 'Erro ao gerar relatório' });
     }
 });
 
 app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any) => {
-    // Dossiê Mantido
     let { cpf } = req.params;
     cpf = cpf.replace(/\D/g, '');
     try {
@@ -866,8 +826,6 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any
         const vinculosAtivos: any[] = [];
         for (const c of contratos) { vinculosAtivos.push({ tipo: 'Contrato', id_contrato: c.ID_CONTRATO, funcao: c.funcao?.FUNCAO || 'Função não definida', data_inicio: c.DATA_DO_CONTRATO, detalhes: `Vaga ${c.ID_VAGA || 'N/A'}` }); }
         
-        // Fixed TS Error: Property '0' does not exist on type...
-        // Use 'any' cast to allow flexible access since schema might be defined as Object but TS expects something else, or vice-versa
         for (const s of servidores) { 
             const sAny = s as any;
             let aloc = Array.isArray(sAny.alocacao) ? sAny.alocacao[0] : sAny.alocacao; 
@@ -884,10 +842,44 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any
         }
 
         const timeline: any[] = [];
-        const histContratos = await prisma.contratoHistorico.findMany({ where: { CPF: cpf } });
-        histContratos.forEach((h: any) => timeline.push({ tipo: 'Contrato Encerrado', data_ordenacao: h.DATA_ARQUIVAMENTO, periodo: `${h.DATA_DO_CONTRATO ? new Date(h.DATA_DO_CONTRATO).getFullYear() : '?'} - ${h.DATA_ARQUIVAMENTO ? new Date(h.DATA_ARQUIVAMENTO).getFullYear() : '?'}`, descricao: `Contrato ${h.ID_CONTRATO}`, detalhes: `Motivo: ${h.MOTIVO_ARQUIVAMENTO || 'N/A'}`, icone: 'fa-file-contract', cor: 'gray' }));
-        const inativos = await prisma.inativo.findMany({ where: { CPF: cpf } });
-        inativos.forEach((i: any) => timeline.push({ tipo: 'Inativação de Servidor', data_ordenacao: i.DATA_INATIVACAO, periodo: `Encerrado em ${new Date(i.DATA_INATIVACAO).toLocaleDateString()}`, descricao: `Matrícula ${i.MATRICULA}`, detalhes: `Motivo: ${i.MOTIVO_INATIVACAO}`, icone: 'fa-user-slash', cor: 'red' }));
+        // Agora buscamos o histórico na AUDITORIA, pois o acesso às tabelas históricas é indireto
+        const auditoriaLogs = await prisma.auditoria.findMany({
+            where: {
+                OR: [
+                    { TABELA_AFETADA: 'Contrato', ACAO: 'ARQUIVAR' },
+                    { TABELA_AFETADA: 'Servidor', ACAO: 'INATIVAR' }
+                ],
+                VALOR_ANTIGO: { contains: cpf } // Simple search within JSON
+            }
+        });
+
+        auditoriaLogs.forEach((log: any) => {
+            const data = JSON.parse(log.VALOR_ANTIGO || '{}');
+            if (data.CPF !== cpf) return; // Double check
+
+            if (log.ACAO === 'ARQUIVAR' && log.TABELA_AFETADA === 'Contrato') {
+                timeline.push({ 
+                    tipo: 'Contrato Encerrado', 
+                    data_ordenacao: data.DATA_ARQUIVAMENTO || log.DATA_HORA, 
+                    periodo: `Encerrado em ${new Date(log.DATA_HORA).getFullYear()}`, 
+                    descricao: `Contrato ${data.ID_CONTRATO}`, 
+                    detalhes: `Motivo: ${data.MOTIVO_ARQUIVAMENTO || 'Arquivo'}`, 
+                    icone: 'fa-file-contract', 
+                    cor: 'gray' 
+                });
+            } else if (log.ACAO === 'INATIVAR' && log.TABELA_AFETADA === 'Servidor') {
+                timeline.push({ 
+                    tipo: 'Inativação de Servidor', 
+                    data_ordenacao: data.DATA_INATIVACAO || log.DATA_HORA, 
+                    periodo: `Encerrado em ${new Date(log.DATA_HORA).toLocaleDateString()}`, 
+                    descricao: `Matrícula ${data.MATRICULA}`, 
+                    detalhes: `Motivo: ${data.MOTIVO_INATIVACAO || 'Inativação'}`, 
+                    icone: 'fa-user-slash', 
+                    cor: 'red' 
+                });
+            }
+        });
+
         timeline.sort((a, b) => new Date(b.data_ordenacao).getTime() - new Date(a.data_ordenacao).getTime());
         res.json({ pessoal: pessoa, tipoPerfil, vinculosAtivos, historico: timeline, atividadesEstudantis: { capacitacoes: [] } });
     } catch (e: any) { res.status(500).json({ message: 'Erro Dossiê: ' + e.message }); }

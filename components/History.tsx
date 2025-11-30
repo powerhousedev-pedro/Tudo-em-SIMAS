@@ -8,10 +8,7 @@ import { UserSession, AppContextProps } from '../types';
 interface HistoryProps extends AppContextProps {}
 
 const VIEWS = [
-    { id: 'AUDITORIA', label: 'Auditoria do Sistema', icon: 'fas fa-shield-alt' },
-    { id: 'CONTRATO_HISTORICO', label: 'Histórico de Contratos', icon: 'fas fa-file-contract' },
-    { id: 'ALOCACAO_HISTORICO', label: 'Histórico de Alocações', icon: 'fas fa-map-marked-alt' },
-    { id: 'INATIVOS', label: 'Arquivo de Inativos', icon: 'fas fa-archive' }
+    { id: 'AUDITORIA', label: 'Auditoria e Arquivo Morto', icon: 'fas fa-shield-alt' }
 ];
 
 export const History: React.FC<HistoryProps> = ({ showToast }) => {
@@ -25,23 +22,18 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     };
     const session = getSession();
 
-    // Logic: Audit visible only for Managers or Coordination
-    const allowedViews = useMemo(() => {
-        const isAllowedAudit = session.papel === 'COORDENAÇÃO' || session.isGerente;
-        return VIEWS.filter(view => {
-            if (view.id === 'AUDITORIA' && !isAllowedAudit) return false;
-            return true;
-        });
-    }, [session.papel, session.isGerente]);
+    // Logic: Audit visible ONLY for Managers/Coordinators
+    // Operacionais não veem Auditoria
+    const canAccess = session.papel === 'COORDENAÇÃO' || session.isGerente;
 
-    const [currentView, setCurrentView] = useState(allowedViews[0]?.id || '');
+    const [currentView, setCurrentView] = useState('AUDITORIA');
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     
     // UI State for specific actions
     const [restoringId, setRestoringId] = useState<string | null>(null); // Controls Spinner
     const [pendingRestoreId, setPendingRestoreId] = useState<string | null>(null); // Controls Modal
-    
+
     // Modal State
     const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
 
@@ -66,36 +58,30 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     }, []);
 
     useEffect(() => {
-        if (currentView) {
+        if (canAccess) {
             loadData();
             setActiveFilters({});
             setGlobalSearch('');
         }
-    }, [currentView]);
+    }, [canAccess]);
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const res = await api.fetchEntity(currentView);
-            // Default Sort: Try DATE fields or fallback to index
-            if (res.length > 0) {
-                const dateKeys = Object.keys(res[0]).filter(k => k.includes('DATA') || k === 'DATE');
-                if (dateKeys.length > 0) {
-                    const key = dateKeys[0];
-                    res.sort((a: any, b: any) => new Date(b[key]).getTime() - new Date(a[key]).getTime());
-                }
-            }
+            const res = await api.fetchEntity('Auditoria');
+            // Ordenar por data decrescente
+            res.sort((a: any, b: any) => new Date(b.DATA_HORA).getTime() - new Date(a.DATA_HORA).getTime());
             setData(res);
         } catch (e) {
-            showToast('error', `Erro ao carregar dados de ${currentView}.`);
+            showToast('error', `Erro ao carregar auditoria.`);
         } finally {
             setLoading(false);
         }
     };
 
     // Abre o modal de confirmação
-    const initiateRestore = (idLog: string) => {
-        setPendingRestoreId(idLog);
+    const initiateRestore = (id: string) => {
+        setPendingRestoreId(id);
     };
 
     // Executa a ação real após confirmação no modal
@@ -105,6 +91,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         setRestoringId(pendingRestoreId);
         try {
             const res = await api.restoreAuditLog(pendingRestoreId);
+
             if (res.success) {
                 showToast('success', res.message);
                 setPendingRestoreId(null); // Fecha o modal apenas no sucesso
@@ -121,24 +108,13 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
 
     // --- Dynamic Column Logic ---
     const columns = useMemo(() => {
-        if (currentView === 'AUDITORIA') {
-             return ['DATA_HORA', 'USUARIO', 'ACAO', 'TABELA_AFETADA', 'ID_REGISTRO_AFETADO', 'DETALHES'];
-        }
-        // For other views, use keys from DATA_MODEL if available, else infer from first item
-        if (DATA_MODEL[currentView]) {
-            return DATA_MODEL[currentView];
-        }
-        if (data.length > 0) {
-            return Object.keys(data[0]).filter(k => k !== 'hidden');
-        }
-        return [];
-    }, [currentView, data]);
+        return ['DATA_HORA', 'USUARIO', 'ACAO', 'TABELA_AFETADA', 'ID_REGISTRO_AFETADO', 'DETALHES'];
+    }, []);
 
     // --- Filter Logic ---
 
     const getUniqueValues = (key: string) => {
         const values = data.map(item => {
-            // Special handling for Auditoria Details which are complex objects rendered differently
             if (key === 'DETALHES') return null; 
             return String(item[key] || '');
         }).filter(v => v !== null);
@@ -187,7 +163,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
 
     // --- Sub-Component for Header with Filter ---
     const FilterHeader: React.FC<{ label: string, columnKey: string }> = ({ label, columnKey }) => {
-        // Skip filtering for complex/computed columns or specifically Details in Audit
         if (columnKey === 'DETALHES') {
              return <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Detalhes</th>;
         }
@@ -235,46 +210,34 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     };
 
     const renderCell = (item: any, col: string) => {
-        // Special Audit Rendering
-        if (currentView === 'AUDITORIA') {
-            if (col === 'DETALHES') {
-                 return (
-                    <button 
-                        onClick={() => setSelectedAudit(item)}
-                        className="px-4 py-1.5 rounded-full bg-white border border-gray-200 shadow-sm text-xs font-bold text-simas-dark hover:border-simas-cyan hover:text-simas-cyan transition-all flex items-center gap-2"
-                    >
-                        <i className="fas fa-eye text-[10px]"></i> Ver Detalhes
-                    </button>
-                 );
-            }
-            if (col === 'DATA_HORA') return new Date(item[col]).toLocaleString('pt-BR');
-            if (col === 'ACAO') {
-                return (
-                    <span className={`px-2 py-1 rounded-md text-xs font-bold uppercase tracking-wide
-                        ${item.ACAO === 'CRIAR' ? 'bg-green-100 text-green-700' : 
-                          item.ACAO === 'EDITAR' ? 'bg-blue-100 text-blue-700' : 
-                          item.ACAO === 'EXCLUIR' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}
-                    `}>
-                        {item.ACAO}
-                    </span>
-                );
-            }
+        if (col === 'DETALHES') {
+             return (
+                <button 
+                    onClick={() => setSelectedAudit(item)}
+                    className="px-4 py-1.5 rounded-full bg-white border border-gray-200 shadow-sm text-xs font-bold text-simas-dark hover:border-simas-cyan hover:text-simas-cyan transition-all flex items-center gap-2"
+                >
+                    <i className="fas fa-eye text-[10px]"></i> Ver
+                </button>
+             );
+        }
+        if (col === 'DATA_HORA') return new Date(item[col]).toLocaleString('pt-BR');
+        if (col === 'ACAO') {
+            return (
+                <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide
+                    ${item.ACAO === 'CRIAR' ? 'bg-green-100 text-green-700' : 
+                      item.ACAO === 'EDITAR' ? 'bg-blue-100 text-blue-700' : 
+                      item.ACAO === 'EXCLUIR' ? 'bg-red-100 text-red-700' : 
+                      item.ACAO === 'ARQUIVAR' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                      item.ACAO === 'INATIVAR' ? 'bg-gray-200 text-gray-700 border border-gray-300' :
+                      item.ACAO === 'RESTAURAR' ? 'bg-cyan-100 text-cyan-700 border border-cyan-200' :
+                      'bg-gray-100 text-gray-700'}
+                `}>
+                    {item.ACAO}
+                </span>
+            );
         }
 
-        // Generic Rendering
         let val = item[col];
-        
-        // Date Formatting
-        if (typeof val === 'string' && (col.includes('DATA') || col.match(/^\d{4}-\d{2}-\d{2}/))) {
-             // Simple regex check for ISO date or YYYY-MM-DD
-             if (val.match(/^\d{4}-\d{2}-\d{2}/)) {
-                 try { val = new Date(val).toLocaleDateString('pt-BR'); } catch(e){}
-             }
-        }
-
-        // CPF Formatting
-        if (col === 'CPF' && val) val = validation.formatCPF(val);
-        
         return <span className="text-sm text-gray-600 truncate block max-w-[200px]" title={String(val)}>{val}</span>;
     };
 
@@ -290,7 +253,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         try { newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}'); } catch(e){}
 
         // Cores baseadas na ação
-        let cardClass = "bg-white border-gray-200"; // Padrão/Editar
+        let cardClass = "bg-white border-gray-200"; 
         let headerIcon = "fa-pen text-simas-blue";
         
         if (action === 'CRIAR') {
@@ -299,11 +262,23 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         } else if (action === 'EXCLUIR') {
             cardClass = "bg-red-50 border-red-200";
             headerIcon = "fa-trash-alt text-red-600";
+        } else if (action === 'ARQUIVAR') {
+            cardClass = "bg-orange-50 border-orange-200";
+            headerIcon = "fa-archive text-orange-600";
+        } else if (action === 'INATIVAR') {
+            cardClass = "bg-gray-100 border-gray-300";
+            headerIcon = "fa-user-slash text-gray-600";
+        } else if (action === 'RESTAURAR') {
+            cardClass = "bg-cyan-50 border-cyan-200";
+            headerIcon = "fa-undo text-cyan-600";
         }
 
-        // Definir qual conjunto de chaves mostrar
-        const dataDisplay = action === 'EXCLUIR' ? oldData : (action === 'CRIAR' ? newData : { ...oldData, ...newData });
+        // Para Restaurar ou Criar, mostramos o VALOR_NOVO. Para os outros, VALOR_ANTIGO.
+        const dataDisplay = (action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR') ? oldData : (action === 'CRIAR' || action === 'RESTAURAR' ? newData : { ...oldData, ...newData });
         const keys = Object.keys(dataDisplay).sort();
+
+        // Extrai metadados importantes para mostrar no topo
+        const motivo = oldData.MOTIVO_ARQUIVAMENTO || oldData.MOTIVO_INATIVACAO || oldData.MOTIVO_MUDANCA || newData.MOTIVO_ARQUIVAMENTO;
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
@@ -314,11 +289,13 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                         <div>
                             <h3 className="font-bold text-lg text-simas-dark flex items-center gap-2">
                                 <i className={`fas ${headerIcon}`}></i>
-                                Auditoria: {action}
+                                {action}: {selectedAudit.TABELA_AFETADA}
                             </h3>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                                Registro: {selectedAudit.ID_REGISTRO_AFETADO} • Tabela: {selectedAudit.TABELA_AFETADA}
-                            </p>
+                            {motivo && (
+                                <p className="text-sm font-bold text-gray-800 mt-1">
+                                    Motivo: "{motivo}"
+                                </p>
+                            )}
                         </div>
                         <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-black/10 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
                     </div>
@@ -326,15 +303,13 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                     {/* Conteúdo Scrollável */}
                     <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
                         {keys.map(key => {
-                            if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null; // Ocultar campos técnicos irrelevantes
+                            if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null; 
 
                             let content;
                             
                             if (action === 'EDITAR') {
                                 const oldVal = oldData[key];
                                 const newVal = newData[key];
-                                
-                                // Verifica mudança (conversão para string para comparação simples)
                                 const hasChanged = JSON.stringify(oldVal) !== JSON.stringify(newVal);
 
                                 if (hasChanged) {
@@ -349,11 +324,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                         </div>
                                     );
                                 } else {
-                                    // Valor inalterado
                                     content = <span className="text-gray-600 font-medium text-sm">{String(newVal === null || newVal === undefined ? '' : newVal)}</span>;
                                 }
                             } else {
-                                // CRIAR ou EXCLUIR (mostra o valor plano)
                                 const val = dataDisplay[key];
                                 content = <span className="text-gray-800 font-medium text-sm">{String(val === null || val === undefined ? '' : val)}</span>;
                             }
@@ -377,17 +350,29 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         );
     };
 
+    if (!canAccess) {
+        return (
+            <div className="flex h-full items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <i className="fas fa-lock text-4xl text-gray-300 mb-4"></i>
+                    <h2 className="text-xl font-bold text-gray-500">Acesso Restrito</h2>
+                    <p className="text-sm text-gray-400">Você não tem permissão para acessar a auditoria.</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex h-full bg-gray-50 overflow-hidden">
             
             {/* Sidebar Navigation */}
             <div className="w-64 bg-white border-r border-gray-200 flex flex-col flex-none z-20 shadow-sm">
                 <div className="p-6 border-b border-gray-100">
-                    <h2 className="text-xl font-black text-simas-dark tracking-brand uppercase leading-none">Arquivo Morto</h2>
-                    <p className="text-xs text-gray-400 mt-1">Consultas históricas</p>
+                    <h2 className="text-xl font-black text-simas-dark tracking-brand uppercase leading-none">Arquivo Central</h2>
+                    <p className="text-xs text-gray-400 mt-1">Histórico e Auditoria</p>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-1">
-                    {allowedViews.map(view => (
+                    {VIEWS.map(view => (
                         <button
                             key={view.id}
                             onClick={() => setCurrentView(view.id)}
@@ -411,14 +396,12 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 {/* Top Bar */}
                 <div className="px-8 py-6 bg-white border-b border-gray-200 flex justify-between items-center shadow-sm z-10">
                     <div>
-                        <h1 className="text-2xl font-black text-simas-dark uppercase tracking-brand">{VIEWS.find(v => v.id === currentView)?.label}</h1>
+                        <h1 className="text-2xl font-black text-simas-dark uppercase tracking-brand">Auditoria do Sistema</h1>
                         <p className="text-sm text-gray-500 mt-1">
-                            {data.length} registros encontrados
-                            {Object.keys(activeFilters).length > 0 && <span className="text-simas-accent ml-2 font-medium">(Filtrado)</span>}
+                            {filteredData.length} registros encontrados
                         </p>
                     </div>
                     
-                    {/* Global Search Bar */}
                     <div className="relative w-80">
                         <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
                         <input 
@@ -450,39 +433,40 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                 label={col.replace(/_/g, ' ')} 
                                             />
                                         ))}
-                                        {currentView === 'AUDITORIA' && <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Ações</th>}
+                                        <th className="px-6 py-4 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Restaurar</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {filteredData.length === 0 ? (
                                         <tr>
-                                            <td colSpan={columns.length + (currentView === 'AUDITORIA' ? 1 : 0)} className="px-6 py-12 text-center text-gray-400 italic">
+                                            <td colSpan={columns.length + 1} className="px-6 py-12 text-center text-gray-400 italic">
                                                 Nenhum registro encontrado.
                                             </td>
                                         </tr>
                                     ) : (
-                                        filteredData.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-gray-50 transition-colors group">
-                                                {columns.map(col => (
-                                                    <td key={col} className="px-6 py-4 whitespace-nowrap">
-                                                        {renderCell(item, col)}
-                                                    </td>
-                                                ))}
-                                                {currentView === 'AUDITORIA' && (
+                                        filteredData.map((item, idx) => {
+                                            const isRestorable = item.ACAO === 'EXCLUIR' || item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR';
+                                            return (
+                                                <tr key={idx} className="hover:bg-gray-50 transition-colors group">
+                                                    {columns.map(col => (
+                                                        <td key={col} className="px-6 py-4 whitespace-nowrap">
+                                                            {renderCell(item, col)}
+                                                        </td>
+                                                    ))}
                                                     <td className="px-6 py-4 text-right">
-                                                        {(item.ACAO === 'CRIAR' || item.ACAO === 'EDITAR' || item.ACAO === 'EXCLUIR') && (
+                                                        {isRestorable && (
                                                             <button 
                                                                 onClick={() => initiateRestore(item.ID_LOG)}
-                                                                className="p-2 rounded-lg text-gray-300 hover:text-orange-500 hover:bg-orange-50 transition-all"
-                                                                title="Reverter Ação"
+                                                                className={`p-2 rounded-lg transition-all ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'text-green-500 hover:bg-green-50' : 'text-gray-300 hover:text-orange-500 hover:bg-orange-50'}`}
+                                                                title={item.ACAO === 'ARQUIVAR' ? "Desarquivar" : "Desfazer Exclusão"}
                                                             >
-                                                                <i className="fas fa-undo"></i>
+                                                                <i className={`fas ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'fa-box-open' : 'fa-undo'}`}></i>
                                                             </button>
                                                         )}
                                                     </td>
-                                                )}
-                                            </tr>
-                                        ))
+                                                </tr>
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>
@@ -491,20 +475,19 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 </div>
             </div>
 
-            {/* Modal de Auditoria (Detalhes) */}
+            {/* Modals */}
             {renderAuditModal()}
 
-            {/* Modal de Confirmação de Restauração */}
             {pendingRestoreId && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in px-4">
                     <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 border border-white/20 animate-slide-in">
                         <div className="flex flex-col items-center text-center">
                             <div className="w-16 h-16 bg-yellow-50 rounded-full flex items-center justify-center mb-4 border border-yellow-100">
-                                <i className="fas fa-exclamation-triangle text-2xl text-yellow-500"></i>
+                                <i className="fas fa-history text-2xl text-yellow-500"></i>
                             </div>
                             <h3 className="text-xl font-extrabold text-simas-dark mb-2">Confirmar Restauração</h3>
                             <p className="text-sm text-gray-500 mb-6 px-4 leading-relaxed">
-                                Você está prestes a desfazer uma ação histórica. O registro voltará ao estado anterior e este log de auditoria será apagado permanentemente.
+                                Você está prestes a restaurar este registro do arquivo/auditoria para a lista ativa. O registro de log será removido após a restauração.
                             </p>
                             
                             <div className="flex gap-3 w-full">
@@ -521,7 +504,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                     isLoading={!!restoringId}
                                     className="flex-1 justify-center"
                                 >
-                                    Confirmar Restauração
+                                    Restaurar
                                 </Button>
                             </div>
                         </div>
