@@ -354,10 +354,7 @@ app.get('/api/:entity', authenticateToken, async (req: any, res: any) => {
     }
 });
 
-// [Outros endpoints de CRUD, Ações Específicas e Relatórios Fixos mantidos identicos ao original, apenas com o novo endpoint custom adicionado acima]
-
 app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    // ... Implementação padrão (mantida)
     const { entity } = req.params;
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
@@ -382,7 +379,6 @@ app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, re
 });
 
 app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    // ... Implementação padrão (mantida)
     const { entity, id } = req.params;
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
@@ -409,7 +405,6 @@ app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest,
 });
 
 app.delete('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    // ... Implementação padrão (mantida)
     const { entity, id } = req.params;
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
@@ -522,19 +517,6 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
                 return { VINCULACAO: vinculacao, LOTACAO: lotacao, CARGO: cargo, DETALHES: detailsParts.join(', ') };
             });
             result = { panorama, quantitativo };
-        } else if (reportName === 'analiseCustos') {
-            const contratos = await prisma.contrato.findMany({ include: { vaga: { include: { lotacao: true, cargo: true } } } });
-            const custoMap: Record<string, number> = {};
-            contratos.forEach((c: any) => {
-                const lotacao = c.vaga?.lotacao?.LOTACAO || 'N/A';
-                const salario = parseFloat(c.vaga?.cargo?.SALARIO || '0');
-                custoMap[lotacao] = (custoMap[lotacao] || 0) + salario;
-            });
-            const sortedCustos = Object.entries(custoMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
-            result = { graficos: { custoPorLotacao: sortedCustos }, tabela: { colunas: ['Lotação', 'Custo Total'], linhas: Object.entries(custoMap).map(([k, v]) => [k, v]) } };
-        } else if (reportName === 'atividadeUsuarios') {
-            const logs = await prisma.auditoria.findMany({ orderBy: { DATA_HORA: 'desc' }, take: 100 });
-            result = { colunas: ['Data', 'Usuário', 'Ação', 'Tabela', 'ID'], linhas: logs.map((l: any) => [new Date(l.DATA_HORA).toLocaleString(), l.USUARIO, l.ACAO, l.TABELA_AFETADA, l.ID_REGISTRO_AFETADO]) };
         } else {
             return res.status(404).json({ message: 'Relatório não implementado' });
         }

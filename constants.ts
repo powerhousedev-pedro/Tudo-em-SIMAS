@@ -61,6 +61,75 @@ export const FK_MAPPING: { [field: string]: string } = {
     'ID_EXERCICIO': 'Exercicio'
 };
 
+export const FIELD_LABELS: Record<string, Record<string, string>> = {
+  'Global': {
+      'NOME': 'Nome Completo',
+      'CPF': 'CPF',
+      'MATRICULA': 'Matrícula',
+      'TELEFONE': 'Telefone de Contato',
+      'EMAIL': 'E-mail',
+      'DATA_DE_NASCIMENTO': 'Data de Nascimento',
+      'BAIRRO': 'Bairro Residencial',
+      'ESCOLARIDADE': 'Nível de Escolaridade',
+      'FORMACAO': 'Formação Acadêmica',
+      'SEXO': 'Gênero',
+      'USUARIO': 'Usuário Responsável',
+      'DATA_HORA': 'Data e Hora',
+      'ACAO': 'Ação Realizada'
+  },
+  'Contrato': {
+      'ID_CONTRATO': 'Código do Contrato (Atual)',
+      'DATA_DO_CONTRATO': 'Data de Início (Contrato Atual)',
+      'ID_FUNCAO': 'Função Contratada',
+      'ID_VAGA': 'Vaga Vinculada'
+  },
+  'ContratoHistorico': {
+      'ID_CONTRATO': 'Código do Contrato (Arquivo)',
+      'DATA_DO_CONTRATO': 'Início do Contrato Arquivado',
+      'DATA_ARQUIVAMENTO': 'Data de Encerramento',
+      'MOTIVO_ARQUIVAMENTO': 'Motivo do Encerramento',
+      'ID_FUNCAO': 'Função Exercida (Histórico)'
+  },
+  'Alocacao': {
+      'DATA_INICIO': 'Início na Lotação (Atual)',
+      'ID_LOTACAO': 'Lotação Atual',
+      'ID_FUNCAO': 'Função Desempenhada'
+  },
+  'AlocacaoHistorico': {
+      'DATA_INICIO': 'Início na Lotação (Antiga)',
+      'DATA_FIM': 'Saída da Lotação',
+      'MOTIVO_MUDANCA': 'Motivo da Mudança',
+      'ID_LOTACAO': 'Lotação Anterior'
+  },
+  'Servidor': {
+      'DATA_MATRICULA': 'Data de Admissão',
+      'VINCULO': 'Tipo de Vínculo',
+      'PREFIXO_MATRICULA': 'Prefixo'
+  },
+  'Vaga': {
+      'STATUS_VAGA': 'Situação da Vaga',
+      'BLOQUEADA': 'Está Bloqueada?',
+      'ID_LOTACAO': 'Lotação da Vaga',
+      'ID_CARGO': 'Cargo da Vaga'
+  },
+  'Inativo': {
+      'DATA_INATIVACAO': 'Data da Inativação',
+      'MOTIVO': 'Motivo da Inativação',
+      'PROCESSO': 'Processo Administrativo'
+  },
+  'Lotacao': {
+      'LOTACAO': 'Nome da Lotação',
+      'TIPO_DA_LOTACAO': 'Tipo de Unidade',
+      'COMPLEXIDADE': 'Nível de Complexidade'
+  },
+  'Atendimento': {
+      'TIPO_PEDIDO': 'Tipo de Solicitação',
+      'STATUS_PEDIDO': 'Status do Fluxo',
+      'DATA_ENTRADA': 'Data de Abertura',
+      'DATA_AGENDAMENTO': 'Data Agendada/Revisão'
+  }
+};
+
 export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   // --- COMPARTILHADO / GERAL ---
   'Pessoa': {

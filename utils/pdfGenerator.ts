@@ -62,7 +62,7 @@ export const generateReportPDF = (
             });
         }
     }
-    // Generic Table Handling (Fallback for custom or future reports)
+    // Fallback for custom or future generic tables
     else if ((data.colunas && data.linhas) || data.tabela) {
         const cols = data.colunas || data.tabela?.colunas || [];
         const rows = data.linhas || data.tabela?.linhas || [];
