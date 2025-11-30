@@ -39,6 +39,14 @@ export const usePendingReviews = () => {
   });
 };
 
+export const useSystemAlerts = () => {
+    return useQuery({
+        queryKey: ['alerts'],
+        queryFn: api.getSystemAlerts,
+        refetchInterval: 300000 // Poll every 5 minutes
+    });
+};
+
 export const useReportData = (reportId: string) => {
   return useQuery({
     queryKey: ['report', reportId],

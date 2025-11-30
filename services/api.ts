@@ -1,19 +1,8 @@
-
-
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
 const API_BASE_URL = 'https://tudoemsimas.powerhouseapp.de/api';
 const TOKEN_KEY = 'simas_auth_token';
-
-// --- CACHE & REQUEST MANAGEMENT ---
-interface CacheEntry {
-    data: any;
-    timestamp: number;
-}
-
-const cache: Map<string, CacheEntry> = new Map();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutos de cache
 
 // MAPEAMENTO DE ENTIDADES (Frontend -> Database)
 const ENTITY_MAP: Record<string, string> = {
@@ -66,15 +55,12 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        // Backend now returns sanitized 'message', but we double check here
         let errorMessage = errorData.message || errorData.error || response.statusText;
         
-        // Final Safety Net: If backend leaked a Prisma error or code, sanitize it here
         if (errorMessage.includes('Prisma') || errorMessage.includes('invocation') || errorMessage.includes('Internal Server Error')) {
             errorMessage = 'Ocorreu um erro técnico no servidor. Tente novamente mais tarde.';
         }
         
-        // Handle HTML response (e.g. Nginx 500/502)
         if (errorMessage.includes('<!DOCTYPE html>')) {
              errorMessage = 'Servidor temporariamente indisponível.';
         }
@@ -86,15 +72,12 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
   } catch (error: any) {
     if (error.name === 'AbortError') throw error;
     
-    // Transform Connection Refused / Network Error
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
         throw new Error('Não foi possível conectar ao servidor. Verifique sua internet.');
     }
 
-    // Pass through the sanitized error
     const isClientError = error.message && (error.message.includes('Senha incorreta') || error.message.includes('Usuário'));
     if (!isClientError) {
-        // Log original error for dev debugging, but user sees the friendly one
         console.warn(`API Error (${method} ${endpoint}):`, error);
     }
     throw error;
@@ -102,40 +85,29 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
 }
 
 // --- MÉTODOS PÚBLICOS DA API ---
+// Agora apenas retornam Promises, sem gerenciar cache
 export const api = {
   login: async (usuario: string, senha: string) => request('/auth/login', 'POST', { usuario, senha }),
 
-  // Função principal: Busca dados JÁ ENRIQUECIDOS pelo backend
-  fetchEntity: async (entityName: string, forceRefresh = false, searchTerm = ''): Promise<any[]> => {
+  fetchEntity: async (entityName: string, searchTerm = '', page = 1, limit = 0): Promise<any[]> => {
     const baseEndpoint = getEndpoint(entityName);
-    const query = searchTerm ? `?search=${encodeURIComponent(searchTerm)}` : '';
-    const fullUrl = baseEndpoint + query;
-    const cacheKey = fullUrl;
+    // Prep for server-side pagination, currently query is just search
+    const queryParams = new URLSearchParams();
+    if (searchTerm) queryParams.append('search', searchTerm);
+    if (page > 1) queryParams.append('page', page.toString());
+    if (limit > 0) queryParams.append('limit', limit.toString());
 
-    // 1. Verificar Cache (apenas se não for refresh e não for busca)
-    const now = Date.now();
-    const cached = cache.get(cacheKey);
-    if (!forceRefresh && !searchTerm && cached && (now - cached.timestamp < CACHE_TTL)) {
-        return Promise.resolve(JSON.parse(JSON.stringify(cached.data))); // Clone to avoid mutation
-    }
+    const queryString = queryParams.toString();
+    const fullUrl = baseEndpoint + (queryString ? `?${queryString}` : '');
 
     try {
         const data = await request(fullUrl);
-        
-        // Garante que o retorno seja sempre um array
         if (!Array.isArray(data)) {
             console.warn(`fetchEntity: API retornou não-array para ${entityName}`, data);
             return [];
         }
-
-        // Salvar no cache se não for busca
-        if (!searchTerm) {
-            cache.set(cacheKey, { data: data, timestamp: Date.now() });
-        }
-
         return data;
     } catch (err) {
-        // Use Warn instead of Error for fetches to avoid alarming console spam for non-critical failures (e.g. missing tables)
         console.warn(`Falha ao buscar ${entityName}:`, err);
         return [];
     }
@@ -143,67 +115,59 @@ export const api = {
 
   createRecord: async (entityName: string, data: RecordData) => {
     const endpoint = getEndpoint(entityName);
-    const res = await request(endpoint, 'POST', data);
-    if (res.success) cache.clear(); // Invalida cache global simples para garantir consistência
-    return res;
+    return request(endpoint, 'POST', data);
   },
 
   updateRecord: async (entityName: string, pkField: string, pkValue: string, data: RecordData) => {
     const endpoint = getEndpoint(entityName);
-    const res = await request(`${endpoint}/${pkValue}`, 'PUT', data);
-    if (res.success) cache.clear();
-    return res;
+    return request(`${endpoint}/${pkValue}`, 'PUT', data);
   },
 
   deleteRecord: async (entityName: string, pkField: string, pkValue: string) => {
     const endpoint = getEndpoint(entityName);
-    const res = await request(`${endpoint}/${pkValue}`, 'DELETE');
-    if (res.success) cache.clear();
-    return res;
+    return request(`${endpoint}/${pkValue}`, 'DELETE');
   },
 
   getUsers: async () => request('/Usuario'),
   deleteUser: async (usuarioId: string) => request(`/Usuario/${usuarioId}`, 'DELETE'),
 
   toggleVagaBloqueada: async (idVaga: string) => {
-    const res = await request(`/Vaga/${idVaga}/toggle-lock`, 'POST');
-    cache.clear();
-    return res;
+    return request(`/Vaga/${idVaga}/toggle-lock`, 'POST');
   },
 
   setExercicio: async (idVaga: string, idLotacao: string) => {
-      const res = await request('/Exercicio', 'POST', { 
+      return request('/Exercicio', 'POST', { 
           ID_EXERCICIO: 'EXE' + Date.now(), 
           ID_VAGA: idVaga, 
           ID_LOTACAO: idLotacao 
       });
-      cache.clear();
-      return res;
   },
 
   getDossiePessoal: async (cpf: string): Promise<DossierData> => request(`/Pessoa/${cpf}/dossier`),
 
   restoreAuditLog: async (idLog: string) => {
-    const res = await request(`/Auditoria/${idLog}/restore`, 'POST');
-    cache.clear(); 
-    return res;
+    return request(`/Auditoria/${idLog}/restore`, 'POST');
   },
 
   processDailyRoutines: async () => console.log('Syncing daily routines...'),
 
   getRevisoesPendentes: async () => {
     try {
+        // This is still heavy, but we will optimize later with a dedicated endpoint
         const data = await api.fetchEntity('Atendimento'); 
         if (!Array.isArray(data)) return [];
         
         const today = new Date().toISOString().split('T')[0];
         
         return data.filter((a: any) => {
-            // Must be Pending AND Date must be today or in the past
             return a.STATUS_AGENDAMENTO === 'Pendente' && 
                    (a.DATA_AGENDAMENTO && a.DATA_AGENDAMENTO <= today);
         });
     } catch (e) { return []; }
+  },
+
+  getSystemAlerts: async () => {
+      return request('/alerts');
   },
 
   getActionContext: async (idAtendimento: string): Promise<ActionContext> => {
@@ -219,6 +183,7 @@ export const api = {
     const promises: Promise<any>[] = [];
 
     // Busca dependências enriquecidas diretamente
+    // React Query will eventually handle these dependencies via useQuery prefetching
     if (acao.includes('Contrato')) {
         promises.push(api.fetchEntity('Vaga').then(d => lookups['Vaga'] = d));
         promises.push(api.fetchEntity('Funcao').then(d => lookups['Funcao'] = d));
@@ -231,7 +196,6 @@ export const api = {
     
     await Promise.all(promises);
 
-    // O objeto atd já vem enriquecido do backend com NOME_PESSOA, etc.
     return { atendimento: atd, lookups, fields };
   },
 
@@ -255,14 +219,12 @@ export const api = {
           if (atd.TIPO_DE_ACAO === 'EDITAR' && data.ID_ALOCACAO) {
                await api.createRecord('Alocacao', data); 
           } else {
-               // Generic Update
                const pkKey = targetEntity === 'Contrato' ? 'ID_CONTRATO' : `ID_${atd.ENTIDADE_ALVO.toUpperCase()}`;
                if (data[pkKey]) await api.updateRecord(atd.ENTIDADE_ALVO, pkKey, data[pkKey], data);
           }
       }
       
       await api.updateRecord('Atendimento', 'ID_ATENDIMENTO', idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
-      cache.clear();
       return { success: true, message: 'Ação executada com sucesso.' };
   },
   
