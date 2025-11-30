@@ -689,18 +689,6 @@ export const Reports: React.FC = () => {
 
       return (
           <div className="space-y-6 animate-fade-in">
-              {/* TOP BAR ACTIONS */}
-              <div className="flex justify-end gap-3 mb-2">
-                  <Button variant="secondary" icon="fas fa-folder-open" onClick={handleOpenLoadModal} className="text-xs py-2 h-9">
-                      Meus Relatórios
-                  </Button>
-                  {customEntity && (
-                      <Button variant="secondary" icon="fas fa-save" onClick={() => setSaveModalOpen(true)} className="text-xs py-2 h-9">
-                          Salvar Modelo
-                      </Button>
-                  )}
-              </div>
-
               {/* MAIN BUILDER BOX - Layout fixo de Split Pane */}
               <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden flex flex-col md:flex-row h-[600px]">
                   
@@ -1118,9 +1106,22 @@ export const Reports: React.FC = () => {
                             {currentReport === 'customGenerator' ? 'Business Intelligence: Crie consultas complexas cruzando tabelas.' : 'Visualização atualizada do sistema.'}
                         </p>
                     </div>
-                    {currentReport !== 'customGenerator' && (
-                        <Button onClick={handleExportFixedPDF} icon="fas fa-file-pdf">Exportar PDF</Button>
-                    )}
+                    <div className="flex gap-3">
+                        {currentReport === 'customGenerator' ? (
+                            <>
+                                {customEntity && (
+                                    <Button variant="secondary" icon="fas fa-save" onClick={() => setSaveModalOpen(true)}>
+                                        Salvar Modelo
+                                    </Button>
+                                )}
+                                <Button variant="secondary" icon="fas fa-folder-open" onClick={handleOpenLoadModal}>
+                                    Meus Relatórios
+                                </Button>
+                            </>
+                        ) : (
+                            <Button onClick={handleExportFixedPDF} icon="fas fa-file-pdf">Exportar PDF</Button>
+                        )}
+                    </div>
                 </header>
 
                 {loading ? (

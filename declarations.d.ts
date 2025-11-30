@@ -37,3 +37,12 @@ declare module 'jspdf' {
 declare module 'jspdf-autotable' {
   export default function autoTable(doc: any, options: any): any;
 }
+
+declare module '@prisma/client' {
+  export class PrismaClient {
+    constructor(options?: any);
+    [key: string]: any;
+    $connect(): Promise<void>;
+    $disconnect(): Promise<void>;
+  }
+}
