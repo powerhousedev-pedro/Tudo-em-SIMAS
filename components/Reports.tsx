@@ -33,6 +33,8 @@ export const Reports: React.FC = () => {
 
   // --- ESTADO DO GERADOR PERSONALIZADO ---
   const [customEntity, setCustomEntity] = useState<string>('');
+  const [availableJoins, setAvailableJoins] = useState<string[]>([]);
+  const [selectedJoins, setSelectedJoins] = useState<string[]>([]);
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [customFilters, setCustomFilters] = useState<{ field: string, operator: string, value: string }[]>([]);
@@ -60,22 +62,55 @@ export const Reports: React.FC = () => {
     load();
   }, [currentReport]);
 
-  // Resetar gerador ao mudar de entidade
+  // Identificar Joins Disponíveis (Baseado em DATA_MODEL e FK_MAPPING)
   useEffect(() => {
       if (!customEntity) {
+          setAvailableJoins([]);
+          setSelectedJoins([]);
           setAvailableColumns([]);
           setSelectedColumns([]);
           setCustomResults([]);
           setGenerated(false);
           return;
       }
-      const cols = DATA_MODEL[customEntity] || [];
+
+      // Identificar relacionamentos possíveis onde a tabela atual tem a FK
+      const currentFields = DATA_MODEL[customEntity] || [];
+      const potentialJoins = currentFields
+        .map(field => FK_MAPPING[field])
+        .filter(entity => entity && entity !== customEntity);
+
+      setAvailableJoins([...new Set(potentialJoins)]);
+      setSelectedJoins([]);
+      
+      // Carregar colunas iniciais (só da tabela principal)
+      const cols = currentFields.map(f => `${customEntity}.${f}`);
       setAvailableColumns(cols);
-      setSelectedColumns(cols.slice(0, 5)); // Seleciona as 5 primeiras por padrão
+      setSelectedColumns(cols.slice(0, 5));
+      setCustomFilters([]);
       setCustomResults([]);
       setGenerated(false);
-      setCustomFilters([]);
   }, [customEntity]);
+
+  // Atualizar Colunas quando Joins mudam
+  useEffect(() => {
+      if (!customEntity) return;
+      
+      const primaryFields = (DATA_MODEL[customEntity] || []).map(f => `${customEntity}.${f}`);
+      let joinFields: string[] = [];
+
+      selectedJoins.forEach(joinEntity => {
+          const fields = DATA_MODEL[joinEntity] || [];
+          // Prefix columns with Joined Entity Name
+          joinFields = [...joinFields, ...fields.map(f => `${joinEntity}.${f}`)];
+      });
+
+      setAvailableColumns([...primaryFields, ...joinFields]);
+      // Não reseta selectedColumns se já tiver algo, apenas adiciona se estiver vazio
+      if (selectedColumns.length === 0) {
+          setSelectedColumns(primaryFields.slice(0, 5));
+      }
+  }, [selectedJoins, customEntity]);
 
   // --- LÓGICA DO GERADOR ---
 
@@ -96,13 +131,14 @@ export const Reports: React.FC = () => {
       if (!customEntity) return;
       setLoading(true);
       try {
-          // Busca dados brutos
-          let rawData = await api.fetchEntity(customEntity);
+          // Busca dados brutos com Joins no servidor
+          let rawData = await api.generateCustomReport(customEntity, selectedJoins);
 
           // Aplica Filtros no Cliente (Client-side filtering para flexibilidade)
           if (customFilters.length > 0) {
-              rawData = rawData.filter(item => {
+              rawData = rawData.filter((item: any) => {
                   return customFilters.every(filter => {
+                      // O filtro agora precisa lidar com chaves achatadas 'Entity.Field'
                       const itemValue = String(item[filter.field] || '').toLowerCase();
                       const filterValue = filter.value.toLowerCase();
                       
@@ -292,80 +328,125 @@ export const Reports: React.FC = () => {
           <div className="space-y-6 animate-fade-in">
               {/* CONFIGURAÇÃO DO RELATÓRIO */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {/* Seleção de Entidade */}
-                      <div>
-                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">1. Fonte de Dados</label>
-                          <select 
-                            className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none"
-                            value={customEntity}
-                            onChange={(e) => setCustomEntity(e.target.value)}
-                          >
-                              <option value="">Selecione uma tabela...</option>
-                              {availableEntities.map(key => (
-                                  <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
-                              ))}
-                          </select>
+                  
+                  {/* ETAPA 1: TABELA PRINCIPAL */}
+                  <div>
+                      <div className="flex items-center gap-2 mb-2">
+                          <span className="w-6 h-6 rounded-full bg-simas-dark text-white flex items-center justify-center text-xs font-bold">1</span>
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Fonte de Dados Principal</label>
                       </div>
-                      
-                      {/* Seleção de Colunas */}
-                      <div>
-                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">2. Colunas ({selectedColumns.length})</label>
-                          <div className="w-full h-32 border border-gray-200 rounded-xl bg-gray-50 overflow-y-auto p-2 grid grid-cols-2 gap-2">
-                              {availableColumns.map(col => (
-                                  <label key={col} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100 p-1 rounded">
+                      <select 
+                        className="w-full md:w-1/2 p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none transition-all focus:ring-2 focus:ring-simas-light/20"
+                        value={customEntity}
+                        onChange={(e) => setCustomEntity(e.target.value)}
+                      >
+                          <option value="">Selecione uma tabela...</option>
+                          {availableEntities.map(key => (
+                              <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
+                          ))}
+                      </select>
+                  </div>
+
+                  {/* ETAPA 2: CRUZAMENTO DE DADOS (JOINS) */}
+                  {customEntity && availableJoins.length > 0 && (
+                      <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                          <div className="flex items-center gap-2 mb-3">
+                              <span className="w-6 h-6 rounded-full bg-simas-blue text-white flex items-center justify-center text-xs font-bold">2</span>
+                              <label className="text-xs font-bold text-blue-700 uppercase tracking-widest">Cruzar dados com (Joins)</label>
+                          </div>
+                          <div className="flex flex-wrap gap-3">
+                              {availableJoins.map(joinEntity => (
+                                  <label key={joinEntity} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border ${selectedJoins.includes(joinEntity) ? 'bg-white border-simas-blue shadow-sm' : 'bg-transparent border-transparent hover:bg-white hover:border-gray-200'}`}>
                                       <input 
-                                        type="checkbox" 
-                                        checked={selectedColumns.includes(col)}
-                                        onChange={(e) => {
-                                            if (e.target.checked) setSelectedColumns([...selectedColumns, col]);
-                                            else setSelectedColumns(selectedColumns.filter(c => c !== col));
-                                        }}
-                                        className="text-simas-cyan rounded"
+                                          type="checkbox" 
+                                          checked={selectedJoins.includes(joinEntity)}
+                                          onChange={(e) => {
+                                              if (e.target.checked) setSelectedJoins([...selectedJoins, joinEntity]);
+                                              else setSelectedJoins(selectedJoins.filter(j => j !== joinEntity));
+                                          }}
+                                          className="text-simas-blue rounded focus:ring-simas-blue"
                                       />
-                                      {col}
+                                      <span className="text-sm font-medium text-gray-700">{ENTITY_CONFIGS[joinEntity]?.title || joinEntity}</span>
                                   </label>
                               ))}
                           </div>
-                      </div>
-                  </div>
-
-                  {/* Filtros */}
-                  {customEntity && (
-                      <div>
-                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">3. Filtros Aplicados</label>
-                          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                              <div className="flex flex-wrap gap-2 mb-4">
-                                  {customFilters.length === 0 && <span className="text-sm text-gray-400 italic">Nenhum filtro aplicado (mostrando tudo).</span>}
-                                  {customFilters.map((f, idx) => (
-                                      <div key={idx} className="flex items-center gap-2 bg-white border border-gray-200 px-3 py-1 rounded-full text-xs shadow-sm">
-                                          <span className="font-bold text-simas-dark">{f.field}</span>
-                                          <span className="text-gray-500">{f.operator}</span>
-                                          <span className="font-bold text-simas-cyan">"{f.value}"</span>
-                                          <button onClick={() => removeFilter(idx)} className="text-gray-400 hover:text-red-500 ml-1"><i className="fas fa-times"></i></button>
-                                      </div>
-                                  ))}
-                              </div>
-                              <div className="flex gap-2">
-                                  <select className="flex-1 p-2 rounded-lg border border-gray-200 text-sm" value={newFilter.field} onChange={e => setNewFilter({...newFilter, field: e.target.value})}>
-                                      <option value="">Campo...</option>
-                                      {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
-                                  </select>
-                                  <select className="w-32 p-2 rounded-lg border border-gray-200 text-sm" value={newFilter.operator} onChange={e => setNewFilter({...newFilter, operator: e.target.value})}>
-                                      <option value="contains">Contém</option>
-                                      <option value="equals">Igual</option>
-                                      <option value="starts">Começa com</option>
-                                      <option value="gt">Maior que</option>
-                                      <option value="lt">Menor que</option>
-                                  </select>
-                                  <input type="text" placeholder="Valor..." className="flex-1 p-2 rounded-lg border border-gray-200 text-sm" value={newFilter.value} onChange={e => setNewFilter({...newFilter, value: e.target.value})} />
-                                  <Button onClick={handleAddFilter} disabled={!newFilter.field || !newFilter.value} variant="secondary" className="px-4 py-2">Adicionar</Button>
-                              </div>
-                          </div>
+                          <p className="text-[10px] text-blue-400 mt-2 italic">* Apenas tabelas relacionadas diretamente disponíveis.</p>
                       </div>
                   )}
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* ETAPA 3: COLUNAS */}
+                      <div>
+                          <div className="flex items-center gap-2 mb-2">
+                              <span className="w-6 h-6 rounded-full bg-gray-400 text-white flex items-center justify-center text-xs font-bold">3</span>
+                              <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Colunas ({selectedColumns.length})</label>
+                          </div>
+                          <div className="w-full h-48 border border-gray-200 rounded-xl bg-gray-50 overflow-y-auto p-2 custom-scrollbar">
+                              {availableColumns.map(col => {
+                                  // Separar Tabela.Coluna para visualização melhor
+                                  const [table, field] = col.split('.');
+                                  const isPrimary = table === customEntity;
+                                  
+                                  return (
+                                      <label key={col} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100 p-1.5 rounded border-b border-gray-100 last:border-0">
+                                          <input 
+                                            type="checkbox" 
+                                            checked={selectedColumns.includes(col)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) setSelectedColumns([...selectedColumns, col]);
+                                                else setSelectedColumns(selectedColumns.filter(c => c !== col));
+                                            }}
+                                            className="text-simas-cyan rounded"
+                                          />
+                                          <span className={`font-bold ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{table}</span>
+                                          <span className="text-gray-400">/</span>
+                                          <span>{field}</span>
+                                      </label>
+                                  );
+                              })}
+                          </div>
+                      </div>
 
-                  <div className="flex justify-end pt-2">
+                      {/* ETAPA 4: FILTROS */}
+                      {customEntity && (
+                          <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                  <span className="w-6 h-6 rounded-full bg-gray-400 text-white flex items-center justify-center text-xs font-bold">4</span>
+                                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Filtros</label>
+                              </div>
+                              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 h-48 flex flex-col">
+                                  <div className="flex-1 overflow-y-auto mb-2 custom-scrollbar">
+                                    <div className="flex flex-wrap gap-2">
+                                        {customFilters.length === 0 && <span className="text-sm text-gray-400 italic">Nenhum filtro aplicado.</span>}
+                                        {customFilters.map((f, idx) => (
+                                            <div key={idx} className="flex items-center gap-2 bg-white border border-gray-200 px-3 py-1 rounded-full text-xs shadow-sm">
+                                                <span className="font-bold text-simas-dark">{f.field}</span>
+                                                <span className="text-gray-500">{f.operator}</span>
+                                                <span className="font-bold text-simas-cyan">"{f.value}"</span>
+                                                <button onClick={() => removeFilter(idx)} className="text-gray-400 hover:text-red-500 ml-1"><i className="fas fa-times"></i></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2 mt-auto">
+                                      <select className="flex-1 p-2 rounded-lg border border-gray-200 text-xs" value={newFilter.field} onChange={e => setNewFilter({...newFilter, field: e.target.value})}>
+                                          <option value="">Campo...</option>
+                                          {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
+                                      </select>
+                                      <select className="w-24 p-2 rounded-lg border border-gray-200 text-xs" value={newFilter.operator} onChange={e => setNewFilter({...newFilter, operator: e.target.value})}>
+                                          <option value="contains">Contém</option>
+                                          <option value="equals">Igual</option>
+                                          <option value="starts">Começa</option>
+                                      </select>
+                                      <input type="text" placeholder="Valor..." className="flex-1 p-2 rounded-lg border border-gray-200 text-xs" value={newFilter.value} onChange={e => setNewFilter({...newFilter, value: e.target.value})} />
+                                      <Button onClick={handleAddFilter} disabled={!newFilter.field || !newFilter.value} variant="secondary" className="px-3 py-1 text-xs">OK</Button>
+                                  </div>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="flex justify-end pt-4 border-t border-gray-100">
                       <Button onClick={handleGenerateCustom} disabled={!customEntity || selectedColumns.length === 0} isLoading={loading} icon="fas fa-play">
                           Gerar Relatório
                       </Button>
@@ -403,7 +484,7 @@ export const Reports: React.FC = () => {
                                       customResults.map((row, idx) => (
                                           <tr key={idx} className="hover:bg-gray-50 transition-colors">
                                               {selectedColumns.map(col => (
-                                                  <td key={`${idx}-${col}`} className="px-4 py-2 whitespace-nowrap text-gray-700 border-r border-gray-50 last:border-0">
+                                                  <td key={`${idx}-${col}`} className="px-4 py-2 whitespace-nowrap text-gray-700 border-r border-gray-50 last:border-0 text-xs">
                                                       {String(row[col] === null || row[col] === undefined ? '' : row[col])}
                                                   </td>
                                               ))}
