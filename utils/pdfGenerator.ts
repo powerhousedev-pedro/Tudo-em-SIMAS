@@ -26,7 +26,7 @@ export const generateReportPDF = (
 
     let currentY = 30;
 
-    // Totals Section (Simple Text)
+    // Totals Section
     if (data.totais) {
         doc.setTextColor(0, 0, 0);
         doc.setFontSize(12);
@@ -42,7 +42,7 @@ export const generateReportPDF = (
         currentY += 5;
     }
 
-    // Special Handling for Painel Vagas
+    // Painel Vagas Logic
     if (reportId === 'painelVagas') {
         if (vagasView === 'quantitativo' && data.quantitativo) {
             autoTable(doc, {
@@ -62,7 +62,7 @@ export const generateReportPDF = (
             });
         }
     }
-    // Generic Table Handling
+    // Generic Table Handling (Fallback for custom or future reports)
     else if ((data.colunas && data.linhas) || data.tabela) {
         const cols = data.colunas || data.tabela?.colunas || [];
         const rows = data.linhas || data.tabela?.linhas || [];
@@ -164,28 +164,6 @@ export const generateDossierPDF = (data: DossierData) => {
             headStyles: { fillColor: [19, 51, 90] }
         });
         currentY = (doc as any).lastAutoTable.finalY + 10;
-    }
-
-    // Capacitações
-    if (data.atividadesEstudantis?.capacitacoes?.length > 0) {
-         doc.setFontSize(12);
-        doc.text("Capacitação", 14, currentY);
-        currentY += 5;
-
-        const capRows = data.atividadesEstudantis.capacitacoes.map(c => [
-            c.data,
-            c.nome,
-            c.turma,
-            c.status
-        ]);
-
-        autoTable(doc, {
-            startY: currentY,
-            head: [['Data', 'Atividade', 'Turma', 'Presença']],
-            body: capRows,
-            theme: 'striped',
-            headStyles: { fillColor: [16, 185, 129] }
-        });
     }
 
     doc.save(`Dossie_${data.pessoal.NOME?.split(' ')[0] || 'Completo'}.pdf`);

@@ -1,11 +1,13 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReportData, UserSession, QuantitativoItem } from '../types';
 import { Button } from './Button';
-import { REPORT_PERMISSIONS } from '../constants';
+import { REPORT_PERMISSIONS, ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING } from '../constants';
 import { generateReportPDF } from '../utils/pdfGenerator';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export const Reports: React.FC = () => {
   const getSession = (): UserSession => {
@@ -17,27 +19,32 @@ export const Reports: React.FC = () => {
   }; 
   const session = getSession();
 
-  const allReports = [
+  // --- CONFIGURAÇÃO DOS RELATÓRIOS ---
+  const validReports = [
       { id: 'dashboardPessoal', label: 'Dashboard de Pessoal', category: 'Gerencial' },
       { id: 'painelVagas', label: 'Painel de Vagas', category: 'Operacional' },
-      { id: 'contratosAtivos', label: 'Contratos Ativos', category: 'Operacional' },
-      { id: 'quadroLotacaoServidores', label: 'Quadro de Lotação (Serv.)', category: 'Operacional' },
-      { id: 'adesaoFrequencia', label: 'Adesão e Frequência', category: 'Operacional' },
-      { id: 'analiseCustos', label: 'Análise de Custos', category: 'Gerencial' },
-      { id: 'perfilDemografico', label: 'Perfil Demográfico', category: 'Análise Social' },
-      { id: 'atividadeUsuarios', label: 'Atividade de Usuários', category: 'Administrativo' },
+      { id: 'customGenerator', label: 'Gerador Personalizado', category: 'Ferramentas' }
   ];
 
-  const allowedIds = REPORT_PERMISSIONS[session.papel] || [];
-  const reportsList = allReports.filter(r => allowedIds.includes(r.id) || allowedIds.includes('TODAS'));
-
-  const [currentReport, setCurrentReport] = useState(reportsList[0]?.id || '');
+  const [currentReport, setCurrentReport] = useState(validReports[0].id);
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [vagasView, setVagasView] = useState<'quantitativo' | 'panorama'>('quantitativo');
 
+  // --- ESTADO DO GERADOR PERSONALIZADO ---
+  const [customEntity, setCustomEntity] = useState<string>('');
+  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+  const [customFilters, setCustomFilters] = useState<{ field: string, operator: string, value: string }[]>([]);
+  const [customResults, setCustomResults] = useState<any[]>([]);
+  const [generated, setGenerated] = useState(false);
+  
+  // Estado temporário para adicionar novo filtro
+  const [newFilter, setNewFilter] = useState({ field: '', operator: 'contains', value: '' });
+
+  // Carregar dados dos relatórios fixos
   useEffect(() => {
-    if (!currentReport) return;
+    if (currentReport === 'customGenerator' || !currentReport) return;
     const load = async () => {
       setLoading(true);
       try {
@@ -53,11 +60,127 @@ export const Reports: React.FC = () => {
     load();
   }, [currentReport]);
 
-  const handleExportPDF = () => {
+  // Resetar gerador ao mudar de entidade
+  useEffect(() => {
+      if (!customEntity) {
+          setAvailableColumns([]);
+          setSelectedColumns([]);
+          setCustomResults([]);
+          setGenerated(false);
+          return;
+      }
+      const cols = DATA_MODEL[customEntity] || [];
+      setAvailableColumns(cols);
+      setSelectedColumns(cols.slice(0, 5)); // Seleciona as 5 primeiras por padrão
+      setCustomResults([]);
+      setGenerated(false);
+      setCustomFilters([]);
+  }, [customEntity]);
+
+  // --- LÓGICA DO GERADOR ---
+
+  const handleAddFilter = () => {
+      if (newFilter.field && newFilter.value) {
+          setCustomFilters([...customFilters, newFilter]);
+          setNewFilter({ ...newFilter, value: '' }); // Limpa valor
+      }
+  };
+
+  const removeFilter = (idx: number) => {
+      const newF = [...customFilters];
+      newF.splice(idx, 1);
+      setCustomFilters(newF);
+  };
+
+  const handleGenerateCustom = async () => {
+      if (!customEntity) return;
+      setLoading(true);
+      try {
+          // Busca dados brutos
+          let rawData = await api.fetchEntity(customEntity);
+
+          // Aplica Filtros no Cliente (Client-side filtering para flexibilidade)
+          if (customFilters.length > 0) {
+              rawData = rawData.filter(item => {
+                  return customFilters.every(filter => {
+                      const itemValue = String(item[filter.field] || '').toLowerCase();
+                      const filterValue = filter.value.toLowerCase();
+                      
+                      switch (filter.operator) {
+                          case 'contains': return itemValue.includes(filterValue);
+                          case 'equals': return itemValue === filterValue;
+                          case 'starts': return itemValue.startsWith(filterValue);
+                          case 'ends': return itemValue.endsWith(filterValue);
+                          case 'gt': return parseFloat(itemValue) > parseFloat(filterValue);
+                          case 'lt': return parseFloat(itemValue) < parseFloat(filterValue);
+                          default: return true;
+                      }
+                  });
+              });
+          }
+          
+          setCustomResults(rawData);
+          setGenerated(true);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const exportCustomCSV = () => {
+      if (customResults.length === 0) return;
+      
+      const headers = selectedColumns.join(';');
+      const rows = customResults.map(row => 
+          selectedColumns.map(col => {
+              let val = row[col];
+              if (val === null || val === undefined) return '';
+              return String(val).replace(/;/g, ','); // Escape semi-colons
+          }).join(';')
+      );
+      
+      const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join('\n');
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Relatorio_${customEntity}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const exportCustomPDF = () => {
+      if (customResults.length === 0) return;
+      const doc = new jsPDF('l', 'mm', 'a4'); // Landscape
+      const today = new Date().toLocaleDateString('pt-BR');
+      
+      doc.setFontSize(14);
+      doc.text(`Relatório Personalizado: ${ENTITY_CONFIGS[customEntity]?.title || customEntity}`, 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Gerado em: ${today} - ${customResults.length} registros`, 14, 22);
+
+      const tableRows = customResults.map(row => selectedColumns.map(col => row[col] || ''));
+
+      autoTable(doc, {
+          startY: 25,
+          head: [selectedColumns],
+          body: tableRows,
+          theme: 'grid',
+          styles: { fontSize: 8, cellPadding: 2 },
+          headStyles: { fillColor: [19, 51, 90] }
+      });
+      
+      doc.save(`Relatorio_${customEntity}_${today}.pdf`);
+  };
+
+  const handleExportFixedPDF = () => {
     if (!data) return;
-    const reportLabel = reportsList.find(r => r.id === currentReport)?.label || 'Relatório';
+    const reportLabel = validReports.find(r => r.id === currentReport)?.label || 'Relatório';
     generateReportPDF(currentReport, reportLabel, data, vagasView);
   };
+
+  // --- RENDERIZADORES ---
 
   const renderQuantitativoGrouped = (items: QuantitativoItem[]) => {
       const grouped = items.reduce((acc, item) => {
@@ -95,61 +218,28 @@ export const Reports: React.FC = () => {
       );
   };
 
-  const renderContent = () => {
+  const renderFixedReport = () => {
       if (!data) return null;
 
       if (currentReport === 'painelVagas') {
           return (
               <div className="space-y-6">
                   <div className="flex gap-2 bg-white p-2 rounded-lg shadow-sm border border-gray-100 w-fit">
-                      <button 
-                        onClick={() => setVagasView('quantitativo')} 
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vagasView === 'quantitativo' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}
-                      >
-                          <i className="fas fa-list-ol mr-2"></i> Quantitativo
-                      </button>
-                      <button 
-                        onClick={() => setVagasView('panorama')} 
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vagasView === 'panorama' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}
-                      >
-                          <i className="fas fa-table mr-2"></i> Panorama
-                      </button>
+                      <button onClick={() => setVagasView('quantitativo')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vagasView === 'quantitativo' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-list-ol mr-2"></i> Quantitativo</button>
+                      <button onClick={() => setVagasView('panorama')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${vagasView === 'panorama' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-table mr-2"></i> Panorama</button>
                   </div>
-
-                  {vagasView === 'quantitativo' && data.quantitativo ? (
-                      renderQuantitativoGrouped(data.quantitativo)
-                  ) : null}
-
+                  {vagasView === 'quantitativo' && data.quantitativo ? renderQuantitativoGrouped(data.quantitativo) : null}
                   {vagasView === 'panorama' && data.panorama ? (
                       <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 overflow-x-auto">
                           <table className="w-full text-sm text-left whitespace-nowrap">
                               <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
-                                  <tr>
-                                      <th className="px-6 py-3">Ocupante / Status</th>
-                                      <th className="px-6 py-3">Vinculação</th>
-                                      <th className="px-6 py-3">Lotação Oficial</th>
-                                      <th className="px-6 py-3">Cargo</th>
-                                      <th className="px-6 py-3">Status</th>
-                                      <th className="px-6 py-3">Reservada Para</th>
-                                  </tr>
+                                  <tr><th className="px-6 py-3">Ocupante</th><th className="px-6 py-3">Vinculação</th><th className="px-6 py-3">Lotação</th><th className="px-6 py-3">Cargo</th><th className="px-6 py-3">Status</th></tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
                                   {data.panorama.map((row: any, i: number) => (
                                       <tr key={i} className="hover:bg-gray-50/50">
-                                          <td className="px-6 py-3 font-bold">{row.OCUPANTE as React.ReactNode}</td>
-                                          <td className="px-6 py-3">{row.VINCULACAO as React.ReactNode}</td>
-                                          <td className="px-6 py-3">{row.LOTACAO_OFICIAL as React.ReactNode}</td>
-                                          <td className="px-6 py-3">{row.NOME_CARGO as React.ReactNode}</td>
-                                          <td className="px-6 py-3">
-                                              <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                                                  row.STATUS === 'Disponível' ? 'bg-green-100 text-green-800' : 
-                                                  row.STATUS === 'Ocupada' ? 'bg-gray-100 text-gray-800' : 
-                                                  row.STATUS === 'Em Aviso Prévio' ? 'bg-yellow-100 text-yellow-800' :
-                                                  'bg-blue-100 text-blue-800'}`}>
-                                                  {row.STATUS as React.ReactNode}
-                                              </span>
-                                          </td>
-                                          <td className="px-6 py-3">{(row.RESERVADA_PARA || '-') as React.ReactNode}</td>
+                                          <td className="px-6 py-3 font-bold">{row.OCUPANTE}</td><td className="px-6 py-3">{row.VINCULACAO}</td><td className="px-6 py-3">{row.LOTACAO_OFICIAL}</td><td className="px-6 py-3">{row.NOME_CARGO}</td>
+                                          <td className="px-6 py-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${row.STATUS === 'Disponível' ? 'bg-green-100 text-green-800' : row.STATUS === 'Ocupada' ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800'}`}>{row.STATUS}</span></td>
                                       </tr>
                                   ))}
                               </tbody>
@@ -172,18 +262,17 @@ export const Reports: React.FC = () => {
                       ))}
                   </div>
               )}
-
               {data.graficos && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {Object.entries(data.graficos).map(([key, chartData]) => (
                           <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[400px]">
-                              <h4 className="text-sm font-bold text-gray-500 mb-4 uppercase">{key === 'vinculo' ? 'Por Vínculo' : (key === 'lotacao' ? 'Por Lotação' : key.replace(/([A-Z])/g, ' $1').trim())}</h4>
+                              <h4 className="text-sm font-bold text-gray-500 mb-4 uppercase">{key === 'vinculo' ? 'Por Vínculo' : 'Por Lotação'}</h4>
                               <ResponsiveContainer width="100%" height="100%">
                                   <BarChart data={chartData}>
                                       <CartesianGrid strokeDasharray="3 3" />
                                       <XAxis dataKey="name" />
                                       <YAxis />
-                                      <Tooltip cursor={{fill: '#f3f4f6'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}} />
+                                      <Tooltip cursor={{fill: '#f3f4f6'}} />
                                       <Legend />
                                       <Bar dataKey="value" fill="#2a688f" radius={[4, 4, 0, 0]} />
                                   </BarChart>
@@ -192,29 +281,135 @@ export const Reports: React.FC = () => {
                       ))}
                   </div>
               )}
+          </div>
+      );
+  };
 
-              {((data.colunas && data.linhas) || data.tabela) && (
-                  <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
-                      <div className="px-6 py-4 border-b border-gray-100 font-bold text-simas-dark bg-gray-50/50">
-                          Detalhes
+  const renderCustomBuilder = () => {
+      const availableEntities = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && ENTITY_CONFIGS[k].title).sort();
+      
+      return (
+          <div className="space-y-6 animate-fade-in">
+              {/* CONFIGURAÇÃO DO RELATÓRIO */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* Seleção de Entidade */}
+                      <div>
+                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">1. Fonte de Dados</label>
+                          <select 
+                            className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none"
+                            value={customEntity}
+                            onChange={(e) => setCustomEntity(e.target.value)}
+                          >
+                              <option value="">Selecione uma tabela...</option>
+                              {availableEntities.map(key => (
+                                  <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
+                              ))}
+                          </select>
                       </div>
-                      <div className="overflow-x-auto">
-                          <table className="w-full text-sm text-left whitespace-nowrap">
-                              <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
+                      
+                      {/* Seleção de Colunas */}
+                      <div>
+                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">2. Colunas ({selectedColumns.length})</label>
+                          <div className="w-full h-32 border border-gray-200 rounded-xl bg-gray-50 overflow-y-auto p-2 grid grid-cols-2 gap-2">
+                              {availableColumns.map(col => (
+                                  <label key={col} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100 p-1 rounded">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={selectedColumns.includes(col)}
+                                        onChange={(e) => {
+                                            if (e.target.checked) setSelectedColumns([...selectedColumns, col]);
+                                            else setSelectedColumns(selectedColumns.filter(c => c !== col));
+                                        }}
+                                        className="text-simas-cyan rounded"
+                                      />
+                                      {col}
+                                  </label>
+                              ))}
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Filtros */}
+                  {customEntity && (
+                      <div>
+                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">3. Filtros Aplicados</label>
+                          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                              <div className="flex flex-wrap gap-2 mb-4">
+                                  {customFilters.length === 0 && <span className="text-sm text-gray-400 italic">Nenhum filtro aplicado (mostrando tudo).</span>}
+                                  {customFilters.map((f, idx) => (
+                                      <div key={idx} className="flex items-center gap-2 bg-white border border-gray-200 px-3 py-1 rounded-full text-xs shadow-sm">
+                                          <span className="font-bold text-simas-dark">{f.field}</span>
+                                          <span className="text-gray-500">{f.operator}</span>
+                                          <span className="font-bold text-simas-cyan">"{f.value}"</span>
+                                          <button onClick={() => removeFilter(idx)} className="text-gray-400 hover:text-red-500 ml-1"><i className="fas fa-times"></i></button>
+                                      </div>
+                                  ))}
+                              </div>
+                              <div className="flex gap-2">
+                                  <select className="flex-1 p-2 rounded-lg border border-gray-200 text-sm" value={newFilter.field} onChange={e => setNewFilter({...newFilter, field: e.target.value})}>
+                                      <option value="">Campo...</option>
+                                      {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
+                                  </select>
+                                  <select className="w-32 p-2 rounded-lg border border-gray-200 text-sm" value={newFilter.operator} onChange={e => setNewFilter({...newFilter, operator: e.target.value})}>
+                                      <option value="contains">Contém</option>
+                                      <option value="equals">Igual</option>
+                                      <option value="starts">Começa com</option>
+                                      <option value="gt">Maior que</option>
+                                      <option value="lt">Menor que</option>
+                                  </select>
+                                  <input type="text" placeholder="Valor..." className="flex-1 p-2 rounded-lg border border-gray-200 text-sm" value={newFilter.value} onChange={e => setNewFilter({...newFilter, value: e.target.value})} />
+                                  <Button onClick={handleAddFilter} disabled={!newFilter.field || !newFilter.value} variant="secondary" className="px-4 py-2">Adicionar</Button>
+                              </div>
+                          </div>
+                      </div>
+                  )}
+
+                  <div className="flex justify-end pt-2">
+                      <Button onClick={handleGenerateCustom} disabled={!customEntity || selectedColumns.length === 0} isLoading={loading} icon="fas fa-play">
+                          Gerar Relatório
+                      </Button>
+                  </div>
+              </div>
+
+              {/* RESULTADOS */}
+              {generated && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-slide-in">
+                      <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                          <div>
+                              <h3 className="font-bold text-simas-dark">Resultados</h3>
+                              <p className="text-xs text-gray-500">{customResults.length} registros encontrados</p>
+                          </div>
+                          <div className="flex gap-2">
+                              <Button onClick={exportCustomCSV} variant="secondary" icon="fas fa-file-csv" className="text-xs">CSV</Button>
+                              <Button onClick={exportCustomPDF} variant="secondary" icon="fas fa-file-pdf" className="text-xs">PDF</Button>
+                          </div>
+                      </div>
+                      <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                          <table className="w-full text-sm text-left border-collapse">
+                              <thead className="bg-white sticky top-0 shadow-sm z-10">
                                   <tr>
-                                      {(data.colunas || data.tabela?.colunas || []).map((col, idx) => (
-                                          <th key={idx} className="px-6 py-3">{col}</th>
+                                      {selectedColumns.map(col => (
+                                          <th key={col} className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">
+                                              {col}
+                                          </th>
                                       ))}
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
-                                  {(data.linhas || data.tabela?.linhas || []).map((row: any[], i: number) => (
-                                      <tr key={i} className="hover:bg-gray-50/50">
-                                          {row.map((cell: any, j: number) => (
-                                              <td key={j} className="px-6 py-3">{cell as React.ReactNode}</td>
-                                          ))}
-                                      </tr>
-                                  ))}
+                                  {customResults.length === 0 ? (
+                                      <tr><td colSpan={selectedColumns.length} className="p-8 text-center text-gray-400 italic">Nenhum dado encontrado com os filtros aplicados.</td></tr>
+                                  ) : (
+                                      customResults.map((row, idx) => (
+                                          <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                              {selectedColumns.map(col => (
+                                                  <td key={`${idx}-${col}`} className="px-4 py-2 whitespace-nowrap text-gray-700 border-r border-gray-50 last:border-0">
+                                                      {String(row[col] === null || row[col] === undefined ? '' : row[col])}
+                                                  </td>
+                                              ))}
+                                          </tr>
+                                      ))
+                                  )}
                               </tbody>
                           </table>
                       </div>
@@ -226,14 +421,15 @@ export const Reports: React.FC = () => {
 
   return (
     <div className="flex h-full overflow-hidden">
-        <div className="w-64 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
+        {/* SIDEBAR DE RELATÓRIOS */}
+        <div className="w-64 bg-white border-r border-gray-200 flex flex-col overflow-y-auto flex-none z-10">
             <div className="p-6 border-b border-gray-100">
                 <h2 className="text-xl font-extrabold text-simas-dark tracking-tight">Relatórios</h2>
                 <p className="text-xs text-gray-400 mt-1">Selecione uma visão</p>
             </div>
             <div className="p-4 space-y-6">
-                {['Gerencial', 'Operacional', 'Análise Social', 'Administrativo'].map(cat => {
-                    const catReports = reportsList.filter(r => r.category === cat);
+                {['Gerencial', 'Operacional', 'Ferramentas'].map(cat => {
+                    const catReports = validReports.filter(r => r.category === cat);
                     if (catReports.length === 0) return null;
                     return (
                         <div key={cat}>
@@ -242,9 +438,10 @@ export const Reports: React.FC = () => {
                                 {catReports.map(rep => (
                                     <button 
                                         key={rep.id} 
-                                        onClick={() => setCurrentReport(rep.id)}
-                                        className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${currentReport === rep.id ? 'bg-simas-blue/10 text-simas-blue' : 'text-gray-600 hover:bg-gray-50 hover:text-simas-dark'}`}
+                                        onClick={() => { setCurrentReport(rep.id); setGenerated(false); }}
+                                        className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 ${currentReport === rep.id ? 'bg-simas-blue/10 text-simas-blue' : 'text-gray-600 hover:bg-gray-50 hover:text-simas-dark'}`}
                                     >
+                                        {rep.id === 'customGenerator' && <i className="fas fa-magic text-xs"></i>}
                                         {rep.label}
                                     </button>
                                 ))}
@@ -255,26 +452,30 @@ export const Reports: React.FC = () => {
             </div>
         </div>
 
+        {/* ÁREA PRINCIPAL */}
         <div className="flex-1 overflow-y-auto bg-gray-50/50 p-8">
-            {loading ? (
-                <div className="flex flex-col items-center justify-center h-full gap-4">
-                    <div className="w-12 h-12 border-4 border-simas-cyan border-t-transparent rounded-full animate-spin"></div>
-                    <p className="text-simas-blue font-medium animate-pulse">Carregando dados...</p>
-                </div>
-            ) : (
-                <div className="max-w-7xl mx-auto animate-slide-in">
-                    <header className="mb-8 flex justify-between items-center">
-                        <div>
-                            <h1 className="text-3xl font-bold text-simas-dark">{reportsList.find(r => r.id === currentReport)?.label || 'Selecione um Relatório'}</h1>
-                            <p className="text-gray-500 mt-2">Visualização atualizada do sistema.</p>
-                        </div>
-                        <Button onClick={handleExportPDF} icon="fas fa-file-pdf">
-                            Exportar PDF
-                        </Button>
-                    </header>
-                    {renderContent()}
-                </div>
-            )}
+            <div className="max-w-7xl mx-auto animate-slide-in pb-10">
+                <header className="mb-8 flex justify-between items-center">
+                    <div>
+                        <h1 className="text-3xl font-bold text-simas-dark">{validReports.find(r => r.id === currentReport)?.label}</h1>
+                        <p className="text-gray-500 mt-2">
+                            {currentReport === 'customGenerator' ? 'Crie consultas personalizadas cruzando dados do sistema.' : 'Visualização atualizada do sistema.'}
+                        </p>
+                    </div>
+                    {currentReport !== 'customGenerator' && (
+                        <Button onClick={handleExportFixedPDF} icon="fas fa-file-pdf">Exportar PDF</Button>
+                    )}
+                </header>
+
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center h-64 gap-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="w-12 h-12 border-4 border-simas-cyan border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-simas-blue font-medium animate-pulse">Processando dados...</p>
+                    </div>
+                ) : (
+                    currentReport === 'customGenerator' ? renderCustomBuilder() : renderFixedReport()
+                )}
+            </div>
         </div>
     </div>
   );
