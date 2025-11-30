@@ -1,10 +1,12 @@
 
+
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReportData, UserSession, QuantitativoItem } from '../types';
 import { Button } from './Button';
-import { REPORT_PERMISSIONS, ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING } from '../constants';
+import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, FIELD_LABELS } from '../constants';
 import { generateReportPDF } from '../utils/pdfGenerator';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -29,12 +31,11 @@ export const Reports: React.FC = () => {
   const session = getSession();
 
   // --- CONFIGURAÇÃO DOS RELATÓRIOS ---
+  // Apenas Dashboard, Painel de Vagas e o Gerador Customizado
   const validReports = [
       { id: 'dashboardPessoal', label: 'Dashboard de Pessoal', category: 'Gerencial' },
       { id: 'painelVagas', label: 'Painel de Vagas', category: 'Operacional' },
-      { id: 'analiseCustos', label: 'Análise de Custos', category: 'Gerencial' },
-      { id: 'atividadeUsuarios', label: 'Atividade de Usuários', category: 'Administrativo' },
-      { id: 'customGenerator', label: 'Gerador Personalizado (BI)', category: 'Ferramentas' }
+      { id: 'customGenerator', label: 'Gerador Personalizado', category: 'Ferramentas' }
   ];
 
   const [currentReport, setCurrentReport] = useState(validReports[0].id);
@@ -99,15 +100,46 @@ export const Reports: React.FC = () => {
       // Ex: ID_CONTRATO (oculta), CPF (mantém se estiver em Pessoa)
       if (field === config.pk && !config.manualPk) return false;
 
-      // 2. Ocultar Foreign Keys (FKs)
+      // 2. Ocultar Foreign Keys (FKs) que apontam para OUTRAS tabelas
       // Se o campo for uma FK que aponta para outra tabela, escondemos para forçar o uso do Join.
-      // Ex: ID_VAGA em Contrato (Oculta).
-      // Ex: CPF em Contrato (Oculta, pois aponta para Pessoa).
-      // Ex: CPF em Pessoa (Mantém, pois aponta para si mesma/é a PK).
       const targetEntity = FK_MAPPING[field];
       if (targetEntity && targetEntity !== entity) return false;
 
       return true;
+  };
+  
+  const translateOperator = (op: string) => {
+      switch(op) {
+          case 'contains': return 'Contém';
+          case 'equals': return 'Igual a';
+          case 'starts': return 'Começa com';
+          case 'ends': return 'Termina com';
+          default: return op;
+      }
+  };
+
+  const getColumnLabel = (fullPath: string) => {
+      const parts = fullPath.split('.');
+      const field = parts.pop()!;
+      
+      // Tenta inferir a entidade com base no prefixo (ex: Vaga.Lotacao -> Lotacao)
+      // O backend retorna os dados achatados onde o prefixo é o caminho camelCase capitalizado.
+      // O 'availableColumns' foi construído com esse prefixo.
+      // A entidade de contexto é o último segmento do caminho (ex: Lotacao em Vaga.Lotacao) ou a customEntity se for raiz.
+      
+      let entityName = customEntity;
+      if (parts.length > 0) {
+          entityName = parts[parts.length - 1]; // Pega o último segmento (ex: Lotacao)
+      }
+
+      // 1. Label Específico da Entidade
+      if (FIELD_LABELS[entityName]?.[field]) return FIELD_LABELS[entityName][field];
+
+      // 2. Label Global
+      if (FIELD_LABELS['Global']?.[field]) return FIELD_LABELS['Global'][field];
+
+      // 3. Fallback: Formatação do nome técnico
+      return field.replace(/_/g, ' ');
   };
 
   // Inicializar Joins Nível 1 quando a entidade principal muda
@@ -147,7 +179,7 @@ export const Reports: React.FC = () => {
       setGenerated(false);
   }, [customEntity]);
 
-  // --- LÓGICA RECURSIVA DE JOINS ---
+  // --- LÓGICA RECURSIVA DE JOINS COM PREVENÇÃO DE REDUNDÂNCIA ---
 
   const handleJoinToggle = (path: string, entity: string, isChecked: boolean) => {
       let newSelected = [...selectedJoins];
@@ -157,16 +189,26 @@ export const Reports: React.FC = () => {
           // Adicionar aos selecionados
           if (!newSelected.includes(path)) newSelected.push(path);
 
+          // RASTREAMENTO DE ENTIDADES DISPONÍVEIS (PREVENÇÃO DE REDUNDÂNCIA)
+          // A regra agora é: Se a entidade JÁ APARECE na lista de opções (availableJoins) 
+          // ou é a entidade raiz, ela NÃO deve ser oferecida novamente como filha.
+          const entitiesAlreadyOption = new Set<string>();
+          entitiesAlreadyOption.add(customEntity); // A principal conta
+          
+          // Mapeia tudo que já está visível para o usuário
+          newAvailable.forEach(opt => entitiesAlreadyOption.add(opt.entity));
+
           // DESCOBRIR NOVAS RELAÇÕES (NÍVEL N+1)
           const childRelations = getRelationsForEntity(entity);
           
           childRelations.forEach(rel => {
               const childPath = `${path}.${rel.entity.toLowerCase()}`;
               
-              // Evitar ciclos (não adicionar se o caminho já contém a entidade ou volta pra principal)
-              if (path.includes(rel.entity.toLowerCase()) || rel.entity === customEntity) return;
+              // IMPEDIR REDUNDÂNCIA:
+              // Se 'Pessoa' já está na lista (ex: vizinha da raiz), não adiciona 'Pessoa' de novo como filha de 'Servidor'.
+              if (entitiesAlreadyOption.has(rel.entity)) return;
 
-              // Evitar duplicatas na lista de disponíveis
+              // Evitar duplicatas na lista de disponíveis (caso o path exato já exista, embora a lógica acima deva prevenir)
               if (!newAvailable.some(opt => opt.path === childPath)) {
                   newAvailable.push({
                       label: `${ENTITY_CONFIGS[rel.entity]?.title || rel.entity} (via ${ENTITY_CONFIGS[entity]?.title})`,
@@ -175,6 +217,9 @@ export const Reports: React.FC = () => {
                       parentPath: path,
                       depth: (path.split('.').length)
                   });
+                  
+                  // Adiciona ao Set local para garantir unicidade dentro deste próprio loop (caso haja 2 FKs para a mesma tabela)
+                  entitiesAlreadyOption.add(rel.entity);
               }
           });
 
@@ -182,6 +227,9 @@ export const Reports: React.FC = () => {
           // Remover dos selecionados e remover recursivamente os filhos dependentes
           const pathsToRemove = newSelected.filter(p => p === path || p.startsWith(path + '.'));
           newSelected = newSelected.filter(p => !pathsToRemove.includes(p));
+          
+          // Opcional: Poderíamos limpar 'newAvailable' de órfãos, mas manter as opções lá não quebra nada
+          // e permite re-selecionar sem recalcular tudo.
       }
 
       setSelectedJoins(newSelected);
@@ -192,29 +240,25 @@ export const Reports: React.FC = () => {
   useEffect(() => {
       if (!customEntity) return;
       
-      // Filtra PKs e FKs automáticas da entidade principal
+      // Colunas da entidade principal
       const primaryFields = (DATA_MODEL[customEntity] || [])
         .filter(f => isColumnSelectable(customEntity, f))
         .map(f => `${customEntity}.${f}`);
 
       let joinFields: string[] = [];
 
-      // Ordenar selects para manter consistência visual
+      // Colunas das entidades relacionadas selecionadas
       const sortedJoins = [...selectedJoins].sort();
 
       sortedJoins.forEach(path => {
-          // Encontrar qual entidade corresponde a este path
           const option = availableJoins.find(opt => opt.path === path);
           if (option) {
               const fields = DATA_MODEL[option.entity] || [];
-              // Prefixo da coluna agora usa o Path completo para evitar ambiguidade
-              // Ex: vaga.lotacao.NOME
+              // Prefixo da coluna usa o Path "Bonito"
               const displayPrefix = path.split('.').map(p => {
-                  // Tentar deixar mais bonito: vaga -> Vaga
                   return p.charAt(0).toUpperCase() + p.slice(1);
               }).join('.');
 
-              // Filtra PKs e FKs das entidades relacionadas
               const validFields = fields.filter(f => isColumnSelectable(option.entity, f));
 
               joinFields = [...joinFields, ...validFields.map(f => `${displayPrefix}.${f}`)];
@@ -223,9 +267,13 @@ export const Reports: React.FC = () => {
 
       setAvailableColumns([...primaryFields, ...joinFields]);
       
-      // Se não tiver colunas selecionadas, pega as 5 primeiras
+      // Resetar seleção se a lista ficar vazia (ou inicializar)
       if (selectedColumns.length === 0) {
           setSelectedColumns(primaryFields.slice(0, 5));
+      } else {
+          // Filtrar colunas selecionadas que não existem mais (caso um join tenha sido removido)
+          const allCols = [...primaryFields, ...joinFields];
+          setSelectedColumns(prev => prev.filter(c => allCols.includes(c)));
       }
   }, [selectedJoins, availableJoins, customEntity]);
 
@@ -255,7 +303,6 @@ export const Reports: React.FC = () => {
           if (customFilters.length > 0) {
               rawData = rawData.filter((item: any) => {
                   return customFilters.every(filter => {
-                      // Normalização do valor para comparação
                       const itemValue = String(item[filter.field] || '').toLowerCase();
                       const filterValue = filter.value.toLowerCase();
                       
@@ -281,7 +328,7 @@ export const Reports: React.FC = () => {
 
   const exportCustomCSV = () => {
       if (customResults.length === 0) return;
-      const headers = selectedColumns.join(';');
+      const headers = selectedColumns.map(col => getColumnLabel(col)).join(';');
       const rows = customResults.map(row => 
           selectedColumns.map(col => {
               let val = row[col];
@@ -314,7 +361,7 @@ export const Reports: React.FC = () => {
 
       autoTable(doc, {
           startY: 25,
-          head: [selectedColumns.map(c => c.split('.').pop() || c)], // Header simplificado
+          head: [selectedColumns.map(c => getColumnLabel(c))], // Usar Label Amigável
           body: tableRows,
           theme: 'grid',
           styles: { fontSize: 7, cellPadding: 1 },
@@ -333,13 +380,13 @@ export const Reports: React.FC = () => {
   // --- RENDERIZADORES ---
 
   const renderJoinSelector = () => {
-    if (availableJoins.length === 0) return <p className="text-xs text-gray-400 italic">Nenhuma relação direta encontrada.</p>;
+    if (availableJoins.length === 0) return <div className="h-full flex items-center justify-center text-xs text-gray-400 italic">Nenhuma relação direta encontrada.</div>;
 
     // Ordenar para que filhos fiquem abaixo dos pais
     const displayList = [...availableJoins].sort((a, b) => a.path.localeCompare(b.path));
 
     return (
-        <div className="flex flex-col gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
+        <div className="flex flex-col gap-1 p-1">
             {displayList.map((join) => {
                 const isSelected = selectedJoins.includes(join.path);
                 const isParentSelected = join.parentPath === '' || selectedJoins.includes(join.parentPath);
@@ -350,22 +397,28 @@ export const Reports: React.FC = () => {
                 return (
                     <label 
                         key={join.path} 
-                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all border text-xs
-                            ${isSelected ? 'bg-white border-simas-blue shadow-sm' : 'bg-transparent border-transparent hover:bg-white hover:border-gray-200'}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all border text-xs
+                            ${isSelected ? 'bg-simas-cyan/5 border-simas-cyan text-simas-dark' : 'bg-transparent border-transparent hover:bg-gray-100 text-gray-600'}
                         `}
-                        style={{ marginLeft: `${join.depth * 20}px` }}
+                        style={{ marginLeft: `${join.depth * 16}px` }}
                     >
-                        <input 
-                            type="checkbox" 
-                            checked={isSelected}
-                            onChange={(e) => handleJoinToggle(join.path, join.entity, e.target.checked)}
-                            className="text-simas-blue rounded focus:ring-simas-blue w-4 h-4"
-                        />
+                        <div className="relative flex items-center">
+                            <input 
+                                type="checkbox" 
+                                checked={isSelected}
+                                onChange={(e) => handleJoinToggle(join.path, join.entity, e.target.checked)}
+                                className="peer sr-only"
+                            />
+                            <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center transition-colors ${isSelected ? 'bg-simas-cyan border-simas-cyan' : 'bg-white border-gray-300'}`}>
+                                {isSelected && <i className="fas fa-check text-[8px] text-white"></i>}
+                            </div>
+                        </div>
+                        
                         <div className="flex flex-col">
-                            <span className={`font-bold ${isSelected ? 'text-simas-blue' : 'text-gray-600'}`}>
+                            <span className="font-medium truncate">
                                 {ENTITY_CONFIGS[join.entity]?.title || join.entity}
                             </span>
-                            {join.depth > 0 && <span className="text-[9px] text-gray-400">Via {join.parentPath.split('.').pop()}</span>}
+                            {join.depth > 0 && <span className="text-[9px] text-gray-400 leading-none">Via {join.parentPath.split('.').pop()}</span>}
                         </div>
                     </label>
                 );
@@ -379,130 +432,202 @@ export const Reports: React.FC = () => {
       
       return (
           <div className="space-y-6 animate-fade-in">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-6">
+              {/* MAIN BUILDER BOX - Layout fixo de Split Pane */}
+              <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden flex flex-col md:flex-row h-[600px]">
                   
-                  {/* ETAPA 1: TABELA PRINCIPAL */}
-                  <div className="flex flex-col md:flex-row gap-6">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                            <span className="w-6 h-6 rounded-full bg-simas-dark text-white flex items-center justify-center text-xs font-bold">1</span>
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Fonte de Dados</label>
-                        </div>
-                        <select 
-                            className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none transition-all focus:ring-2 focus:ring-simas-light/20"
-                            value={customEntity}
-                            onChange={(e) => setCustomEntity(e.target.value)}
-                        >
-                            <option value="">Selecione uma tabela...</option>
-                            {availableEntities.map(key => (
-                                <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
-                            ))}
-                        </select>
+                  {/* LEFT COLUMN: SOURCE & JOINS (40%) */}
+                  <div className="w-full md:w-5/12 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col bg-gray-50/30">
+                      
+                      {/* Step 1: Source */}
+                      <div className="p-5 border-b border-gray-100 bg-white">
+                           <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 mb-3">
+                              <span className="w-6 h-6 bg-simas-dark text-white rounded-full flex items-center justify-center shadow-sm">1</span>
+                              Fonte de Dados
+                           </label>
+                           <div className="relative">
+                               <i className="fas fa-database absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan text-sm"></i>
+                               <select 
+                                   className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-simas-cyan/20 outline-none transition-all text-sm font-medium text-simas-dark shadow-sm appearance-none cursor-pointer hover:border-simas-cyan"
+                                   value={customEntity}
+                                   onChange={(e) => setCustomEntity(e.target.value)}
+                               >
+                                   <option value="">Selecione a tabela principal...</option>
+                                   {availableEntities.map(key => (
+                                       <option key={key} value={key}>{ENTITY_CONFIGS[key].title}</option>
+                                   ))}
+                               </select>
+                               <i className="fas fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                           </div>
                       </div>
 
-                       {/* ETAPA 2: JOINS RECURSIVOS */}
-                       <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                              <span className="w-6 h-6 rounded-full bg-simas-blue text-white flex items-center justify-center text-xs font-bold">2</span>
-                              <label className="text-xs font-bold text-blue-700 uppercase tracking-widest">Cruzar Dados (Joins)</label>
-                          </div>
-                          <div className="bg-blue-50/30 p-3 rounded-xl border border-blue-100 min-h-[100px]">
-                              {customEntity ? renderJoinSelector() : <p className="text-xs text-gray-400 p-2">Selecione uma fonte primeiro.</p>}
-                          </div>
-                       </div>
+                      {/* Step 2: Joins (Flex Grow) */}
+                      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                           <div className="p-4 px-5 pb-2 bg-gray-50/50">
+                              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                  <span className="w-6 h-6 bg-simas-blue text-white rounded-full flex items-center justify-center shadow-sm">2</span>
+                                  Cruzar Dados (Joins)
+                              </label>
+                           </div>
+                           <div className="flex-1 overflow-y-auto px-5 pb-5 custom-scrollbar">
+                               <div className="bg-white border border-gray-200 rounded-2xl p-2 min-h-full shadow-inner">
+                                  {customEntity ? renderJoinSelector() : <div className="h-full flex items-center justify-center text-xs text-gray-400 italic text-center p-4">Selecione uma fonte de dados para ver as conexões disponíveis.</div>}
+                               </div>
+                           </div>
+                      </div>
                   </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-gray-50">
-                      {/* ETAPA 3: COLUNAS */}
-                      <div>
-                          <div className="flex items-center gap-2 mb-2">
-                              <span className="w-6 h-6 rounded-full bg-gray-400 text-white flex items-center justify-center text-xs font-bold">3</span>
-                              <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Colunas ({selectedColumns.length})</label>
-                          </div>
-                          <div className="w-full h-48 border border-gray-200 rounded-xl bg-gray-50 overflow-y-auto p-2 custom-scrollbar">
-                              {availableColumns.map(col => {
-                                  // Separar Hierarquia
-                                  const parts = col.split('.');
-                                  const field = parts.pop();
-                                  const prefix = parts.join(' > ');
-                                  
-                                  const isPrimary = parts[0] === customEntity;
-                                  
-                                  return (
-                                      <label key={col} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer hover:bg-gray-100 p-1.5 rounded border-b border-gray-100 last:border-0">
-                                          <input 
-                                            type="checkbox" 
-                                            checked={selectedColumns.includes(col)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) setSelectedColumns([...selectedColumns, col]);
-                                                else setSelectedColumns(selectedColumns.filter(c => c !== col));
-                                            }}
-                                            className="text-simas-cyan rounded focus:ring-simas-cyan"
-                                          />
-                                          <span className={`font-bold ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{prefix}</span>
-                                          <span className="text-gray-300">/</span>
-                                          <span>{field}</span>
-                                      </label>
-                                  );
-                              })}
-                          </div>
+
+                  {/* RIGHT COLUMN: COLUMNS & FILTERS (60%) */}
+                  <div className="w-full md:w-7/12 flex flex-col">
+                      
+                      {/* Step 3: Columns (50% Height) */}
+                      <div className="flex-1 flex flex-col min-h-0 border-b border-gray-100 h-1/2">
+                           <div className="p-4 px-5 border-b border-gray-100 bg-white flex justify-between items-center">
+                               <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                  <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center shadow-sm">3</span>
+                                  Colunas
+                               </label>
+                               <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{selectedColumns.length} selec.</span>
+                           </div>
+                           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar bg-white">
+                               <div className="grid grid-cols-2 gap-1 p-2">
+                                  {availableColumns.map(col => {
+                                      const parts = col.split('.');
+                                      const prefix = parts.join(' > ');
+                                      const isPrimary = parts[0] === customEntity;
+                                      const label = getColumnLabel(col);
+                                      
+                                      return (
+                                          <label key={col} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer hover:bg-simas-cyan/5 p-2 rounded-lg border border-transparent hover:border-simas-cyan/20 transition-all select-none group">
+                                              <div className="relative flex items-center mt-0.5">
+                                                  <input 
+                                                    type="checkbox" 
+                                                    checked={selectedColumns.includes(col)}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) setSelectedColumns([...selectedColumns, col]);
+                                                        else setSelectedColumns(selectedColumns.filter(c => c !== col));
+                                                    }}
+                                                    className="peer sr-only"
+                                                  />
+                                                  <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center transition-colors ${selectedColumns.includes(col) ? 'bg-simas-cyan border-simas-cyan' : 'bg-white border-gray-300 group-hover:border-simas-cyan'}`}>
+                                                      {selectedColumns.includes(col) && <i className="fas fa-check text-[8px] text-white"></i>}
+                                                  </div>
+                                              </div>
+                                              <div className="flex flex-col overflow-hidden">
+                                                  <span className={`font-bold truncate ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{prefix}</span>
+                                                  <span className="text-gray-500 truncate">{label}</span>
+                                              </div>
+                                          </label>
+                                      );
+                                  })}
+                               </div>
+                           </div>
                       </div>
 
-                      {/* ETAPA 4: FILTROS */}
-                      {customEntity && (
-                          <div>
-                              <div className="flex items-center gap-2 mb-2">
-                                  <span className="w-6 h-6 rounded-full bg-gray-400 text-white flex items-center justify-center text-xs font-bold">4</span>
-                                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Filtros</label>
-                              </div>
-                              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 h-48 flex flex-col">
-                                  <div className="flex-1 overflow-y-auto mb-2 custom-scrollbar">
-                                    <div className="flex flex-wrap gap-2">
-                                        {customFilters.length === 0 && <span className="text-sm text-gray-400 italic">Nenhum filtro aplicado.</span>}
-                                        {customFilters.map((f, idx) => (
-                                            <div key={idx} className="flex items-center gap-2 bg-white border border-gray-200 px-3 py-1 rounded-full text-xs shadow-sm">
-                                                <span className="font-bold text-simas-dark">{f.field}</span>
-                                                <span className="text-gray-500">{f.operator}</span>
-                                                <span className="font-bold text-simas-cyan">"{f.value}"</span>
-                                                <button onClick={() => removeFilter(idx)} className="text-gray-400 hover:text-red-500 ml-1"><i className="fas fa-times"></i></button>
-                                            </div>
-                                        ))}
+                      {/* Step 4: Filters (50% Height) */}
+                      <div className="flex-1 flex flex-col min-h-0 bg-gray-50/20 h-1/2">
+                           <div className="p-3 px-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+                               <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                  <span className="w-6 h-6 bg-simas-cyan text-white rounded-full flex items-center justify-center shadow-sm">4</span>
+                                  Filtros
+                               </label>
+                               {customFilters.length > 0 && <span className="text-[10px] bg-simas-cyan/10 text-simas-cyan px-2 py-0.5 rounded-full font-bold">{customFilters.length} ativo(s)</span>}
+                           </div>
+
+                           {/* Active Filters List - Card Based */}
+                           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                               <div className="flex flex-wrap gap-2 content-start">
+                               {customFilters.length === 0 ? (
+                                    <div className="w-full h-20 flex flex-col items-center justify-center text-gray-300 gap-2">
+                                        <i className="fas fa-filter text-2xl opacity-50"></i>
+                                        <span className="text-xs italic">Adicione filtros abaixo para refinar</span>
                                     </div>
-                                  </div>
-                                  <div className="flex gap-2 mt-auto">
-                                      <select className="flex-1 p-2 rounded-lg border border-gray-200 text-xs outline-none" value={newFilter.field} onChange={e => setNewFilter({...newFilter, field: e.target.value})}>
-                                          <option value="">Campo...</option>
-                                          {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
-                                      </select>
-                                      <select className="w-24 p-2 rounded-lg border border-gray-200 text-xs outline-none" value={newFilter.operator} onChange={e => setNewFilter({...newFilter, operator: e.target.value})}>
-                                          <option value="contains">Contém</option>
-                                          <option value="equals">Igual</option>
-                                          <option value="starts">Começa</option>
-                                      </select>
-                                      <input type="text" placeholder="Valor..." className="flex-1 p-2 rounded-lg border border-gray-200 text-xs outline-none" value={newFilter.value} onChange={e => setNewFilter({...newFilter, value: e.target.value})} />
-                                      <Button onClick={handleAddFilter} disabled={!newFilter.field || !newFilter.value} variant="secondary" className="px-3 py-1 text-xs">OK</Button>
-                                  </div>
-                              </div>
-                          </div>
-                      )}
-                  </div>
+                               ) : (
+                                   customFilters.map((f, idx) => (
+                                       <div key={idx} className="bg-white p-2 pr-3 rounded-lg border border-gray-200 shadow-sm flex items-center gap-3 animate-fade-in max-w-full">
+                                           <div className="w-8 h-8 rounded-md bg-gray-50 flex items-center justify-center text-gray-400 shrink-0">
+                                               <i className="fas fa-filter text-xs"></i>
+                                           </div>
+                                           <div className="flex flex-col min-w-0">
+                                               <span className="text-[9px] font-bold text-gray-400 uppercase truncate">{getColumnLabel(f.field)}</span>
+                                               <div className="text-[10px] text-simas-dark truncate flex items-center gap-1">
+                                                   <span className="text-gray-500">{translateOperator(f.operator)}</span>
+                                                   <span className="font-bold">"{f.value}"</span>
+                                               </div>
+                                           </div>
+                                           <button 
+                                               onClick={() => removeFilter(idx)}
+                                               className="w-5 h-5 rounded-full hover:bg-red-50 hover:text-red-500 text-gray-300 flex items-center justify-center transition-colors ml-auto"
+                                               title="Remover"
+                                           >
+                                               <i className="fas fa-times text-[10px]"></i>
+                                           </button>
+                                       </div>
+                                   ))
+                               )}
+                               </div>
+                           </div>
 
-                  <div className="flex justify-end pt-4 border-t border-gray-100">
-                      <Button onClick={handleGenerateCustom} disabled={!customEntity || selectedColumns.length === 0} isLoading={loading} icon="fas fa-play">
-                          Gerar Relatório
-                      </Button>
+                           {/* Add Filter Form */}
+                           <div className="p-3 bg-white border-t border-gray-100 shadow-[0_-5px_15px_-10px_rgba(0,0,0,0.05)] z-10">
+                               <div className="flex flex-col gap-2">
+                                   <div className="flex gap-2">
+                                       <select 
+                                           className="w-1/2 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
+                                           value={newFilter.field} 
+                                           onChange={e => setNewFilter({...newFilter, field: e.target.value})}
+                                       >
+                                           <option value="">Campo...</option>
+                                           {availableColumns.map(col => <option key={col} value={col}>{getColumnLabel(col)}</option>)}
+                                       </select>
+                                       <select 
+                                           className="w-1/2 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
+                                           value={newFilter.operator} 
+                                           onChange={e => setNewFilter({...newFilter, operator: e.target.value})}
+                                       >
+                                           <option value="contains">Contém</option>
+                                           <option value="equals">Igual</option>
+                                           <option value="starts">Inicia</option>
+                                       </select>
+                                   </div>
+                                   <div className="flex gap-2">
+                                       <input 
+                                           type="text" 
+                                           placeholder="Valor..." 
+                                           className="flex-1 text-xs p-2 rounded-lg border border-gray-200 bg-gray-50 focus:bg-white outline-none focus:border-simas-cyan focus:ring-1 focus:ring-simas-cyan transition-all"
+                                           value={newFilter.value} 
+                                           onChange={e => setNewFilter({...newFilter, value: e.target.value})}
+                                           onKeyPress={(e) => e.key === 'Enter' && handleAddFilter()}
+                                       />
+                                       <button 
+                                           onClick={handleAddFilter} 
+                                           disabled={!newFilter.field || !newFilter.value}
+                                           className="px-4 bg-simas-dark text-white rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-simas-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                                       >
+                                           OK
+                                       </button>
+                                   </div>
+                               </div>
+                           </div>
+                      </div>
                   </div>
+              </div>
+
+              {/* ACTION BUTTON */}
+              <div className="flex justify-end pt-2">
+                  <Button onClick={handleGenerateCustom} disabled={!customEntity || selectedColumns.length === 0} isLoading={loading} icon="fas fa-bolt" className="px-8 py-4 text-sm shadow-xl shadow-simas-blue/20">
+                      Gerar Relatório
+                  </Button>
               </div>
 
               {/* RESULTADOS */}
               {generated && (
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden animate-slide-in">
-                      <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                  <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden animate-slide-in mb-10">
+                      <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
                           <div>
-                              <h3 className="font-bold text-simas-dark">Resultados</h3>
-                              <p className="text-xs text-gray-500">{customResults.length} registros encontrados</p>
+                              <h3 className="font-extrabold text-simas-dark text-lg">Resultados da Consulta</h3>
+                              <p className="text-xs text-gray-500 font-medium">{customResults.length} registros encontrados</p>
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-3">
                               <Button onClick={exportCustomCSV} variant="secondary" icon="fas fa-file-csv" className="text-xs">CSV</Button>
                               <Button onClick={exportCustomPDF} variant="secondary" icon="fas fa-file-pdf" className="text-xs">PDF</Button>
                           </div>
@@ -512,20 +637,20 @@ export const Reports: React.FC = () => {
                               <thead className="bg-white sticky top-0 shadow-sm z-10">
                                   <tr>
                                       {selectedColumns.map(col => (
-                                          <th key={col} className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">
-                                              {col.split('.').pop()}
+                                          <th key={col} className="px-6 py-4 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                                              {getColumnLabel(col)}
                                           </th>
                                       ))}
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
                                   {customResults.length === 0 ? (
-                                      <tr><td colSpan={selectedColumns.length} className="p-8 text-center text-gray-400 italic">Nenhum dado encontrado com os filtros aplicados.</td></tr>
+                                      <tr><td colSpan={selectedColumns.length} className="p-10 text-center text-gray-400 italic">Nenhum dado encontrado com os filtros aplicados.</td></tr>
                                   ) : (
                                       customResults.map((row, idx) => (
                                           <tr key={idx} className="hover:bg-gray-50 transition-colors">
                                               {selectedColumns.map(col => (
-                                                  <td key={`${idx}-${col}`} className="px-4 py-2 whitespace-nowrap text-gray-700 border-r border-gray-50 last:border-0 text-xs">
+                                                  <td key={`${idx}-${col}`} className="px-6 py-3 whitespace-nowrap text-gray-600 border-r border-gray-50 last:border-0 text-xs font-medium">
                                                       {String(row[col] === null || row[col] === undefined ? '' : row[col])}
                                                   </td>
                                               ))}
@@ -632,27 +757,6 @@ export const Reports: React.FC = () => {
               </div>
           );
       }
-      // Outros relatórios genéricos
-      if (data.tabela || (data.colunas && data.linhas)) {
-          const cols = data.colunas || data.tabela?.colunas || [];
-          const rows = data.linhas || data.tabela?.linhas || [];
-          return (
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 overflow-x-auto animate-fade-in">
-                  <table className="w-full text-sm text-left whitespace-nowrap">
-                      <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
-                          <tr>{cols.map((c: string) => <th key={c} className="px-6 py-3">{c}</th>)}</tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                          {rows.map((row: any[], i: number) => (
-                              <tr key={i} className="hover:bg-gray-50">
-                                  {row.map((val: any, j: number) => <td key={j} className="px-6 py-3">{val}</td>)}
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-          );
-      }
       return null;
   };
 
@@ -665,7 +769,7 @@ export const Reports: React.FC = () => {
                 <p className="text-xs text-gray-400 mt-1">Selecione uma visão</p>
             </div>
             <div className="p-4 space-y-6">
-                {['Gerencial', 'Operacional', 'Administrativo', 'Ferramentas'].map(cat => {
+                {['Gerencial', 'Operacional', 'Ferramentas'].map(cat => {
                     const catReports = validReports.filter(r => r.category === cat);
                     if (catReports.length === 0) return null;
                     return (
