@@ -588,6 +588,13 @@ app.get('/api/:entity/unique/:field', authenticateToken, async (req: any, res: a
     }
 });
 
+// --- SPECIFIC ROUTES (New Alerts Endpoint) ---
+app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
+    // Retorna lista vazia para evitar erro 400 no frontend
+    // Futuramente, aqui será implementada a lógica de alertas
+    res.json([]);
+});
+
 // --- GENERIC CRUD ROUTES ---
 
 app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
