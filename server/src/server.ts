@@ -1,4 +1,6 @@
 
+
+
 import express, { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -69,6 +71,7 @@ const getModel = (modelName: string) => {
     let name = modelName.charAt(0).toLowerCase() + modelName.slice(1);
     if (name === 'solicitacaoPesquisa') name = 'solicitacaoPesquisa'; 
     if (name === 'cargoComissionado') name = 'cargoComissionado';
+    if (name === 'relatorioSalvo') name = 'relatorioSalvo';
     return (prisma as any)[name];
 };
 
@@ -82,7 +85,8 @@ function getEntityPk(entity: string): string {
         'Contrato': 'ID_CONTRATO',
         'Vaga': 'ID_VAGA',
         'Reserva': 'ID_RESERVA',
-        'Protocolo': 'ID_PROTOCOLO'
+        'Protocolo': 'ID_PROTOCOLO',
+        'RelatorioSalvo': 'ID_RELATORIO'
     };
     if (pks[entity]) return pks[entity];
     return `ID_${entity.toUpperCase()}`;
@@ -302,6 +306,63 @@ app.post('/api/reports/custom', authenticateToken, async (req: AuthenticatedRequ
         res.status(500).json({ message: getFriendlyErrorMessage(e) });
     }
 });
+
+// --- SAVED REPORTS ROUTES ---
+
+app.get('/api/reports/saved', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const reports = await prisma.relatorioSalvo.findMany({
+            where: { USUARIO: req.user?.usuario },
+            orderBy: { DATA_CRIACAO: 'desc' }
+        });
+        res.json(reports);
+    } catch (e: any) {
+        console.error('Error fetching saved reports:', e);
+        res.status(500).json({ message: 'Erro ao buscar relatórios salvos.' });
+    }
+});
+
+app.post('/api/reports/saved', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { name, config } = req.body;
+    
+    if (!name || !config) return res.status(400).json({ message: 'Dados inválidos.' });
+
+    try {
+        const newReport = await prisma.relatorioSalvo.create({
+            data: {
+                ID_RELATORIO: `REP${Date.now()}`,
+                NOME: name,
+                USUARIO: req.user?.usuario,
+                CONFIGURACAO: JSON.stringify(config),
+                DATA_CRIACAO: new Date()
+            }
+        });
+        res.json({ success: true, data: newReport });
+    } catch (e: any) {
+        console.error('Error saving report:', e);
+        res.status(500).json({ message: 'Erro ao salvar relatório.' });
+    }
+});
+
+app.delete('/api/reports/saved/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { id } = req.params;
+    try {
+        // Verifica se pertence ao usuário
+        const report = await prisma.relatorioSalvo.findUnique({ where: { ID_RELATORIO: id } });
+        if (!report) return res.status(404).json({ message: 'Relatório não encontrado.' });
+        
+        if (report.USUARIO !== req.user?.usuario && !req.user?.isGerente) {
+            return res.status(403).json({ message: 'Sem permissão.' });
+        }
+
+        await prisma.relatorioSalvo.delete({ where: { ID_RELATORIO: id } });
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('Error deleting report:', e);
+        res.status(500).json({ message: 'Erro ao excluir relatório.' });
+    }
+});
+
 
 // --- AUTOCOMPLETE UNIQUE VALUES ---
 

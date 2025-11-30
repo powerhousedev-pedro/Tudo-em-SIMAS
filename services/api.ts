@@ -1,4 +1,5 @@
 
+
 import { RecordData, DossierData, ActionContext, ReportData } from '../types';
 
 // CONFIGURAÇÃO
@@ -25,7 +26,8 @@ const ENTITY_MAP: Record<string, string> = {
     'PESSOA': 'Pessoa', 'SERVIDOR': 'Servidor', 'CONTRATO': 'Contrato',
     'ALOCACAO': 'Alocacao', 'PROTOCOLO': 'Protocolo', 'CHAMADA': 'Chamada',
     'ATENDIMENTO': 'Atendimento', 'ENCONTRO': 'Encontro', 'AUDITORIA': 'Auditoria',
-    'USUARIO': 'Usuario', 'RESERVA': 'Reserva', 'PESQUISA': 'Pesquisa'
+    'USUARIO': 'Usuario', 'RESERVA': 'Reserva', 'PESQUISA': 'Pesquisa',
+    'RELATORIO_SALVO': 'RelatorioSalvo'
 };
 
 // HELPERS DE ENDPOINT
@@ -239,5 +241,19 @@ export const api = {
   // Novo método para Autocomplete de valores únicos
   getUniqueValues: async (entity: string, field: string) => {
       return request(`/${entity}/unique/${field}`);
+  },
+
+  // --- RELATÓRIOS SALVOS (Meus Relatórios) ---
+  
+  getSavedReports: async () => {
+      return request('/reports/saved');
+  },
+
+  saveReportConfig: async (name: string, config: any) => {
+      return request('/reports/saved', 'POST', { name, config });
+  },
+
+  deleteSavedReport: async (id: string) => {
+      return request(`/reports/saved/${id}`, 'DELETE');
   }
 };

@@ -362,3 +362,14 @@ model Auditoria {
   VALOR_ANTIGO        String?  @db.Text
   VALOR_NOVO          String?  @db.Text
 }
+
+model RelatorioSalvo {
+  ID_RELATORIO String   @id
+  NOME         String
+  USUARIO      String
+  CONFIGURACAO String   @db.Text // Aqui salvaremos o JSON com colunas, filtros e joins
+  DATA_CRIACAO DateTime @default(now())
+
+  // Relação com Usuario (se quiser integridade referencial)
+  usuarioRef   Usuario  @relation(fields: [USUARIO], references: [usuario])
+}
