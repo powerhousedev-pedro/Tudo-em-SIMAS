@@ -26,7 +26,13 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Password Reset State
+  const [resetUser, setResetUser] = useState<{id: string, usuario: string} | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resetting, setResetting] = useState(false);
+
   const isCoord = session.papel === 'COORDENAÇÃO';
+  const isSuperAdmin = session.papel === 'COORDENAÇÃO' && session.isGerente;
 
   useEffect(() => {
       loadUsers();
@@ -105,9 +111,31 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
       }
   };
 
+  const handlePasswordReset = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!resetUser || !newPassword) return;
+      setResetting(true);
+      
+      try {
+          // Assuming 'id' is the primary key for Usuario (default in most DBs, though server uses 'id')
+          const res = await api.updateRecord('Usuario', 'id', resetUser.id, { senha: newPassword });
+          if (res.success) {
+              showToast('success', 'Senha redefinida com sucesso!');
+              setResetUser(null);
+              setNewPassword('');
+          } else {
+              showToast('error', res.message || 'Erro ao redefinir senha.');
+          }
+      } catch (e: any) {
+          showToast('error', 'Erro ao conectar: ' + e.message);
+      } finally {
+          setResetting(false);
+      }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-slide-in">
-      <div className="bg-white w-full max-w-4xl h-[85vh] rounded-3xl shadow-2xl overflow-hidden border border-white/50 flex">
+      <div className="bg-white w-full max-w-4xl h-[85vh] rounded-3xl shadow-2xl overflow-hidden border border-white/50 flex relative">
         
         {/* Create User Column */}
         <div className="w-1/3 bg-white border-r border-gray-100 flex flex-col">
@@ -193,7 +221,7 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
         </div>
 
         {/* List Users Column */}
-        <div className="flex-1 flex flex-col bg-gray-50/30">
+        <div className="flex-1 flex flex-col bg-gray-50/30 relative">
             <div className="p-6 border-b border-gray-100 bg-white flex justify-between items-center">
               <h3 className="font-extrabold text-lg text-simas-dark tracking-tight">Usuários Existentes</h3>
               <button onClick={onClose} className="text-gray-400 hover:text-red-500 transition-colors"><i className="fas fa-times"></i></button>
@@ -206,42 +234,109 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                     <p className="text-center text-gray-400">Nenhum usuário encontrado.</p>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {usersList.map(user => (
-                            <div key={user.usuario} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-8 h-8 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center font-bold text-xs">
-                                            {user.usuario.charAt(0).toUpperCase()}
+                        {usersList.map(user => {
+                            // --- HIERARQUIA DE PERMISSÕES ---
+                            const isTargetSuper = user.papel === 'COORDENAÇÃO' && user.isGerente;
+                            const isTargetGerente = user.isGerente;
+
+                            // 1. Quem pode Editar (apenas Super Admins: Coord + Gerente)
+                            const canEdit = isSuperAdmin;
+
+                            // 2. Quem pode Excluir
+                            let canDelete = false;
+                            if (user.usuario !== session.usuario) {
+                                if (isTargetSuper) {
+                                    // Apenas outro Super Admin apaga um Super Admin
+                                    canDelete = isSuperAdmin;
+                                } else if (isTargetGerente) {
+                                    // Apenas Coordenação (qualquer um) apaga Gerentes
+                                    canDelete = isCoord;
+                                } else {
+                                    // Funcionários: Gerentes ou Coordenação podem apagar
+                                    canDelete = session.isGerente || isCoord;
+                                }
+                            }
+
+                            return (
+                                <div key={user.usuario} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center font-bold text-xs">
+                                                {user.usuario.charAt(0).toUpperCase()}
+                                            </div>
+                                            <h4 className="font-bold text-simas-dark text-sm">{user.usuario}</h4>
                                         </div>
-                                        <h4 className="font-bold text-simas-dark text-sm">{user.usuario}</h4>
+                                        <div className="mt-2 flex gap-2">
+                                            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-md uppercase">{user.papel}</span>
+                                            {user.isGerente && <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-[10px] font-bold rounded-md uppercase">Gerente</span>}
+                                        </div>
                                     </div>
-                                    <div className="mt-2 flex gap-2">
-                                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-md uppercase">{user.papel}</span>
-                                        {user.isGerente && <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-[10px] font-bold rounded-md uppercase">Gerente</span>}
+                                    
+                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {canEdit && (
+                                            <button 
+                                                onClick={() => setResetUser({ id: user.id, usuario: user.usuario })}
+                                                className="w-8 h-8 rounded-lg text-gray-300 hover:text-simas-blue hover:bg-simas-blue/10 flex items-center justify-center transition-all"
+                                                title="Redefinir Senha (Admin)"
+                                            >
+                                                <i className="fas fa-pencil-alt text-sm"></i>
+                                            </button>
+                                        )}
+                                        {canDelete && (
+                                            <button 
+                                                onClick={() => setUserToDelete(user.id)}
+                                                className="w-8 h-8 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all"
+                                                title="Excluir Usuário"
+                                            >
+                                                <i className="fas fa-trash-alt text-sm"></i>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
-                                
-                                {user.usuario !== session.usuario && (
-                                    <button 
-                                        onClick={() => setUserToDelete(user.usuario)}
-                                        className="w-8 h-8 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
-                                        title="Excluir Usuário"
-                                    >
-                                        <i className="fas fa-trash-alt text-sm"></i>
-                                    </button>
-                                )}
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
+
+            {/* Password Reset Overlay */}
+            {resetUser && (
+                <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center animate-fade-in p-8">
+                    <div className="bg-white w-full max-w-sm p-6 rounded-2xl shadow-xl border border-gray-200">
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3 text-yellow-600">
+                                <i className="fas fa-key text-lg"></i>
+                            </div>
+                            <h3 className="font-bold text-simas-dark">Redefinir Senha</h3>
+                            <p className="text-sm text-gray-500">Nova senha para <strong>{resetUser.usuario}</strong></p>
+                        </div>
+                        <form onSubmit={handlePasswordReset}>
+                            <div className="mb-4">
+                                <input 
+                                    type="password" 
+                                    autoFocus
+                                    placeholder="Digite a nova senha..."
+                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-simas-cyan focus:ring-0 outline-none transition-all text-center font-medium"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <Button type="button" variant="secondary" onClick={() => { setResetUser(null); setNewPassword(''); }} className="flex-1 justify-center">Cancelar</Button>
+                                <Button type="submit" isLoading={resetting} className="flex-1 justify-center">Salvar</Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
       </div>
       
       {userToDelete && (
           <ConfirmModal 
               title="Excluir Usuário" 
-              message={`Tem certeza que deseja excluir permanentemente o usuário ${userToDelete}?`}
+              message="Tem certeza que deseja excluir este usuário permanentemente?"
               onConfirm={confirmDeleteUser} 
               onCancel={() => setUserToDelete(null)}
               isLoading={deleting}

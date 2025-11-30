@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, BOOLEAN_FIELD_CONFIG, PERMISSOES_POR_PAPEL } from '../constants';
-import { api } from '../services/api';
+import { useDashboardData, useMutateEntity, useToggleVagaLock } from '../hooks/useSimasData';
 import { Button } from './Button';
 import { Card } from './Card';
 import { RecordData, UserSession, AppContextProps } from '../types';
@@ -11,7 +12,9 @@ import { DossierModal } from './DossierModal';
 import { ExerciseSelectionModal } from './ExerciseSelectionModal';
 import { ConfirmModal } from './ConfirmModal';
 
-interface DashboardProps extends AppContextProps {}
+interface DashboardProps {
+  showToast: (type: 'success' | 'error' | 'info', message: string) => void;
+}
 
 export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   // --- SESSION ---
@@ -19,6 +22,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       const stored = localStorage.getItem('simas_user_session');
       return stored ? JSON.parse(stored) : { token: '', papel: 'GGT', usuario: '', isGerente: false };
   }, []);
+
+  const queryClient = useQueryClient();
 
   // --- COMPUTED VALUES (Role Filtering) ---
   const tabs = useMemo(() => {
@@ -33,19 +38,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   }, [session.papel]);
 
   // --- STATE ---
-  // Ensure default is a valid key available to the user
   const [activeTab, setActiveTab] = useState(tabs[0] || 'Pessoa');
   const [formData, setFormData] = useState<RecordData>({});
   const [isEditing, setIsEditing] = useState(false);
-  const [loadingData, setLoadingData] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  
-  const [cardData, setCardData] = useState<{ [key: string]: any[] }>({});
-  const [searchTerms, setSearchTerms] = useState<{ [key: string]: string }>({});
-  const deferredSearchTerms = useDeferredValue(searchTerms);
   const [selectedItems, setSelectedItems] = useState<Record<string, string>>({});
 
   // UI State
+  const [searchTerms, setSearchTerms] = useState<{ [key: string]: string }>({});
+  const deferredSearchTerms = useDeferredValue(searchTerms);
   const [activeFilters, setActiveFilters] = useState<{ [entity: string]: string[] }>({});
   const [filterPopoverOpen, setFilterPopoverOpen] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -58,85 +58,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   
   // Delete Confirmation State
   const [itemToDelete, setItemToDelete] = useState<{item: any, entity: string} | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
-  // --- EFFECTS ---
-
-  // Ensure activeTab is valid when tabs change (e.g. login)
+  // --- REACT QUERY DATA LOADING ---
+  // Ensure default is a valid key available to the user
   useEffect(() => {
       if (!tabs.includes(activeTab) && tabs.length > 0) {
           setActiveTab(tabs[0]);
       }
   }, [tabs, activeTab]);
 
-  // 1. Tab Change Reset
+  // Reset form on tab change
   useEffect(() => {
     const initialData: RecordData = {};
     const today = new Date().toISOString().split('T')[0];
-    
-    // Pre-fill dates
     DATA_MODEL[activeTab]?.forEach(field => {
         const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
         initialData[field] = isDateField ? today : '';
     });
-
     setFormData(initialData);
     setIsEditing(false);
     setSelectedItems({});
     setShowMainList(false);
     setDropdownSearch('');
     setActiveFilters({});
-    
-    loadAllRequiredData();
   }, [activeTab]);
 
-  // 2. Click Outside Handler
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-        if (filterPopoverOpen && popoverRefs.current[filterPopoverOpen] && !popoverRefs.current[filterPopoverOpen]?.contains(event.target as Node)) {
-            setFilterPopoverOpen(null);
-        }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [filterPopoverOpen]);
-
-  // --- DATA LOADING ---
-
-  const loadAllRequiredData = async () => {
-    setLoadingData(true);
-    const entitiesToLoad = tabs; 
-    
-    try {
-      const results = await Promise.all(entitiesToLoad.map(async (entity) => {
-           try {
-             const data = await api.fetchEntity(entity);
-             return { entity, data };
-           } catch (e) {
-             return { entity, data: [] };
-           }
-      }));
-      
-      const newCardData = { ...cardData };
-      results.forEach(res => { newCardData[res.entity] = res.data; });
-      setCardData(newCardData);
-    } catch (e) {
-      showToast('error', 'Erro ao carregar dados.');
-    } finally {
-      setLoadingData(false);
-    }
-  };
-
-  // --- COMPUTED VALUES ---
-  
-  const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
-
+  // Calculate needed columns
   const columnsToRender = useMemo(() => {
     const columns: string[] = showMainList ? [activeTab] : [];
     const modelFields = DATA_MODEL[activeTab] || [];
-    
     modelFields.forEach(field => {
         const linkedEntity = FK_MAPPING[field];
         if (linkedEntity && ENTITY_CONFIGS[linkedEntity] && !columns.includes(linkedEntity) && linkedEntity !== activeTab) {
@@ -148,18 +100,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     return columns;
   }, [activeTab, showMainList, tabs]);
 
-  // --- HANDLERS ---
+  // FETCH DATA IN PARALLEL
+  const queries = useDashboardData(columnsToRender);
+  const loadingData = queries.some(q => q.isLoading);
 
-  const resetForm = () => {
-    const initialData: RecordData = {};
-    const today = new Date().toISOString().split('T')[0];
-    
-    DATA_MODEL[activeTab]?.forEach(field => {
-        const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
-        initialData[field] = isDateField ? today : '';
-    });
-    setFormData(initialData);
-  };
+  // --- MUTATIONS ---
+  const { create: createMutation, update: updateMutation, remove: deleteMutation } = useMutateEntity(activeTab);
+  
+  // Hook genérico para deletar qualquer entidade (usado no modal de confirmação)
+  const { remove: genericRemove } = useMutateEntity(itemToDelete?.entity || 'Pessoa'); 
+
+  const toggleLockMutation = useToggleVagaLock();
+
+  // --- HANDLERS ---
 
   const handleCardSelect = (entity: string, item: any) => {
     const config = ENTITY_CONFIGS[entity];
@@ -176,7 +129,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const handleEdit = (item: any) => {
       const formatted = { ...item };
       
-      // Formatting for Masks
       if (formatted.SALARIO) formatted.SALARIO = validation.formatCurrency(formatted.SALARIO);
       if (formatted.TELEFONE) formatted.TELEFONE = validation.maskPhone(formatted.TELEFONE);
       if (formatted.CPF) formatted.CPF = validation.maskCPF(formatted.CPF);
@@ -189,9 +141,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                  } else if (formatted[key] instanceof Date) {
                      formatted[key] = formatted[key].toISOString().split('T')[0];
                  }
-             } catch(e) {
-                 console.warn("Could not format date for edit:", key);
-             }
+             } catch(e) {}
           }
       });
 
@@ -210,7 +160,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     else if (name === 'TELEFONE') processedValue = validation.maskPhone(value);
     else if (name === 'SALARIO') processedValue = validation.maskCurrency(value);
 
-    // Auto-calculate prefix for Servidor
     if (activeTab === 'Servidor' && name === 'VINCULO') {
          const prefix = getPrefixForVinculo(value);
          setFormData(prev => ({ ...prev, [name]: processedValue, 'PREFIXO_MATRICULA': prefix }));
@@ -222,11 +171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const handleToggleChange = (field: string, checked: boolean) => {
       const config = BOOLEAN_FIELD_CONFIG[field];
       let val: any = checked;
-      
-      if (config.type === 'string') {
-          val = checked ? 'Sim' : 'Não';
-      }
-      
+      if (config.type === 'string') val = checked ? 'Sim' : 'Não';
       setFormData(prev => ({ ...prev, [field]: val }));
   };
 
@@ -234,11 +179,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     e.preventDefault();
     let payload = { ...formData };
 
-    // Frontend Validations
     if (activeTab === 'Pessoa') {
         if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
         payload.CPF = payload.CPF.replace(/\D/g, ""); 
-        
         const normalizedPhone = validation.normalizePhoneForSave(payload.TELEFONE);
         if (payload.TELEFONE && !normalizedPhone) return showToast('error', 'Telefone inválido.');
         payload.TELEFONE = normalizedPhone || "";
@@ -249,45 +192,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         payload.SALARIO = payload.SALARIO.replace(/[R$\.\s]/g, '').replace(',', '.');
     }
 
-    // Business Logic: Calculate Metadata for Atendimento
     if (activeTab === 'Atendimento') {
         const metadata = businessLogic.calculateAtendimentoMetadata(payload);
         payload = { ...payload, ...metadata };
     }
 
-    setSubmitting(true);
     try {
       const config = ENTITY_CONFIGS[activeTab];
       
-      // ID Generation for non-manual PKs
       if(!isEditing && !config.manualPk && config.pkPrefix && !payload[config.pk]) {
           payload[config.pk] = validation.generateLegacyId(config.pkPrefix);
       }
 
-      const res = isEditing 
-        ? await api.updateRecord(activeTab, config.pk, payload[config.pk], payload)
-        : await api.createRecord(activeTab, payload);
-
-      if (res.success) {
-        showToast('success', isEditing ? 'Atualizado!' : 'Criado!');
-        // Refresh Data
-        const newData = await api.fetchEntity(activeTab);
-        setCardData(prev => ({ ...prev, [activeTab]: newData }));
-        if (activeTab === 'Contrato') {
-            const resData = await api.fetchEntity('RESERVAS');
-            setCardData(prev => ({ ...prev, 'RESERVAS': resData }));
-        }
-        
-        // Reset
-        resetForm();
-        setIsEditing(false);
+      if (isEditing) {
+          await updateMutation.mutateAsync({ pkValue: payload[config.pk], data: payload });
+          showToast('success', 'Atualizado!');
       } else {
-        showToast('error', res.message);
+          await createMutation.mutateAsync(payload);
+          showToast('success', 'Criado!');
+          setFormData(prev => {
+              // Reset only specific fields if needed, or simple reset
+              const initial: any = {};
+              DATA_MODEL[activeTab]?.forEach(f => {
+                  if(/DATA|INICIO/.test(f)) initial[f] = new Date().toISOString().split('T')[0];
+                  else initial[f] = '';
+              });
+              return initial;
+          });
       }
+      setIsEditing(false);
     } catch (err: any) {
       showToast('error', err.message || 'Erro de conexão.');
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -298,24 +233,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
-    
-    setIsDeleting(true);
     const { entity, item } = itemToDelete;
     const config = ENTITY_CONFIGS[entity];
     
     try {
-      const res = await api.deleteRecord(entity, config.pk, item[config.pk]);
-      if (res.success) {
-        showToast('info', 'Registro excluído.');
-        const newData = await api.fetchEntity(entity);
-        setCardData(prev => ({ ...prev, [entity]: newData }));
-      } else { 
-        showToast('error', 'Erro ao excluir.'); 
-      }
+      await genericRemove.mutateAsync(item[config.pk]);
+      showToast('info', 'Registro excluído.');
     } catch(err) { 
-      showToast('error', 'Erro de conexão.'); 
+      showToast('error', 'Erro ao excluir.'); 
     } finally {
-      setIsDeleting(false);
       setItemToDelete(null);
     }
   };
@@ -324,28 +250,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       e.stopPropagation();
       if (isOcupada) return showToast('error', 'Vaga ocupada não pode ser bloqueada.');
       try {
-          const newStatus = await api.toggleVagaBloqueada(idVaga);
-          showToast('success', newStatus ? 'Vaga bloqueada.' : 'Vaga desbloqueada.');
-          const newData = await api.fetchEntity('Vaga');
-          setCardData(prev => ({ ...prev, 'Vaga': newData }));
+          await toggleLockMutation.mutateAsync(idVaga);
+          showToast('success', 'Status da vaga alterado.');
       } catch (err: any) { showToast('error', err.message); }
   };
 
-  // --- HELPER FUNCTIONS ---
-
-  const getPrefixForVinculo = (vinculo: string) => {
-      const map: Record<string, string> = { 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' };
-      return map[vinculo] || '10';
-  };
-
-  const getFilteredOptions = (field: string): string[] => {
-      if (field === 'REMETENTE' && session.papel === 'GPRGP') {
-          return DROPDOWN_STRUCTURES['REMETENTE'].filter((o: string) => o !== 'Prefeitura');
-      }
-      return (DROPDOWN_OPTIONS[field] as string[]) || [];
-  };
-
-  // --- RENDER INPUTS ---
+  // --- RENDER HELPERS ---
+  const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
+  const getPrefixForVinculo = (vinculo: string) => ({ 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' }[vinculo] || '10');
+  const getFilteredOptions = (field: string) => field === 'REMETENTE' && session.papel === 'GPRGP' ? DROPDOWN_STRUCTURES['REMETENTE'].filter((o: string) => o !== 'Prefeitura') : (DROPDOWN_OPTIONS[field] as string[]) || [];
 
   const renderInput = (field: string) => {
     const config = ENTITY_CONFIGS[activeTab];
@@ -353,25 +266,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const isFK = FK_MAPPING[field] !== undefined;
     const isCalculated = field === 'PREFIXO_MATRICULA';
 
-    // Logic to hide specific fields based on role or edit state
     if ((isPK && !isEditing && !config.manualPk) || 
         (activeTab === 'Cargo' && field === 'SALARIO' && session.papel === 'GGT') ||
         (activeTab === 'Protocolo' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
         return null;
     }
 
-    // --- TOGGLE FIELDS RENDER ---
     if (BOOLEAN_FIELD_CONFIG[field]) {
         const boolConfig = BOOLEAN_FIELD_CONFIG[field];
-        // Determine current checked state
         let isChecked = false;
         const currentVal = formData[field];
-        
-        if (boolConfig.type === 'boolean') {
-            isChecked = !!currentVal;
-        } else {
-            isChecked = currentVal === 'Sim';
-        }
+        if (boolConfig.type === 'boolean') isChecked = !!currentVal;
+        else isChecked = currentVal === 'Sim';
 
         return (
             <div key={field} className="relative group">
@@ -381,12 +287,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        <span className="text-[10px] text-gray-400 font-medium mt-0.5">{isChecked ? 'Ativado/Sim' : 'Desativado/Não'}</span>
                     </div>
                     <div className="relative">
-                      <input
-                        type="checkbox"
-                        className="sr-only peer"
-                        checked={isChecked}
-                        onChange={(e) => handleToggleChange(field, e.target.checked)}
-                      />
+                      <input type="checkbox" className="sr-only peer" checked={isChecked} onChange={(e) => handleToggleChange(field, e.target.checked)} />
                       <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-simas-cyan"></div>
                     </div>
                 </label>
@@ -401,33 +302,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       if (options.length <= 4) {
           return (
              <div key={field} className="relative group mb-1">
-                 <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-2 ml-1">
-                    {field.replace(/_/g, ' ')} <span className="text-red-400 font-bold">*</span>
-                 </label>
+                 <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-2 ml-1">{field.replace(/_/g, ' ')} <span className="text-red-400 font-bold">*</span></label>
                  <div className="flex gap-2 w-full">
                      {options.map((opt) => {
                          const isSelected = formData[field] === opt;
                          let label = opt;
-                         if (field === 'SEXO') {
-                             if (opt === 'M') label = 'Masculino';
-                             if (opt === 'F') label = 'Feminino';
-                         }
-
+                         if (field === 'SEXO') { if (opt === 'M') label = 'Masculino'; if (opt === 'F') label = 'Feminino'; }
                          return (
-                             <button
-                                key={opt}
-                                type="button"
-                                onClick={() => handleInputChange({ target: { name: field, value: opt } } as any)}
-                                className={`
-                                    flex-1 py-3 px-3 rounded-xl text-xs font-bold border transition-all duration-200 flex items-center justify-center gap-2 outline-none
-                                    ${isSelected 
-                                        ? 'bg-simas-cyan text-white border-simas-cyan shadow-md transform scale-[1.02]' 
-                                        : 'bg-white text-gray-500 border-gray-200 hover:border-simas-cyan/50 hover:bg-gray-50'}
-                                `}
-                             >
-                                 <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-white' : 'border-gray-300'}`}>
-                                     {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
-                                 </div>
+                             <button key={opt} type="button" onClick={() => handleInputChange({ target: { name: field, value: opt } } as any)} className={`flex-1 py-3 px-3 rounded-xl text-xs font-bold border transition-all duration-200 flex items-center justify-center gap-2 outline-none ${isSelected ? 'bg-simas-cyan text-white border-simas-cyan shadow-md transform scale-[1.02]' : 'bg-white text-gray-500 border-gray-200 hover:border-simas-cyan/50 hover:bg-gray-50'}`}>
+                                 <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-white' : 'border-gray-300'}`}>{isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}</div>
                                  {label}
                              </button>
                          )
@@ -436,7 +319,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
              </div>
           );
       }
-
       return (
         <div key={field} className="relative group">
           <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
@@ -460,16 +342,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         <label className="block text-[10px] font-bold text-simas-dark/70 uppercase tracking-widest mb-1.5 ml-1">{field.replace(/_/g, ' ')}</label>
         <div className="relative">
             {isFK && <div className="absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan"><i className="fas fa-link text-xs"></i></div>}
-            <input 
-                type={type} 
-                name={field} 
-                value={formData[field] || ''} 
-                onChange={handleInputChange} 
-                className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} 
-                readOnly={isReadOnly}
-                placeholder={isFK ? "Selecione na lista..." : "Digite aqui..."} 
-                maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)}
-            />
+            <input type={type} name={field} value={formData[field] || ''} onChange={handleInputChange} className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} readOnly={isReadOnly} placeholder={isFK ? "Selecione na lista..." : "Digite aqui..."} maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)} />
         </div>
       </div>
     );
@@ -482,14 +355,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         <div className="relative min-w-[300px] z-50">
             <button onClick={() => setIsDropdownOpen(!isDropdownOpen)} className="w-full flex items-center justify-between pl-2 pr-4 py-2 bg-white text-simas-dark font-bold text-sm rounded-full border border-gray-100 hover:border-simas-cyan transition-all outline-none shadow-soft group">
                 <div className="flex items-center gap-3">
-                     <div className="w-9 h-9 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors">
-                        <i className="fas fa-folder-open text-xs"></i>
-                     </div>
+                     <div className="w-9 h-9 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center group-hover:bg-simas-cyan group-hover:text-white transition-colors"><i className="fas fa-folder-open text-xs"></i></div>
                      <span>{ENTITY_CONFIGS[activeTab]?.title || ENTITY_CONFIGS['Pessoa'].title}</span>
                 </div>
                 <i className={`fas fa-chevron-down text-xs text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}></i>
             </button>
-
             {isDropdownOpen && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)}></div>
@@ -512,7 +382,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                 </>
             )}
         </div>
-
         <div className="pl-6 flex items-center gap-4">
             <button onClick={() => setShowMainList(!showMainList)} className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-sm uppercase tracking-wide ${showMainList ? 'bg-simas-dark text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100 hover:border-gray-200 hover:text-simas-dark'}`}>
                 <i className={`fas ${showMainList ? 'fa-eye' : 'fa-eye-slash'}`}></i> Consultar
@@ -522,14 +391,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MAIN WORKSPACE --- */}
       <div className="flex-1 flex gap-8 px-8 pb-8 overflow-hidden min-h-0 z-10">
-        
-        {/* 1. EDITOR PANEL */}
         <div className="flex-none w-[380px] flex flex-col bg-white rounded-3xl shadow-soft overflow-hidden z-20 border border-white/50">
           <div className="p-6 border-b border-gray-50 bg-white">
             <h2 className="text-lg font-extrabold text-simas-dark flex items-center gap-3 tracking-tight">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isEditing ? 'bg-simas-cyan/10 text-simas-cyan' : 'bg-simas-blue/10 text-simas-blue'}`}>
-                    <i className={`fas ${isEditing ? 'fa-pen' : 'fa-plus'} text-xs`}></i>
-                </div>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isEditing ? 'bg-simas-cyan/10 text-simas-cyan' : 'bg-simas-blue/10 text-simas-blue'}`}><i className={`fas ${isEditing ? 'fa-pen' : 'fa-plus'} text-xs`}></i></div>
                 {isEditing ? 'Editar Registro' : 'Novo Registro'}
             </h2>
           </div>
@@ -537,38 +402,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
             <form onSubmit={handleSubmit} className="space-y-5">
               {DATA_MODEL[activeTab]?.map(field => renderInput(field))}
               <div className="pt-6 flex gap-3">
-                {isEditing && <Button type="button" variant="ghost" onClick={() => { resetForm(); setIsEditing(false); }} className="flex-1">Cancelar</Button>}
-                <Button type="submit" isLoading={submitting} className="flex-[2]">{isEditing ? 'Salvar' : 'Criar'}</Button>
+                {isEditing && <Button type="button" variant="ghost" onClick={() => { setIsEditing(false); }} className="flex-1">Cancelar</Button>}
+                <Button type="submit" isLoading={createMutation.isPending || updateMutation.isPending} className="flex-[2]">{isEditing ? 'Salvar' : 'Criar'}</Button>
               </div>
             </form>
           </div>
         </div>
 
-        {/* 2. HORIZONTAL COLUMNS */}
         <div className="flex-1 overflow-x-auto flex gap-6 pb-2 items-stretch px-2 scrollbar-thin scrollbar-thumb-simas-blue scrollbar-track-transparent snap-x">
            {columnsToRender.map((entity, index) => {
              const config = ENTITY_CONFIGS[entity];
              if (!config) return null;
              
-             const rawData = cardData[entity] || [];
+             // Extract data from the parallel query result
+             const queryResult = queries[index];
+             const rawData = queryResult?.data || [];
+             const isLoading = queryResult?.isLoading;
+
              const searchTerm = (deferredSearchTerms[entity] || '').toLowerCase();
              const entityFilters = activeFilters[entity] || [];
              
-             const filteredData = rawData.filter(item => {
+             const filteredData = Array.isArray(rawData) ? rawData.filter(item => {
                  const display = config.cardDisplay(item);
                  const textMatch = !searchTerm || `${display.title} ${display.subtitle} ${display.details || ''}`.toLowerCase().includes(searchTerm);
                  const filterMatch = entityFilters.length === 0 || (config.filterBy && entityFilters.includes(item[config.filterBy]));
                  return textMatch && filterMatch;
-             });
+             }) : [];
 
              const isFilterOpen = filterPopoverOpen === entity;
              const filterOptions = isFilterOpen && config.filterBy 
-                ? [...new Set(rawData.map(i => i[config.filterBy!]).filter(Boolean))].sort() 
+                ? [...new Set(rawData.map((i: any) => i[config.filterBy!]).filter(Boolean))].sort() 
                 : [];
 
              return (
                <div key={`${entity}-${index}`} className="flex-none w-[340px] flex flex-col bg-slate-200 rounded-3xl overflow-hidden snap-center h-full border border-slate-300 backdrop-blur-sm shadow-inner">
-                 {/* Column Header */}
                  <div className="p-4 bg-gray-50/80 sticky top-0 z-10 backdrop-blur-md border-b border-gray-100">
                    <div className="flex items-center justify-between mb-4">
                      <h3 className="font-bold flex items-center gap-2 text-simas-dark uppercase text-xs tracking-wider pl-1">
@@ -593,7 +460,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                                            {entityFilters.length > 0 && <button onClick={() => setActiveFilters(prev => ({...prev, [entity]: []}))} className="text-[10px] text-red-500 font-bold hover:underline">Limpar</button>}
                                        </div>
                                        <div className="max-h-[200px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                           {filterOptions.map(opt => (
+                                           {filterOptions.map((opt: any) => (
                                                <label key={opt} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors text-xs text-gray-600">
                                                    <input type="checkbox" checked={entityFilters.includes(opt)} onChange={() => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))} className="rounded text-simas-cyan focus:ring-simas-cyan border-gray-300"/>
                                                    <span className="truncate">{opt}</span>
@@ -607,9 +474,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                    </div>
                  </div>
                  
-                 {/* Cards List */}
                  <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
-                   {loadingData ? <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div> : filteredData.map(item => {
+                   {isLoading ? <div className="p-4 mb-3 bg-white/50 rounded-2xl border border-white shadow-sm animate-pulse h-24"></div> : filteredData.map((item: any) => {
                        const pkValue = String(item[config.pk]);
                        const display = config.cardDisplay(item);
                        const isSelected = selectedItems[entity] === pkValue;
@@ -648,19 +514,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         </div>
       </div>
 
-      {/* --- MODALS --- */}
       {dossierCpf && <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />}
-      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); api.fetchEntity('Vaga').then(d => setCardData(p => ({...p, 'Vaga': d}))); }} showToast={showToast} />}
-      
-      {itemToDelete && (
-        <ConfirmModal 
-          title="Confirmar Exclusão"
-          message={`Tem certeza que deseja excluir este registro de ${ENTITY_CONFIGS[itemToDelete.entity].title}?`}
-          onConfirm={handleConfirmDelete}
-          onCancel={() => setItemToDelete(null)}
-          isLoading={isDeleting}
-        />
-      )}
+      {exerciseVagaId && <ExerciseSelectionModal vagaId={exerciseVagaId} onClose={() => setExerciseVagaId(null)} onSuccess={() => { setExerciseVagaId(null); showToast('success', 'Atualizado!'); queryClient.invalidateQueries({ queryKey: ['entity', 'Vaga'] }); }} showToast={showToast} />}
+      {itemToDelete && <ConfirmModal title="Confirmar Exclusão" message={`Tem certeza que deseja excluir este registro de ${ENTITY_CONFIGS[itemToDelete.entity].title}?`} onConfirm={handleConfirmDelete} onCancel={() => setItemToDelete(null)} isLoading={deleteMutation.isPending} />}
     </div>
   );
 };

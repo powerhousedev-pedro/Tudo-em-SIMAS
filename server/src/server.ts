@@ -745,7 +745,98 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
     }
 });
 
-// --- REPORTS (Mantido igual à sua versão original, pois estava correto para leitura) ---
+// --- BUSINESS INTELLIGENCE & ALERTS ---
+app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
+    try {
+        const alerts = [];
+        const today = new Date();
+        const sevenDaysAgo = new Date(today);
+        sevenDaysAgo.setDate(today.getDate() - 7);
+        const twoYearsAgo = new Date(today);
+        twoYearsAgo.setFullYear(today.getFullYear() - 2);
+
+        // 1. Stagnant Workflows (Aguardando > 7 dias)
+        const stagnant = await prisma.atendimento.findMany({
+            where: {
+                STATUS_PEDIDO: 'Aguardando',
+                DATA_ENTRADA: { lt: sevenDaysAgo }
+            }
+        });
+        stagnant.forEach((a: any) => {
+            alerts.push({
+                id: `stale_${a.ID_ATENDIMENTO}`,
+                type: 'STAGNATION',
+                severity: 'medium',
+                title: 'Atendimento Estagnado',
+                message: `O pedido ${a.TIPO_PEDIDO} de ${a.REMETENTE} está aguardando há mais de 7 dias.`,
+                entityId: a.ID_ATENDIMENTO,
+                date: a.DATA_ENTRADA
+            });
+        });
+
+        // 2. Orphan Servers (Servidor sem Alocação)
+        // Note: Using include + filter inside map/reduce might be slow on huge datasets, 
+        // but robust for now. Optimized query: find servers where NONE Alocacao matches
+        const servers = await prisma.servidor.findMany({
+            include: { alocacao: true },
+            where: {
+                alocacao: { none: {} } // Prisma feature: returns records with no related records
+            }
+        });
+        servers.forEach((s: any) => {
+            alerts.push({
+                id: `orphan_${s.MATRICULA}`,
+                type: 'INTEGRITY',
+                severity: 'high',
+                title: 'Servidor sem Alocação',
+                message: `O servidor ${s.MATRICULA} está ativo mas não possui lotação definida.`,
+                entityId: s.MATRICULA,
+                date: s.DATA_MATRICULA
+            });
+        });
+
+        // 3. Blocked Vacancies
+        const blockedVagas = await prisma.vaga.findMany({
+            where: { BLOQUEADA: true },
+            include: { cargo: true, lotacao: true }
+        });
+        blockedVagas.forEach((v: any) => {
+            alerts.push({
+                id: `blocked_${v.ID_VAGA}`,
+                type: 'BLOCKED',
+                severity: 'low',
+                title: 'Vaga Bloqueada',
+                message: `Vaga de ${v.cargo?.NOME_CARGO} em ${v.lotacao?.LOTACAO} está bloqueada.`,
+                entityId: v.ID_VAGA,
+                date: new Date()
+            });
+        });
+
+        // 4. Old Contracts (Potential Expiration > 2 years)
+        const oldContracts = await prisma.contrato.findMany({
+            where: { DATA_DO_CONTRATO: { lt: twoYearsAgo } },
+            include: { pessoa: true }
+        });
+        oldContracts.forEach((c: any) => {
+            alerts.push({
+                id: `expire_${c.ID_CONTRATO}`,
+                type: 'EXPIRATION',
+                severity: 'medium',
+                title: 'Contrato Antigo',
+                message: `O contrato de ${c.pessoa?.NOME} tem mais de 2 anos. Verifique renovação/término.`,
+                entityId: c.ID_CONTRATO,
+                date: c.DATA_DO_CONTRATO
+            });
+        });
+
+        res.json(alerts);
+    } catch (e: any) {
+        console.error("Alerts Error:", e);
+        res.status(500).json({ message: 'Erro ao gerar alertas' });
+    }
+});
+
+// --- REPORTS ---
 app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any) => {
     const { reportName } = req.params;
 
