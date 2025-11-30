@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Fonte personalizada: Cera Pro */
+  --font-display: 'Cera Pro'; 
+  --font-body: 'Cera Pro';
+}
+
+body {
+  font-family: var(--font-body), 'Inter', sans-serif;
+  background-color: #f0f2f5;
+  color: #13335a;
+  /* Cera Pro Regular para textos longos, espaçamento normal */
+  font-weight: 400;
+  letter-spacing: 0; 
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Cera Pro Black para Títulos */
+h1, h2, .font-display {
+  font-family: var(--font-display), var(--font-body), 'Inter', sans-serif;
+  font-weight: 900; /* Black */
+  text-transform: uppercase;
+  letter-spacing: -0.03em; /* 30 milésimos de M */
+}
+
+/* Cera Pro Medium para Subtítulos */
+h3, h4, h5, h6 {
+  font-family: var(--font-body), 'Inter', sans-serif;
+  font-weight: 500; /* Medium */
+  text-transform: uppercase;
+}
+
+@layer utilities {
+  .text-shadow {
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  .text-shadow-md {
+    text-shadow: 0 4px 8px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.08);
+  }
+  .text-shadow-lg {
+    text-shadow: 0 15px 30px rgba(0,0,0,0.11), 0 5px 15px rgba(0,0,0,0.08);
+  }
+  .text-glow {
+    text-shadow: 0 0 10px rgba(66, 185, 235, 0.5), 0 0 20px rgba(66, 185, 235, 0.3);
+  }
+}
+
+/* Minimal Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.custom-scrollbar::-webkit-scrollbar { width: 5px; }
+.glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.6); }
