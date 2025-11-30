@@ -60,8 +60,12 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
         const errorData = await response.json().catch(() => ({}));
         let errorMessage = errorData.message || errorData.error || response.statusText;
         
-        if (errorMessage.includes('Prisma') || errorMessage.includes('invocation') || errorMessage.includes('Internal Server Error')) {
-            errorMessage = 'Ocorreu um erro técnico no servidor. Tente novamente mais tarde.';
+        // Hide only technical Prisma/Internal Server errors that don't have custom messages
+        // But allow "Erro interno:" pass through if it contains specific details
+        if (errorMessage.includes('Prisma') || errorMessage.includes('invocation')) {
+             if (!errorMessage.includes('Erro interno:')) {
+                 errorMessage = 'Ocorreu um erro técnico no servidor. Tente novamente mais tarde.';
+             }
         }
         
         if (errorMessage.includes('<!DOCTYPE html>')) {
