@@ -1,4 +1,5 @@
 
+
 import { EntityConfig, DropdownOptions } from './types';
 import { validation } from './utils/validation';
 
@@ -445,6 +446,17 @@ export const DROPDOWN_STRUCTURES: any = {
   'REMETENTE': [
     'Prefeitura', 'Currículo', 'Protocolo', 'Sem Protocolo', 'Cogestora', 'Outro'
   ]
+};
+
+// Configuration for boolean-like fields
+// type: 'boolean' = Native DB boolean (true/false)
+// type: 'string' = DB String ('Sim'/'Não')
+export const BOOLEAN_FIELD_CONFIG: { [key: string]: { type: 'boolean' | 'string' } } = {
+    'BLOQUEADA': { type: 'boolean' },
+    'AUTORIZO': { type: 'string' },
+    'ABANDONO': { type: 'string' },
+    'MATERIAL_PENDENTE': { type: 'string' },
+    'ATIVO': { type: 'string' }
 };
 
 export const DROPDOWN_OPTIONS: DropdownOptions = {
