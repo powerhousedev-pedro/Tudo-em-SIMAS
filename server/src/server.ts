@@ -748,7 +748,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
 // --- BUSINESS INTELLIGENCE & ALERTS ---
 app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
     try {
-        const alerts = [];
+        const alerts: any[] = [];
         const today = new Date();
         const sevenDaysAgo = new Date(today);
         sevenDaysAgo.setDate(today.getDate() - 7);
