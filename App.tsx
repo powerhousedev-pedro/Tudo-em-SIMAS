@@ -42,7 +42,7 @@ const MainLayout: React.FC<{
             <header className="flex-none bg-simas-dark text-white z-50 shadow-soft relative">
               <div className="flex items-center justify-between px-8 h-20 relative z-10">
                 <div className="flex items-center gap-4">
-                  <div className="h-10 w-10 bg-white text-simas-dark flex items-center justify-center rounded-xl shadow-lg transform transition-transform hover:scale-105 p-2">
+                  <div className="h-10 w-10 bg-white text-simas-dark flex items-center justify-center rounded-xl shadow-lg transform transition-transform hover:scale-105 p-2 shrink-0">
                     <Logo className="w-full h-full" />
                   </div>
                   {/* Texto: Oculto em telas muito pequenas (mobile portrait), aparece empilhado em tablet, linha única em desktop */}
@@ -52,10 +52,6 @@ const MainLayout: React.FC<{
                         <span className="md:mr-1.5">Tudo em</span>
                         <span>SIMAS</span>
                     </h1>
-                    {/* Subtítulo: Cera Pro Medium (font-medium), Uppercase. Oculto em Tablet/Mobile (< md) */}
-                    <span className="hidden md:block text-[10px] text-simas-cyan font-medium tracking-wider uppercase mt-1 opacity-90">
-                        Sistema de Monitoramento Integrado
-                    </span>
                   </div>
                 </div>
 
