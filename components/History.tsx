@@ -86,6 +86,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const [globalSearch, setGlobalSearch] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
     const [openFilterCol, setOpenFilterCol] = useState<string | null>(null);
+    const [filterSearch, setFilterSearch] = useState(''); // New state for filter dropdown search
     const filterRef = useRef<HTMLDivElement>(null);
 
     // Atualiza a view padrão se a lista de tabs mudar
@@ -110,6 +111,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             loadData();
             setActiveFilters({});
             setGlobalSearch('');
+            setOpenFilterCol(null);
         }
     }, [currentView]);
 
@@ -338,14 +340,18 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                     <tr className="border-b border-gray-100 bg-gray-50/50">
                                         {columns.map(col => {
                                             const label = getColumnLabel(col);
-                                            const uniqueValues = getUniqueValues(col);
+                                            const rawValues = getUniqueValues(col);
                                             const isOpen = openFilterCol === col;
+                                            // Filter values based on search inside dropdown
+                                            const uniqueValues = isOpen 
+                                                ? rawValues.filter(v => String(v).toLowerCase().includes(filterSearch.toLowerCase())) 
+                                                : [];
                                             const selectedValues = activeFilters[col] || [];
                                             const isFiltered = selectedValues.length > 0;
 
                                             return (
                                                 <th key={col} className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider relative group select-none">
-                                                    <div className="flex items-center justify-between cursor-pointer hover:bg-gray-100/50 rounded p-1 -ml-1 transition-colors" onClick={() => setOpenFilterCol(isOpen ? null : col)}>
+                                                    <div className="flex items-center justify-between cursor-pointer hover:bg-gray-100/50 rounded p-1 -ml-1 transition-colors" onClick={() => { setOpenFilterCol(isOpen ? null : col); setFilterSearch(''); }}>
                                                         <span className={isFiltered ? 'text-simas-accent' : ''}>{label}</span>
                                                         <button className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${isFiltered ? 'text-simas-accent' : 'text-gray-300 opacity-0 group-hover:opacity-100'}`}>
                                                             <i className={`fas ${isFiltered ? 'fa-filter' : 'fa-chevron-down'} text-[10px]`}></i>
@@ -353,31 +359,50 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                     </div>
 
                                                     {isOpen && (
-                                                        <div ref={filterRef} className="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 animate-fade-in overflow-hidden flex flex-col max-h-[300px]">
-                                                            <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                                                                <span className="text-xs font-bold text-gray-600">Filtrar por {label}</span>
-                                                                {isFiltered && <button onClick={(e) => { e.stopPropagation(); setActiveFilters({...activeFilters, [col]: []}); }} className="text-[10px] text-red-500 hover:underline">Limpar</button>}
+                                                        <div ref={filterRef} className="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 animate-fade-in overflow-hidden flex flex-col max-h-[350px]">
+                                                            <div className="p-3 border-b border-gray-100 bg-gray-50 flex flex-col gap-2">
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className="text-xs font-bold text-gray-600">Filtrar por {label}</span>
+                                                                    {isFiltered && <button onClick={(e) => { e.stopPropagation(); setActiveFilters({...activeFilters, [col]: []}); }} className="text-[10px] text-red-500 hover:underline">Limpar</button>}
+                                                                </div>
+                                                                {/* Search Bar in Filter */}
+                                                                <div className="relative">
+                                                                    <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]"></i>
+                                                                    <input 
+                                                                        type="text" 
+                                                                        placeholder="Procurar valor..." 
+                                                                        className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:ring-1 focus:ring-simas-cyan outline-none"
+                                                                        value={filterSearch}
+                                                                        onChange={(e) => setFilterSearch(e.target.value)}
+                                                                        autoFocus
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    />
+                                                                </div>
                                                             </div>
                                                             <div className="overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                                                {uniqueValues.map(val => (
-                                                                    <label key={val} className="flex items-center gap-3 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
-                                                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${selectedValues.includes(String(val)) ? 'bg-simas-accent border-simas-accent' : 'bg-white border-gray-300'}`}>
-                                                                            {selectedValues.includes(String(val)) && <i className="fas fa-check text-white text-[10px]"></i>}
-                                                                        </div>
-                                                                        <input 
-                                                                            type="checkbox" 
-                                                                            className="hidden"
-                                                                            checked={selectedValues.includes(String(val))}
-                                                                            onChange={() => {
-                                                                                const current = activeFilters[col] || [];
-                                                                                const newVal = String(val);
-                                                                                if (current.includes(newVal)) setActiveFilters({...activeFilters, [col]: current.filter(v => v !== newVal)});
-                                                                                else setActiveFilters({...activeFilters, [col]: [...current, newVal]});
-                                                                            }}
-                                                                        />
-                                                                        <span className="text-xs text-gray-700 truncate">{val === '' ? '(Vazio)' : val}</span>
-                                                                    </label>
-                                                                ))}
+                                                                {uniqueValues.length === 0 ? (
+                                                                     <div className="text-center py-2 text-gray-400 text-xs italic">Nenhum resultado</div>
+                                                                ) : (
+                                                                    uniqueValues.map(val => (
+                                                                        <label key={val} className="flex items-center gap-3 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
+                                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${selectedValues.includes(String(val)) ? 'bg-simas-accent border-simas-accent' : 'bg-white border-gray-300'}`}>
+                                                                                {selectedValues.includes(String(val)) && <i className="fas fa-check text-white text-[10px]"></i>}
+                                                                            </div>
+                                                                            <input 
+                                                                                type="checkbox" 
+                                                                                className="hidden"
+                                                                                checked={selectedValues.includes(String(val))}
+                                                                                onChange={() => {
+                                                                                    const current = activeFilters[col] || [];
+                                                                                    const newVal = String(val);
+                                                                                    if (current.includes(newVal)) setActiveFilters({...activeFilters, [col]: current.filter(v => v !== newVal)});
+                                                                                    else setActiveFilters({...activeFilters, [col]: [...current, newVal]});
+                                                                                }}
+                                                                            />
+                                                                            <span className="text-xs text-gray-700 truncate">{val === '' ? '(Vazio)' : val}</span>
+                                                                        </label>
+                                                                    ))
+                                                                )}
                                                             </div>
                                                         </div>
                                                     )}
