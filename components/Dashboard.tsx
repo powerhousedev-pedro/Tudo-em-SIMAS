@@ -53,6 +53,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const deferredSearchTerms = useDeferredValue(searchTerms);
   const [activeFilters, setActiveFilters] = useState<{ [entity: string]: string[] }>({});
   const [filterPopoverOpen, setFilterPopoverOpen] = useState<string | null>(null);
+  const [filterSearchTerm, setFilterSearchTerm] = useState(''); // New state for filter search
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [dropdownSearch, setDropdownSearch] = useState('');
   const [showMainList, setShowMainList] = useState(false);
@@ -88,6 +89,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     setShowMainList(false);
     setDropdownSearch('');
     setActiveFilters({});
+    setFilterPopoverOpen(null);
   }, [activeTab]);
 
   // Calculate needed columns
@@ -458,8 +460,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
              }) : [];
 
              const isFilterOpen = filterPopoverOpen === entity;
+             const rawOptions = config.filterBy ? [...new Set(rawData.map((i: any) => i[config.filterBy!]).filter(Boolean))].sort() : [];
              const filterOptions = isFilterOpen && config.filterBy 
-                ? [...new Set(rawData.map((i: any) => i[config.filterBy!]).filter(Boolean))].sort() 
+                ? rawOptions.filter((opt: any) => String(opt).toLowerCase().includes(filterSearchTerm.toLowerCase()))
                 : [];
 
              return (
@@ -478,22 +481,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        </div>
                        {config.filterBy && (
                            <div className="relative" ref={el => { popoverRefs.current[entity] = el; }}>
-                               <button className={`w-10 h-full rounded-xl flex items-center justify-center transition-all shadow-sm border border-transparent ${isFilterOpen || entityFilters.length > 0 ? 'bg-simas-cyan text-white shadow-glow' : 'bg-white text-gray-400 hover:text-simas-cyan'}`} onClick={() => setFilterPopoverOpen(isFilterOpen ? null : entity)}>
+                               <button className={`w-10 h-full rounded-xl flex items-center justify-center transition-all shadow-sm border border-transparent ${isFilterOpen || entityFilters.length > 0 ? 'bg-simas-cyan text-white shadow-glow' : 'bg-white text-gray-400 hover:text-simas-cyan'}`} onClick={() => { setFilterPopoverOpen(isFilterOpen ? null : entity); setFilterSearchTerm(''); }}>
                                    <i className="fas fa-filter text-xs"></i>
                                </button>
                                {isFilterOpen && (
-                                   <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden animate-fade-in">
-                                       <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                                           <span className="text-xs font-bold text-gray-600">Filtrar por {config.filterBy.replace(/_/g, ' ')}</span>
-                                           {entityFilters.length > 0 && <button onClick={() => setActiveFilters(prev => ({...prev, [entity]: []}))} className="text-[10px] text-red-500 font-bold hover:underline">Limpar</button>}
+                                   <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden animate-fade-in flex flex-col max-h-[350px]">
+                                       <div className="p-3 border-b border-gray-100 bg-gray-50 flex flex-col gap-2">
+                                           <div className="flex justify-between items-center">
+                                                <span className="text-xs font-bold text-gray-600">Filtrar por {config.filterBy.replace(/_/g, ' ')}</span>
+                                                {entityFilters.length > 0 && <button onClick={() => setActiveFilters(prev => ({...prev, [entity]: []}))} className="text-[10px] text-red-500 font-bold hover:underline">Limpar</button>}
+                                           </div>
+                                           {/* Added Search Bar */}
+                                           <div className="relative">
+                                               <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]"></i>
+                                               <input 
+                                                  type="text" 
+                                                  placeholder="Procurar item..." 
+                                                  className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:ring-1 focus:ring-simas-cyan outline-none"
+                                                  value={filterSearchTerm}
+                                                  onChange={(e) => setFilterSearchTerm(e.target.value)}
+                                                  autoFocus
+                                               />
+                                           </div>
                                        </div>
-                                       <div className="max-h-[200px] overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                                           {filterOptions.map((opt: any) => (
-                                               <label key={opt} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors text-xs text-gray-600 font-medium tracking-wide">
-                                                   <input type="checkbox" checked={entityFilters.includes(opt)} onChange={() => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))} className="rounded text-simas-cyan focus:ring-simas-cyan border-gray-300"/>
-                                                   <span className="truncate">{opt}</span>
-                                               </label>
-                                           ))}
+                                       <div className="overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                                           {filterOptions.length === 0 ? (
+                                                <div className="text-center py-2 text-gray-400 text-xs italic">Nenhum resultado</div>
+                                           ) : (
+                                               filterOptions.map((opt: any) => (
+                                                   <label key={opt} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors text-xs text-gray-600 font-medium tracking-wide">
+                                                       <input type="checkbox" checked={entityFilters.includes(opt)} onChange={() => setActiveFilters(prev => ({ ...prev, [entity]: prev[entity]?.includes(opt) ? prev[entity].filter(v => v !== opt) : [...(prev[entity]||[]), opt] }))} className="rounded text-simas-cyan focus:ring-simas-cyan border-gray-300"/>
+                                                       <span className="truncate">{opt}</span>
+                                                   </label>
+                                               ))
+                                           )}
                                        </div>
                                    </div>
                                )}
