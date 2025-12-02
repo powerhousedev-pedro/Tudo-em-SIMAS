@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { api } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ReportData, UserSession, QuantitativoItem } from '../types';
@@ -91,6 +91,11 @@ export const Reports: React.FC = () => {
   const [savedReportsModalOpen, setSavedReportsModalOpen] = useState(false);
   const [savedReportsList, setSavedReportsList] = useState<any[]>([]);
 
+  // --- ESTADOS PARA FILTRO INTERATIVO DA TABELA DE RESULTADOS ---
+  const [activeResultFilters, setActiveResultFilters] = useState<Record<string, string[]>>({});
+  const [openResultFilterCol, setOpenResultFilterCol] = useState<string | null>(null);
+  const resultFilterRef = useRef<HTMLDivElement>(null);
+
   // Carregar dados dos relatórios fixos
   useEffect(() => {
     if (currentReport === 'customGenerator' || !currentReport) return;
@@ -108,6 +113,17 @@ export const Reports: React.FC = () => {
     };
     load();
   }, [currentReport]);
+
+  // Click Outside Handler para Filtros de Resultado
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+        if (resultFilterRef.current && !resultFilterRef.current.contains(event.target as Node)) {
+            setOpenResultFilterCol(null);
+        }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Função auxiliar para encontrar relações de uma entidade
   const getRelationsForEntity = (entity: string): { entity: string, field: string }[] => {
@@ -361,6 +377,7 @@ export const Reports: React.FC = () => {
       setSelectedColumns([]); // O useEffect vai repopular o padrão
       setCustomFilters([]);
       setCustomResults([]);
+      setActiveResultFilters({});
       setGenerated(false);
       setFilterSuggestions([]);
   };
@@ -415,6 +432,7 @@ export const Reports: React.FC = () => {
   const handleGenerateCustom = async () => {
       if (!customEntity) return;
       setLoading(true);
+      setActiveResultFilters({}); // Limpa filtros da tabela anterior
       try {
           // Envia os paths selecionados (ex: ['vaga', 'vaga.lotacao'])
           let rawData = await api.generateCustomReport(customEntity, selectedJoins);
@@ -611,6 +629,7 @@ export const Reports: React.FC = () => {
           
           // 3. Reset Results
           setCustomResults([]);
+          setActiveResultFilters({});
           setGenerated(false);
           setSavedReportsModalOpen(false);
       } catch (e) {
@@ -628,6 +647,33 @@ export const Reports: React.FC = () => {
       } catch (e) {
           console.error(e);
       }
+  };
+
+  // --- HELPER PARA FILTRO DA TABELA ---
+  const getFormattedValue = (row: any, col: string) => {
+       const val = row[col];
+       if (val === null || val === undefined) return '';
+       const type = getFieldType(col);
+       if (type === 'date') return new Date(val).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
+       return String(val);
+  };
+
+  const filteredResults = useMemo(() => {
+      return customResults.filter(item => {
+          return Object.keys(activeResultFilters).every(key => {
+              const selectedValues = activeResultFilters[key];
+              if (!selectedValues || selectedValues.length === 0) return true;
+              
+              // Compara valores formatados para garantir match com o que é exibido no filtro
+              const val = getFormattedValue(item, key);
+              return selectedValues.includes(val);
+          });
+      });
+  }, [customResults, activeResultFilters]);
+
+  const getUniqueResultValues = (col: string) => {
+      const values = customResults.map(item => getFormattedValue(item, col)).filter(v => v !== '');
+      return [...new Set(values)].sort();
   };
 
   // --- RENDERIZADORES ---
@@ -915,43 +961,83 @@ export const Reports: React.FC = () => {
 
               {/* RESULTADOS */}
               {generated && (
-                  <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden animate-slide-in mb-10">
+                  <div className="bg-white rounded-3xl shadow-soft border border-gray-100 overflow-hidden animate-slide-in mb-10 pb-10">
                       <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
                           <div>
                               <h3 className="font-black uppercase tracking-brand text-simas-dark text-lg">Resultados da Consulta</h3>
-                              <p className="text-xs text-gray-500 font-medium">{customResults.length} registros encontrados</p>
+                              <p className="text-xs text-gray-500 font-medium">{filteredResults.length} registros encontrados (de {customResults.length} totais)</p>
                           </div>
                           <div className="flex gap-3">
                               <Button onClick={exportCustomCSV} variant="secondary" icon="fas fa-file-csv" className="text-xs">CSV</Button>
                               <Button onClick={exportCustomPDF} variant="secondary" icon="fas fa-file-pdf" className="text-xs">PDF</Button>
                           </div>
                       </div>
-                      <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                      <div className="overflow-x-auto max-h-[500px] overflow-y-auto min-h-[300px]">
                           <table className="w-full text-sm text-left border-collapse">
                               <thead className="bg-white sticky top-0 shadow-sm z-10">
                                   <tr>
-                                      {selectedColumns.map(col => (
-                                          <th key={col} className="px-6 py-4 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                                              {getColumnLabel(col)}
-                                          </th>
-                                      ))}
+                                      {selectedColumns.map(col => {
+                                          const label = getColumnLabel(col);
+                                          const uniqueValues = getUniqueResultValues(col);
+                                          const isOpen = openResultFilterCol === col;
+                                          const selectedValues = activeResultFilters[col] || [];
+                                          const isFiltered = selectedValues.length > 0;
+
+                                          return (
+                                              <th key={col} className="px-6 py-4 bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap relative group select-none">
+                                                  <div className="flex items-center justify-between cursor-pointer hover:bg-gray-100 rounded p-1 -ml-1 transition-colors gap-2" onClick={() => setOpenResultFilterCol(isOpen ? null : col)}>
+                                                      <span className={isFiltered ? 'text-simas-cyan' : ''}>{label}</span>
+                                                      <button className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${isFiltered ? 'text-simas-cyan' : 'text-gray-300 opacity-0 group-hover:opacity-100'}`}>
+                                                          <i className={`fas ${isFiltered ? 'fa-filter' : 'fa-chevron-down'} text-[10px]`}></i>
+                                                      </button>
+                                                  </div>
+
+                                                  {isOpen && (
+                                                      <div ref={resultFilterRef} className="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 animate-fade-in overflow-hidden flex flex-col max-h-[300px]">
+                                                          <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                                                              <span className="text-xs font-bold text-gray-600">Filtrar por {label}</span>
+                                                              {isFiltered && <button onClick={(e) => { e.stopPropagation(); setActiveResultFilters({...activeResultFilters, [col]: []}); }} className="text-[10px] text-red-500 hover:underline">Limpar</button>}
+                                                          </div>
+                                                          <div className="overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                                                              {uniqueValues.map(val => (
+                                                                  <label key={val} className="flex items-center gap-3 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer transition-colors" onClick={(e) => e.stopPropagation()}>
+                                                                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors flex-shrink-0 ${selectedValues.includes(String(val)) ? 'bg-simas-cyan border-simas-cyan' : 'bg-white border-gray-300'}`}>
+                                                                          {selectedValues.includes(String(val)) && <i className="fas fa-check text-white text-[10px]"></i>}
+                                                                      </div>
+                                                                      <input 
+                                                                          type="checkbox" 
+                                                                          className="hidden"
+                                                                          checked={selectedValues.includes(String(val))}
+                                                                          onChange={() => {
+                                                                              const current = activeResultFilters[col] || [];
+                                                                              const newVal = String(val);
+                                                                              if (current.includes(newVal)) setActiveResultFilters({...activeResultFilters, [col]: current.filter(v => v !== newVal)});
+                                                                              else setActiveResultFilters({...activeResultFilters, [col]: [...current, newVal]});
+                                                                          }}
+                                                                      />
+                                                                      <span className="text-xs text-gray-700 truncate">{val === '' ? '(Vazio)' : val}</span>
+                                                                  </label>
+                                                              ))}
+                                                          </div>
+                                                      </div>
+                                                  )}
+                                              </th>
+                                          );
+                                      })}
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
-                                  {customResults.length === 0 ? (
+                                  {filteredResults.length === 0 ? (
                                       <tr><td colSpan={selectedColumns.length} className="p-10 text-center text-gray-400 italic">Nenhum dado encontrado com os filtros aplicados.</td></tr>
                                   ) : (
-                                      customResults.map((row, idx) => (
+                                      filteredResults.map((row, idx) => (
                                           <tr key={idx} className="hover:bg-gray-50 transition-colors">
                                               {selectedColumns.map(col => {
-                                                  const val = row[col];
-                                                  const type = getFieldType(col);
-                                                  let displayVal = val;
-                                                  if (type === 'date' && val) displayVal = new Date(val).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
-                                                  
+                                                  // Use helper to ensure consistency with filter logic
+                                                  const displayVal = getFormattedValue(row, col);
                                                   return (
                                                       <td key={`${idx}-${col}`} className="px-6 py-3 whitespace-nowrap text-gray-600 border-r border-gray-50 last:border-0 text-xs font-medium">
-                                                          {String(val === null || val === undefined ? '' : displayVal)}
+                                                          {displayVal}
                                                       </td>
                                                   );
                                               })}
