@@ -520,9 +520,10 @@ export const Reports: React.FC = () => {
   };
 
   const exportCustomCSV = () => {
-      if (customResults.length === 0) return;
+      // Use filteredResults instead of customResults to export what is seen
+      if (filteredResults.length === 0) return;
       const headers = selectedColumns.map(col => getColumnLabel(col)).join(';');
-      const rows = customResults.map(row => 
+      const rows = filteredResults.map(row => 
           selectedColumns.map(col => {
               let val = row[col];
               if (val === null || val === undefined) return '';
@@ -543,16 +544,17 @@ export const Reports: React.FC = () => {
   };
 
   const exportCustomPDF = () => {
-      if (customResults.length === 0) return;
+      // Use filteredResults instead of customResults to export what is seen
+      if (filteredResults.length === 0) return;
       const doc = new jsPDF('l', 'mm', 'a4');
       const today = new Date().toLocaleDateString('pt-BR');
       
       doc.setFontSize(14);
       doc.text(`Relatório: ${ENTITY_CONFIGS[customEntity]?.title || customEntity}`, 14, 15);
       doc.setFontSize(10);
-      doc.text(`Gerado em: ${today} - ${customResults.length} registros`, 14, 22);
+      doc.text(`Gerado em: ${today} - ${filteredResults.length} registros`, 14, 22);
 
-      const tableRows = customResults.map(row => selectedColumns.map(col => {
+      const tableRows = filteredResults.map(row => selectedColumns.map(col => {
           let val = row[col];
           if (val === null || val === undefined) return '';
           if (getFieldType(col) === 'date') return new Date(val).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
