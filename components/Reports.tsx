@@ -84,6 +84,9 @@ export const Reports: React.FC = () => {
   // Estado temporário para adicionar novo filtro
   const [newFilter, setNewFilter] = useState({ field: '', operator: 'contains', value: '' });
   const [filterSuggestions, setFilterSuggestions] = useState<string[]>([]);
+  
+  // Search for column selection
+  const [columnSearch, setColumnSearch] = useState('');
 
   // Estados para Salvar/Carregar Relatórios
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -212,6 +215,21 @@ export const Reports: React.FC = () => {
 
       // 3. Fallback: Formatação do nome técnico
       return field.replace(/_/g, ' ');
+  };
+  
+  // Helper function to generate descriptions for fields
+  const getFieldDescription = (fullPath: string) => {
+      const parts = fullPath.split('.');
+      const field = parts.pop()!;
+      const type = getFieldType(fullPath);
+      
+      if (type === 'date') return "Data/Hora do evento ou registro";
+      if (type === 'number') return "Valor numérico ou quantitativo";
+      if (type === 'boolean') return "Indicador Sim/Não";
+      if (field === 'CPF') return "Cadastro de Pessoa Física";
+      if (field.includes('NOME')) return "Texto descritivo ou nome";
+      
+      return "Campo de texto para filtros";
   };
 
   // Inicializar Joins Nível 1 quando a entidade principal muda
@@ -391,6 +409,7 @@ export const Reports: React.FC = () => {
       setActiveResultFilters({});
       setGenerated(false);
       setFilterSuggestions([]);
+      setColumnSearch('');
   };
 
   const handleAddFilter = () => {
@@ -486,7 +505,7 @@ export const Reports: React.FC = () => {
                               case 'greater_equal': return itemNum >= filterNum;
                               case 'less_equal': return itemNum <= filterNum;
                               default: return false;
-                          }
+                           }
                       } else if (type === 'boolean') {
                           let boolItem = !!rawValue;
                           if (typeof rawValue === 'string') boolItem = rawValue === 'Sim' || rawValue === 'true';
@@ -676,6 +695,17 @@ export const Reports: React.FC = () => {
       const values = customResults.map(item => getFormattedValue(item, col)).filter(v => v !== '');
       return [...new Set(values)].sort();
   };
+  
+  // Filter columns based on search in step 3
+  const filteredColumns = useMemo(() => {
+      if (!columnSearch) return availableColumns;
+      return availableColumns.filter(col => {
+          const label = getColumnLabel(col).toLowerCase();
+          const path = col.toLowerCase();
+          const term = columnSearch.toLowerCase();
+          return label.includes(term) || path.includes(term);
+      });
+  }, [availableColumns, columnSearch, customEntity]);
 
   // --- RENDERIZADORES ---
 
@@ -786,21 +816,35 @@ export const Reports: React.FC = () => {
                       
                       {/* Step 3: Columns (50% Height) */}
                       <div className="flex-1 flex flex-col min-h-0 border-b border-gray-100 h-1/2">
-                           <div className="p-4 px-5 border-b border-gray-100 bg-white flex justify-between items-center">
-                               <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                                  <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center shadow-sm">3</span>
-                                  Colunas
-                               </label>
-                               <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{selectedColumns.length} selec.</span>
+                           <div className="p-4 px-5 border-b border-gray-100 bg-white flex flex-col gap-3">
+                               <div className="flex justify-between items-center">
+                                   <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                      <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center shadow-sm">3</span>
+                                      Colunas
+                                   </label>
+                                   <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{selectedColumns.length} selec.</span>
+                               </div>
+                               {/* Search Bar for Columns */}
+                               <div className="relative">
+                                    <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Buscar colunas..." 
+                                        className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-simas-cyan transition-all"
+                                        value={columnSearch}
+                                        onChange={(e) => setColumnSearch(e.target.value)}
+                                    />
+                               </div>
                            </div>
                            <div className="flex-1 overflow-y-auto p-2 custom-scrollbar bg-white">
                                <div className="grid grid-cols-2 gap-1 p-2">
-                                  {availableColumns.map(col => {
+                                  {filteredColumns.map(col => {
                                       const parts = col.split('.');
                                       const prefix = parts.join(' > ');
                                       const isPrimary = parts[0] === customEntity;
                                       const label = getColumnLabel(col);
                                       const type = getFieldType(col);
+                                      const description = getFieldDescription(col);
                                       
                                       let icon = 'fa-font';
                                       if (type === 'date') icon = 'fa-calendar';
@@ -808,7 +852,7 @@ export const Reports: React.FC = () => {
                                       if (type === 'boolean') icon = 'fa-toggle-on';
 
                                       return (
-                                          <label key={col} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer hover:bg-simas-cyan/5 p-2 rounded-lg border border-transparent hover:border-simas-cyan/20 transition-all select-none group">
+                                          <label key={col} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer hover:bg-simas-cyan/5 p-2 rounded-lg border border-transparent hover:border-simas-cyan/20 transition-all select-none group min-h-[3.5rem]">
                                               <div className="relative flex items-center mt-0.5">
                                                   <input 
                                                     type="checkbox" 
@@ -825,10 +869,12 @@ export const Reports: React.FC = () => {
                                               </div>
                                               <div className="flex flex-col overflow-hidden min-w-0">
                                                   <span className={`font-bold truncate ${isPrimary ? 'text-simas-dark' : 'text-gray-500'}`}>{prefix}</span>
-                                                  <div className="flex items-center gap-1.5 text-gray-500 truncate">
+                                                  <div className="flex items-center gap-1.5 text-gray-600 truncate mb-0.5">
                                                       <i className={`fas ${icon} text-[9px] opacity-70`}></i>
                                                       <span>{label}</span>
                                                   </div>
+                                                  {/* Descriptive Subtitle */}
+                                                  <span className="text-[10px] text-gray-400 font-normal leading-tight line-clamp-2">{description}</span>
                                               </div>
                                           </label>
                                       );
