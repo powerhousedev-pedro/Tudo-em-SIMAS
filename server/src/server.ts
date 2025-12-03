@@ -2,8 +2,9 @@ import express, { Request as ExpressRequest, Response as ExpressResponse, NextFu
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { runBackup } from './scripts/backup';
 import cron from 'node-cron';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -167,7 +168,12 @@ const auditAction = async (
 // --- CRON JOBS (DAILY ROUTINES) ---
 
 cron.schedule('0 0 * * *', async () => {
-    // Rotinas diárias...
+    console.log('Executando rotinas diárias agendadas...');
+    try {
+        await runBackup();
+    } catch (error) {
+        console.error('ERRO: Falha ao executar backup diário:', error);
+    }
 });
 
 // --- AUTH ROUTES ---
@@ -224,7 +230,7 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
     if (!CPF || !MOTIVO) return res.status(400).json({ message: 'CPF e Motivo são obrigatórios.' });
 
     try {
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             const contratoAtivo = await tx.contrato.findFirst({ where: { CPF } });
             
             if (contratoAtivo) {
@@ -267,7 +273,7 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
     let matriculaFinal = MATRICULA;
     
     try {
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             if (!matriculaFinal && req.body.CPF) {
                 const s = await tx.servidor.findFirst({ where: { CPF: req.body.CPF }});
                 if (s) matriculaFinal = s.MATRICULA;
@@ -322,7 +328,7 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
     if (!data.MATRICULA) return res.status(400).json({ message: 'Matrícula é obrigatória.' });
 
     try {
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             const alocacaoExistente = await tx.alocacao.findFirst({ where: { MATRICULA: data.MATRICULA } });
 
             if (alocacaoExistente) {
@@ -350,7 +356,7 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
             const result = await tx.alocacao.create({ data });
             await auditAction(usuario, 'CRIAR', 'Alocacao', result.ID_ALOCACAO, null, result, tx);
             return result; 
-        }).then(result => {
+        }).then((result: any) => {
              res.json({ success: true, data: result });
         });
 
@@ -367,7 +373,7 @@ app.post('/api/Exercicio', authenticateToken, async (req: AuthenticatedRequest, 
     if (!data.ID_VAGA) return res.status(400).json({ message: 'ID da Vaga é obrigatório.' });
 
     try {
-        const result = await prisma.$transaction(async (tx) => {
+        const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
             const exercicioExistente = await tx.exercicio.findFirst({ where: { ID_VAGA: data.ID_VAGA } });
 
             if (exercicioExistente) {
@@ -403,7 +409,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
         
         // --- LOGICA DE RESTAURAÇÃO DE ARQUIVAMENTO (Tabelas Físicas) ---
         if (log.ACAO === 'ARQUIVAR' || log.ACAO === 'INATIVAR') {
-             await prisma.$transaction(async (tx) => {
+             await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
                 let dataToRestore: any = null;
 
                 if (log.TABELA_AFETADA === 'Contrato') {

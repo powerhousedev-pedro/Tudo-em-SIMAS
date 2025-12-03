@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Backup directory
+/server/backups
+
+# Env files
+.env
+.env.*
+!.env.example
