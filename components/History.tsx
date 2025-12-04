@@ -499,10 +499,15 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                     let newData: Record<string, any> = {};
                                     try {
                                         oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}');
-                                    } catch (e) { /* ignore parse errors */ }
+                                    } catch (e) {
+                                        console.error('Failed to parse VALOR_ANTIGO:', e);
+                                    }
                                     try {
                                         newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}');
-                                    } catch (e) { /* ignore parse errors */ }
+                                    } catch (e) {
+                                        console.error('Failed to parse VALOR_NOVO:', e);
+                                    }
+
                                     
                                     if (action === 'RESTAURAR') {
                                         return (
