@@ -25,6 +25,7 @@ dist-ssr
 
 # Backup directory
 /server/backups
+/forclone
 
 # Env files
 .env
