@@ -4,6 +4,7 @@ import { Button } from './Button';
 import { ENTITY_CONFIGS, DATA_MODEL, FIELD_LABELS } from '../constants';
 import { validation } from '../utils/validation';
 import { UserSession, AppContextProps } from '../types';
+import { queryClient } from '../lib/queryClient';
 
 interface HistoryProps extends AppContextProps {}
 
@@ -58,15 +59,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     // Filtra quais abas o usuário pode ver
     const tabs = useMemo(() => {
         return AVAILABLE_VIEWS.filter(view => {
-            // Auditoria só para Admins
             if (view.requiresAdmin && !isAdmin) return false;
-            
-            // Se for admin, vê tudo
             if (isAdmin) return true;
-
-            // Filtra por papel específico
             if (view.roles && view.roles.includes(session.papel)) return true;
-            
             return false;
         });
     }, [session.papel, isAdmin]);
@@ -86,10 +81,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const [globalSearch, setGlobalSearch] = useState('');
     const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
     const [openFilterCol, setOpenFilterCol] = useState<string | null>(null);
-    const [filterSearch, setFilterSearch] = useState(''); // New state for filter dropdown search
+    const [filterSearch, setFilterSearch] = useState('');
     const filterRef = useRef<HTMLDivElement>(null);
 
-    // Atualiza a view padrão se a lista de tabs mudar
     useEffect(() => {
         if (!tabs.find(t => t.id === currentView) && tabs.length > 0) {
             setCurrentView(tabs[0].id);
@@ -125,7 +119,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         const entity = getEntityForView();
         try {
             const res = await api.fetchEntity(entity);
-            // Ordenar por data decrescente (tentativa genérica)
             res.sort((a: any, b: any) => {
                 const dateA = a.DATA_HORA || a.DATA_ARQUIVAMENTO || a.DATA_INATIVACAO || a.DATA_FIM || '';
                 const dateB = b.DATA_HORA || b.DATA_ARQUIVAMENTO || b.DATA_INATIVACAO || b.DATA_FIM || '';
@@ -148,6 +141,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             const res = await api.restoreAuditLog(pendingRestoreId);
             if (res.success) {
                 showToast('success', res.message);
+                if (res.invalidatedEntity) {
+                    queryClient.invalidateQueries([res.invalidatedEntity]);
+                }
                 setPendingRestoreId(null);
                 loadData();
             } else {
@@ -159,8 +155,8 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             setRestoringId(null);
         }
     };
-
-    // --- Column Logic ---
+    
+        // --- Column Logic ---
     const columns = useMemo(() => {
         const entity = getEntityForView();
         
@@ -168,9 +164,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             return ['DATA_HORA', 'USUARIO', 'ACAO', 'TABELA_AFETADA', 'ID_REGISTRO_AFETADO', 'DETALHES'];
         }
         
-        // Para outras entidades, usa o DATA_MODEL
         const modelFields = DATA_MODEL[entity] || [];
-        // Filtra campos técnicos desnecessários para a visualização de lista
         return modelFields.filter(f => !f.startsWith('ID_HISTORICO') && f !== 'VALOR_ANTIGO' && f !== 'VALOR_NOVO');
     }, [currentView]);
 
@@ -178,7 +172,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         const entity = getEntityForView();
         if (entity === 'Auditoria' && col === 'DETALHES') return 'Detalhes';
         
-        // Tenta pegar do FIELD_LABELS específico ou Global
         const specific = FIELD_LABELS[entity]?.[col];
         const global = FIELD_LABELS['Global']?.[col];
         
@@ -192,7 +185,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const getUniqueValues = (key: string) => {
         const values = data.map(item => {
             if (key === 'DETALHES') return null; 
-            // Tratamento especial para datas no filtro
             if (key.includes('DATA')) return validation.formatDate(item[key]);
             return String(item[key] || '');
         }).filter(v => v !== null);
@@ -201,7 +193,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
 
     const filteredData = useMemo(() => {
         return data.filter(item => {
-            // 1. Global Search
             const searchStr = globalSearch.toLowerCase();
             const matchesSearch = !globalSearch || Object.values(item).some(val => 
                 String(val).toLowerCase().includes(searchStr)
@@ -209,7 +200,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
 
             if (!matchesSearch) return false;
 
-            // 2. Column Filters
             const matchesFilters = Object.keys(activeFilters).every((key) => {
                 const selectedValues = activeFilters[key];
                 if (!selectedValues || selectedValues.length === 0) return true;
@@ -229,7 +219,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const renderCell = (item: any, col: string) => {
         const entity = getEntityForView();
 
-        // AUDITORIA SPECIFIC
         if (entity === 'Auditoria') {
             if (col === 'DETALHES') {
                 return (
@@ -259,7 +248,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             }
         }
 
-        // GENERIC TABLES (Historical)
         if (col.includes('DATA')) {
             return <span className="text-sm text-gray-600 font-mono">{validation.formatDate(item[col])}</span>;
         }
@@ -342,7 +330,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                             const label = getColumnLabel(col);
                                             const rawValues = getUniqueValues(col);
                                             const isOpen = openFilterCol === col;
-                                            // Filter values based on search inside dropdown
                                             const uniqueValues = isOpen 
                                                 ? rawValues.filter(v => String(v).toLowerCase().includes(filterSearch.toLowerCase())) 
                                                 : [];
@@ -365,7 +352,6 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                                                     <span className="text-xs font-bold text-gray-600">Filtrar por {label}</span>
                                                                     {isFiltered && <button onClick={(e) => { e.stopPropagation(); setActiveFilters({...activeFilters, [col]: []}); }} className="text-[10px] text-red-500 hover:underline">Limpar</button>}
                                                                 </div>
-                                                                {/* Search Bar in Filter */}
                                                                 <div className="relative">
                                                                     <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]"></i>
                                                                     <input 
@@ -424,35 +410,36 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                     ) : (
                                         filteredData.map((item, idx) => {
                                             const isAudit = getEntityForView() === 'Auditoria';
-                                                        const isRestorable = isAudit && (item.ACAO === 'EXCLUIR' || item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' || item.ACAO === 'CRIAR' || item.ACAO === 'EDITAR');
-                                                        return (
-                                                            <tr key={idx} className="hover:bg-gray-50 transition-colors group">
-                                                                {columns.map(col => (
-                                                                    <td key={col} className="px-6 py-4 whitespace-nowrap">
-                                                                        {renderCell(item, col)}
-                                                                    </td>
-                                                                ))}
-                                                                {isAudit && (
-                                                                    <td className="px-6 py-4 text-right">
-                                                                        {isRestorable && isAdmin && (
-                                                                            <button 
-                                                                                onClick={() => setPendingRestoreId(item.ID_LOG)}
-                                                                                className={`p-2 rounded-lg transition-all ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'text-green-500 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50'}`}
-                                                                                title={
-                                                                                    item.ACAO === 'ARQUIVAR' ? "Desarquivar" :
-                                                                                    item.ACAO === 'INATIVAR' ? "Reativar" :
-                                                                                    item.ACAO === 'CRIAR' ? "Desfazer Criação" :
-                                                                                    item.ACAO === 'EDITAR' ? "Desfazer Edição" :
-                                                                                    item.ACAO === 'EXCLUIR' ? "Desfazer Exclusão" :
-                                                                                    "Restaurar Ação"
-                                                                                }
-                                                                            >
-                                                                                <i className={`fas ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'fa-box-open' : 'fa-undo'}`}></i>
-                                                                            </button>
-                                                                        )}
-                                                                    </td>
-                                                                )}
-                                                            </tr>                                            );
+                                            const isRestorable = isAudit && (item.ACAO === 'EXCLUIR' || item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' || item.ACAO === 'CRIAR' || item.ACAO === 'EDITAR');
+                                            return (
+                                                <tr key={idx} className="hover:bg-gray-50 transition-colors group">
+                                                    {columns.map(col => (
+                                                        <td key={col} className="px-6 py-4 whitespace-nowrap">
+                                                            {renderCell(item, col)}
+                                                        </td>
+                                                    ))}
+                                                    {isAudit && (
+                                                        <td className="px-6 py-4 text-right">
+                                                            {isRestorable && isAdmin && (
+                                                                <button 
+                                                                    onClick={() => setPendingRestoreId(item.ID_LOG)}
+                                                                    className={`p-2 rounded-lg transition-all ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'text-green-500 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50'}`}
+                                                                    title={
+                                                                        item.ACAO === 'ARQUIVAR' ? "Desarquivar" :
+                                                                        item.ACAO === 'INATIVAR' ? "Reativar" :
+                                                                        item.ACAO === 'CRIAR' ? "Desfazer Criação" :
+                                                                        item.ACAO === 'EDITAR' ? "Desfazer Edição" :
+                                                                        item.ACAO === 'EXCLUIR' ? "Desfazer Exclusão" :
+                                                                        "Restaurar Ação"
+                                                                    }
+                                                                >
+                                                                    <i className={`fas ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'fa-box-open' : 'fa-undo'}`}></i>
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            );
                                         })
                                     )}
                                 </tbody>
@@ -468,13 +455,12 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 
                 const getActionStyling = (action: string) => {
                     switch (action) {
-                        case 'CRIAR': return { bg: 'bg-green-100', text: 'text-green-800', icon: 'fa-plus' };
-                        case 'EDITAR': return { bg: 'bg-blue-100', text: 'text-blue-800', icon: 'fa-pencil-alt' };
-                        case 'EXCLUIR': return { bg: 'bg-red-100', text: 'text-red-800', icon: 'fa-trash-alt' };
-                        case 'ARQUIVAR': return { bg: 'bg-orange-100', text: 'text-orange-800', icon: 'fa-archive' };
-                        case 'INATIVAR': return { bg: 'bg-gray-200', text: 'text-gray-800', icon: 'fa-user-slash' };
-                        case 'RESTAURAR': return { bg: 'bg-cyan-100', text: 'text-cyan-800', icon: 'fa-history' };
-                        default: return { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'fa-question-circle' };
+                        case 'CRIAR': return { bg: 'bg-green-50', textH: 'text-green-800', textB: 'text-green-700', icon: 'fa-plus' };
+                        case 'EDITAR': return { bg: 'bg-blue-50', textH: 'text-blue-800', textB: 'text-blue-700', icon: 'fa-pencil-alt' };
+                        case 'EXCLUIR': return { bg: 'bg-red-50', textH: 'text-red-800', textB: 'text-red-700', icon: 'fa-trash-alt' };
+                        case 'ARQUIVAR': return { bg: 'bg-orange-50', textH: 'text-orange-800', textB: 'text-orange-700', icon: 'fa-archive' };
+                        case 'INATIVAR': return { bg: 'bg-gray-100', textH: 'text-gray-800', textB: 'text-gray-700', icon: 'fa-user-slash' };
+                        default: return { bg: 'bg-gray-50', textH: 'text-gray-800', textB: 'text-gray-700', icon: 'fa-question-circle' };
                     }
                 };
 
@@ -484,79 +470,64 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 try { oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}'); } catch (e) {}
                 try { newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}'); } catch (e) {}
 
-                const allKeys = [...Object.keys(oldData), ...Object.keys(newData)];
-                const uniqueKeys = [...new Set(allKeys)].sort();
+                const dataToShow = action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR' ? oldData : newData;
+                const allKeys = [...new Set([...Object.keys(oldData), ...Object.keys(newData)])].sort();
 
                 const renderValue = (value: any) => {
-                    if (value === null || value === undefined || value === '') return <span className="text-gray-400 italic text-xs">(Vazio)</span>;
-                    const strValue = String(value);
-                    if (strValue.length > 150) {
-                         return <span className="text-xs text-gray-600" title={strValue}>{strValue.substring(0, 150)}...</span>;
-                    }
-                    return <span className="text-sm text-gray-800">{strValue}</span>;
+                    if (value === null || value === undefined || value === '') return <span className="text-gray-400 italic">(Vazio)</span>;
+                    return String(value);
                 };
 
                 return (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
-                         <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] border border-gray-200 animate-slide-in">
+                         <div className={`w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] border border-gray-200 animate-slide-in overflow-hidden ${styles.bg}`}>
                             {/* Header */}
-                            <div className="flex justify-between items-center p-5 border-b border-gray-100">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${styles.bg} ${styles.text}`}>
+                            <div className="flex justify-between items-center p-5 border-b border-black/5 bg-white/30">
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${styles.bg} ${styles.textH} border border-black/10 shadow-inner`}>
                                         <i className={`fas ${styles.icon}`}></i>
                                     </div>
                                     <div>
-                                        <h3 className="font-bold text-lg text-simas-dark">
-                                            {action.charAt(0).toUpperCase() + action.slice(1).toLowerCase()} em {selectedAudit.TABELA_AFETADA}
+                                        <h3 className={`font-extrabold text-lg ${styles.textH}`}>
+                                            {action} em {selectedAudit.TABELA_AFETADA}
                                         </h3>
-                                        <p className="text-xs text-gray-400">
+                                        <p className="text-xs text-gray-500">
                                             Por <span className="font-bold">{selectedAudit.USUARIO}</span> em {new Date(selectedAudit.DATA_HORA).toLocaleString('pt-BR')}
                                         </p>
                                     </div>
                                 </div>
-                                <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
+                                <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-black/10 flex items-center justify-center transition-colors text-gray-600"><i className="fas fa-times"></i></button>
                             </div>
                             
                             {/* Content */}
-                            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                                <div className="grid grid-cols-2 gap-x-6">
-                                    {/* Coluna Antes */}
-                                    <div className="flex flex-col">
-                                        <h4 className="font-bold text-gray-500 border-b border-gray-200 pb-2 mb-3">Antes</h4>
-                                        <div className="space-y-3">
-                                        {action !== 'CRIAR' ? uniqueKeys.map(key => {
-                                            const oldVal = oldData[key];
-                                            const newVal = newData[key];
-                                            const isChanged = action === 'EDITAR' && JSON.stringify(oldVal) !== JSON.stringify(newVal);
-                                            
-                                            return (
-                                                <div key={`old-${key}`} className={`p-2 rounded-lg ${isChanged ? 'bg-red-50/50' : ''}`}>
-                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">{key.replace(/_/g, ' ')}</p>
-                                                    {renderValue(oldVal)}
-                                                </div>
-                                            );
-                                        }) : <p className="text-xs text-gray-400 italic text-center p-4">Nenhum dado anterior.</p>}
-                                        </div>
-                                    </div>
-                                    {/* Coluna Depois */}
-                                    <div className="flex flex-col">
-                                         <h4 className="font-bold text-gray-500 border-b border-gray-200 pb-2 mb-3">Depois</h4>
-                                         <div className="space-y-3">
-                                        {action !== 'EXCLUIR' && action !== 'ARQUIVAR' && action !== 'INATIVAR' ? uniqueKeys.map(key => {
-                                            const oldVal = oldData[key];
-                                            const newVal = newData[key];
-                                            const isChanged = action === 'EDITAR' && JSON.stringify(oldVal) !== JSON.stringify(newVal);
+                            <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
+                                {allKeys.map(key => {
+                                    if (key.startsWith('ID_')) return null;
 
-                                            return (
-                                                <div key={`new-${key}`} className={`p-2 rounded-lg ${isChanged ? 'bg-green-50/60' : ''}`}>
-                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">{key.replace(/_/g, ' ')}</p>
-                                                    {renderValue(newVal)}
-                                                </div>
-                                            );
-                                        }) : <p className="text-xs text-gray-400 italic text-center p-4">Nenhum dado posterior.</p>}
+                                    const oldVal = oldData[key];
+                                    const newVal = newData[key];
+                                    const hasChanged = JSON.stringify(oldVal) !== JSON.stringify(newVal);
+
+                                    return (
+                                        <div key={key} className="p-3 rounded-lg border border-black/5 bg-white/40">
+                                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{key.replace(/_/g, ' ')}</p>
+                                            
+                                            {action === 'EDITAR' ? (
+                                                hasChanged ? (
+                                                    <div className="text-sm flex items-center gap-2 font-mono">
+                                                        <span className="line-through text-red-400">{renderValue(oldVal)}</span>
+                                                        <i className="fas fa-arrow-right text-gray-400 text-xs"></i>
+                                                        <span className="font-bold text-green-700">{renderValue(newVal)}</span>
+                                                    </div>
+                                                ) : (
+                                                    <p className={`text-sm font-mono ${styles.textB}`}>{renderValue(newVal)}</p>
+                                                )
+                                            ) : (
+                                                <p className={`text-sm font-mono ${styles.textB}`}>{renderValue(dataToShow[key])}</p>
+                                            )}
                                         </div>
-                                    </div>
-                                </div>
+                                    );
+                                })}
                             </div>
                          </div>
                     </div>
@@ -573,12 +544,12 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                             </div>
                             <h3 className="text-xl font-extrabold text-simas-dark mb-2">Confirmar Restauração</h3>
                             <p className="text-sm text-gray-500 mb-6 px-4 leading-relaxed">
-                                Você está prestes a restaurar este registro para a lista ativa.
+                                Você está prestes a reverter esta ação. Os dados serão restaurados para o estado anterior.
                             </p>
                             
                             <div className="flex gap-3 w-full">
                                 <Button variant="secondary" onClick={() => setPendingRestoreId(null)} className="flex-1 justify-center" disabled={!!restoringId}>Cancelar</Button>
-                                <Button onClick={executeRestore} isLoading={!!restoringId} className="flex-1 justify-center">Restaurar</Button>
+                                <Button onClick={executeRestore} isLoading={!!restoringId} className="flex-1 justify-center">Confirmar</Button>
                             </div>
                         </div>
                     </div>

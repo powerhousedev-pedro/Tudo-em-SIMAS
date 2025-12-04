@@ -498,7 +498,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
             }
         });
 
-        res.json({ success: true, message: 'Registro restaurado com sucesso.' });
+        res.json({ success: true, message: 'Registro restaurado com sucesso.', invalidatedEntity: log.TABELA_AFETADA });
     } catch (e: any) { 
         res.status(500).json({ message: getFriendlyErrorMessage(e) }); 
     }
