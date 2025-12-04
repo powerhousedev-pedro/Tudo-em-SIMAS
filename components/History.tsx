@@ -424,29 +424,35 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                     ) : (
                                         filteredData.map((item, idx) => {
                                             const isAudit = getEntityForView() === 'Auditoria';
-                                            const isRestorable = isAudit && (item.ACAO === 'EXCLUIR' || item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR');
-                                            return (
-                                                <tr key={idx} className="hover:bg-gray-50 transition-colors group">
-                                                    {columns.map(col => (
-                                                        <td key={col} className="px-6 py-4 whitespace-nowrap">
-                                                            {renderCell(item, col)}
-                                                        </td>
-                                                    ))}
-                                                    {isAudit && (
-                                                        <td className="px-6 py-4 text-right">
-                                                            {isRestorable && isAdmin && (
-                                                                <button 
-                                                                    onClick={() => setPendingRestoreId(item.ID_LOG)}
-                                                                    className={`p-2 rounded-lg transition-all ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'text-green-500 hover:bg-green-50' : 'text-gray-300 hover:text-orange-500 hover:bg-orange-50'}`}
-                                                                    title={item.ACAO === 'ARQUIVAR' ? "Desarquivar" : "Desfazer Exclusão"}
-                                                                >
-                                                                    <i className={`fas ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'fa-box-open' : 'fa-undo'}`}></i>
-                                                                </button>
-                                                            )}
-                                                        </td>
-                                                    )}
-                                                </tr>
-                                            );
+                                                        const isRestorable = isAudit && (item.ACAO === 'EXCLUIR' || item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' || item.ACAO === 'CRIAR' || item.ACAO === 'EDITAR');
+                                                        return (
+                                                            <tr key={idx} className="hover:bg-gray-50 transition-colors group">
+                                                                {columns.map(col => (
+                                                                    <td key={col} className="px-6 py-4 whitespace-nowrap">
+                                                                        {renderCell(item, col)}
+                                                                    </td>
+                                                                ))}
+                                                                {isAudit && (
+                                                                    <td className="px-6 py-4 text-right">
+                                                                        {isRestorable && isAdmin && (
+                                                                            <button 
+                                                                                onClick={() => setPendingRestoreId(item.ID_LOG)}
+                                                                                className={`p-2 rounded-lg transition-all ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'text-green-500 hover:bg-green-50' : 'text-orange-500 hover:bg-orange-50'}`}
+                                                                                title={
+                                                                                    item.ACAO === 'ARQUIVAR' ? "Desarquivar" :
+                                                                                    item.ACAO === 'INATIVAR' ? "Reativar" :
+                                                                                    item.ACAO === 'CRIAR' ? "Desfazer Criação" :
+                                                                                    item.ACAO === 'EDITAR' ? "Desfazer Edição" :
+                                                                                    item.ACAO === 'EXCLUIR' ? "Desfazer Exclusão" :
+                                                                                    "Restaurar Ação"
+                                                                                }
+                                                                            >
+                                                                                <i className={`fas ${item.ACAO === 'ARQUIVAR' || item.ACAO === 'INATIVAR' ? 'fa-box-open' : 'fa-undo'}`}></i>
+                                                                            </button>
+                                                                        )}
+                                                                    </td>
+                                                                )}
+                                                            </tr>                                            );
                                         })
                                     )}
                                 </tbody>
