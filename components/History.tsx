@@ -463,58 +463,97 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             </div>
 
             {/* Audit Modal (Details) */}
-            {selectedAudit && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
-                     <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] bg-white border border-gray-200 animate-slide-in">
-                        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                            <div>
-                                <h3 className="font-bold text-lg text-simas-dark flex items-center gap-2">
-                                    <i className="fas fa-search text-simas-cyan"></i>
-                                    Detalhes da Auditoria
-                                </h3>
-                                <p className="text-xs text-gray-500 mt-1">{selectedAudit.TABELA_AFETADA} - {selectedAudit.ACAO}</p>
+            {selectedAudit && (() => {
+                const action = selectedAudit.ACAO;
+                
+                const getActionStyling = (action: string) => {
+                    switch (action) {
+                        case 'CRIAR': return { bg: 'bg-green-50/40', border: 'border-green-200', text: 'text-green-700', icon: 'fa-plus' };
+                        case 'EDITAR': return { bg: 'bg-blue-50/40', border: 'border-blue-200', text: 'text-blue-700', icon: 'fa-pencil-alt' };
+                        case 'EXCLUIR': return { bg: 'bg-red-50/40', border: 'border-red-200', text: 'text-red-700', icon: 'fa-trash-alt' };
+                        case 'ARQUIVAR': return { bg: 'bg-orange-50/40', border: 'border-orange-200', text: 'text-orange-700', icon: 'fa-archive' };
+                        case 'INATIVAR': return { bg: 'bg-gray-100/60', border: 'border-gray-200', text: 'text-gray-700', icon: 'fa-user-slash' };
+                        case 'RESTAURAR': return { bg: 'bg-cyan-50/40', border: 'border-cyan-200', text: 'text-cyan-700', icon: 'fa-history' };
+                        default: return { bg: 'bg-white', border: 'border-gray-200', text: 'text-gray-800', icon: 'fa-question-circle' };
+                    }
+                };
+
+                const styles = getActionStyling(action);
+
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
+                         <div className={`w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] border animate-slide-in ${styles.bg} ${styles.border}`}>
+                            <div className={`p-5 border-b ${styles.border} flex justify-between items-center bg-white/50`}>
+                                <div>
+                                    <h3 className={`font-bold text-lg ${styles.text} flex items-center gap-2`}>
+                                        <i className={`fas ${styles.icon}`}></i>
+                                        Detalhes da Auditoria
+                                    </h3>
+                                    <p className="text-xs text-gray-500 mt-1">{selectedAudit.TABELA_AFETADA} - {action}</p>
+                                </div>
+                                <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-gray-200 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
                             </div>
-                            <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-gray-200 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
-                        </div>
-                        <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
-                            {/* Render Logic for Details matches previous implementation */}
-                            {(() => {
-                                const oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}');
-                                const newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}');
-                                const action = selectedAudit.ACAO;
-                                const displayData = (action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR') ? oldData : (action === 'CRIAR' || action === 'RESTAURAR' ? newData : { ...oldData, ...newData });
-                                
-                                return Object.keys(displayData).sort().map(key => {
-                                    if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null;
-                                    let content;
-                                    if (action === 'EDITAR') {
-                                        const oldVal = oldData[key];
-                                        const newVal = newData[key];
-                                        if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
-                                            content = (
-                                                <div className="flex flex-col items-start bg-yellow-50 p-2 rounded border border-yellow-100 mt-1">
-                                                    <span className="line-through text-gray-400 text-xs mb-1">{String(oldVal || '(Vazio)')}</span>
-                                                    <span className="text-simas-dark font-bold text-sm">{String(newVal || '(Vazio)')}</span>
-                                                </div>
-                                            );
-                                        } else {
-                                            content = <span className="text-gray-600 font-medium text-sm">{String(newVal || '')}</span>;
-                                        }
-                                    } else {
-                                        content = <span className="text-gray-800 font-medium text-sm">{String(displayData[key] || '')}</span>;
+                            <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
+                                {(() => {
+                                    let oldData = {};
+                                    let newData = {};
+                                    try {
+                                        oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}');
+                                        newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}');
+                                    } catch (e) {
+                                        console.error('Failed to parse audit data:', e);
                                     }
-                                    return (
-                                        <div key={key} className="flex flex-col border-b border-gray-50 last:border-0 pb-3 last:pb-0">
-                                            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{key.replace(/_/g, ' ')}</span>
-                                            {content}
-                                        </div>
-                                    );
-                                });
-                            })()}
-                        </div>
-                     </div>
-                </div>
-            )}
+                                    
+                                    if (action === 'RESTAURAR') {
+                                        return (
+                                            <>
+                                                <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 text-center mb-4">
+                                                    <p className="text-xs text-cyan-800 font-semibold">Esta ação reverteu um estado anterior. O resultado é o seguinte:</p>
+                                                </div>
+                                                {Object.keys(newData).sort().map(key => (
+                                                    <div key={key} className="flex flex-col border-b border-gray-50 last:border-0 pb-3 last:pb-0">
+                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{key.replace(/_/g, ' ')}</span>
+                                                        <span className="text-gray-800 font-medium text-sm">{String(newData[key] || '')}</span>
+                                                    </div>
+                                                ))}
+                                            </>
+                                        );
+                                    }
+                                    
+                                    const displayData = (action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR') ? oldData : (action === 'CRIAR' ? newData : { ...oldData, ...newData });
+                                    
+                                    return Object.keys(displayData).sort().map(key => {
+                                        if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null;
+                                        let content;
+                                        if (action === 'EDITAR') {
+                                            const oldVal = oldData[key];
+                                            const newVal = newData[key];
+                                            if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+                                                content = (
+                                                    <div className="flex flex-col items-start bg-yellow-50 p-2 rounded border border-yellow-100 mt-1">
+                                                        <span className="line-through text-gray-400 text-xs mb-1">{String(oldVal || '(Vazio)')}</span>
+                                                        <span className="text-simas-dark font-bold text-sm">{String(newVal || '(Vazio)')}</span>
+                                                    </div>
+                                                );
+                                            } else {
+                                                content = <span className="text-gray-600 font-medium text-sm">{String(newVal || '')}</span>;
+                                            }
+                                        } else {
+                                            content = <span className="text-gray-800 font-medium text-sm">{String(displayData[key] || '')}</span>;
+                                        }
+                                        return (
+                                            <div key={key} className="flex flex-col border-b border-gray-50 last:border-0 pb-3 last:pb-0">
+                                                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{key.replace(/_/g, ' ')}</span>
+                                                {content}
+                                            </div>
+                                        );
+                                    });
+                                })()}
+                            </div>
+                         </div>
+                    </div>
+                )
+            })()}
 
             {/* Restore Confirmation Modal */}
             {pendingRestoreId && (
