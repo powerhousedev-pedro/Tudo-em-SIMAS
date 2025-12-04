@@ -495,14 +495,14 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                             </div>
                             <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
                                 {(() => {
-                                    let oldData = {};
-                                    let newData = {};
+                                    let oldData: Record<string, any> = {};
+                                    let newData: Record<string, any> = {};
                                     try {
                                         oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}');
+                                    } catch (e) { /* ignore parse errors */ }
+                                    try {
                                         newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}');
-                                    } catch (e) {
-                                        console.error('Failed to parse audit data:', e);
-                                    }
+                                    } catch (e) { /* ignore parse errors */ }
                                     
                                     if (action === 'RESTAURAR') {
                                         return (
@@ -520,7 +520,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                                         );
                                     }
                                     
-                                    const displayData = (action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR') ? oldData : (action === 'CRIAR' ? newData : { ...oldData, ...newData });
+                                    const displayData: Record<string, any> = (action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR') ? oldData : (action === 'CRIAR' ? newData : { ...oldData, ...newData });
                                     
                                     return Object.keys(displayData).sort().map(key => {
                                         if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null;
