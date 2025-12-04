@@ -197,17 +197,12 @@ export const api = {
 
   getRevisoesPendentes: async () => {
     try {
-        // This is still heavy, but we will optimize later with a dedicated endpoint
-        const data = await api.fetchEntity('Atendimento'); 
-        if (!Array.isArray(data)) return [];
-        
-        const today = new Date().toISOString().split('T')[0];
-        
-        return data.filter((a: any) => {
-            return a.STATUS_AGENDAMENTO === 'Pendente' && 
-                   (a.DATA_AGENDAMENTO && a.DATA_AGENDAMENTO <= today);
-        });
-    } catch (e) { return []; }
+        // Otimizado: Chama o endpoint que já retorna os dados filtrados.
+        return await request('/reports/revisoesPendentes');
+    } catch (e) { 
+        console.error("Falha ao buscar revisões pendentes:", e);
+        return []; 
+    }
   },
 
   getSystemAlerts: async () => {

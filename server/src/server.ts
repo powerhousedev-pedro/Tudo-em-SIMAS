@@ -6,6 +6,9 @@ import { runBackup } from './scripts/backup';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
 
+import { utcToZonedTime, zonedTimeToUtc } from '@date-fns/tz';
+import { endOfDay } from 'date-fns';
+
 const app = express();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'simas-secure-secret';
@@ -40,20 +43,24 @@ const authenticateToken = (req: any, res: any, next: NextFunction) => {
     });
 };
 
-// --- HELPERS ---
+const getBrasiliaTimestamp = () => {
+    return new Date(); // Best practice: Store UTC in the database
+};
 
 const cleanData = (data: any) => {
     const cleaned: any = {};
+    const timeZone = 'America/Sao_Paulo';
     for (const key in data) {
-        if (key === 'editToken') continue; // Ignorar tokens de frontend
-        if (data[key] === "") {
+        if (key === 'editToken') continue; 
+        if (data[key] === "" || data[key] === null) {
             cleaned[key] = null;
         } else {
             let val = data[key];
-            // Fix for Prisma DateTime validation (YYYY-MM-DD -> ISO)
+            // Correctly handle date-only strings by interpreting them in Brasília time
             if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
                 if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key)) {
-                    val = new Date(val).toISOString();
+                    // Parse as Brasília local time and convert to UTC for storage
+                    val = zonedTimeToUtc(`${val}T00:00:00`, timeZone);
                 }
             }
             cleaned[key] = val;
@@ -150,7 +157,7 @@ const auditAction = async (
         await prismaClient.auditoria.create({
             data: {
                 ID_LOG: generateId('LOG'),
-                DATA_HORA: new Date(),
+                DATA_HORA: getBrasiliaTimestamp(),
                 USUARIO: usuario,
                 ACAO: acao,
                 TABELA_AFETADA: tabela,
@@ -243,7 +250,7 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
                     ID_VAGA: contratoAtivo.ID_VAGA,
                     ID_FUNCAO: contratoAtivo.ID_FUNCAO,
                     DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
-                    DATA_ARQUIVAMENTO: new Date(),
+                    DATA_ARQUIVAMENTO: getBrasiliaTimestamp(),
                     MOTIVO_ARQUIVAMENTO: MOTIVO
                 };
                 
@@ -301,7 +308,7 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
                 DATA_MATRICULA: servidor.DATA_MATRICULA,
                 VINCULO: servidor.VINCULO,
                 PREFIXO_MATRICULA: servidor.PREFIXO_MATRICULA,
-                DATA_INATIVACAO: new Date(),
+                DATA_INATIVACAO: getBrasiliaTimestamp(),
                 MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
             };
 
@@ -342,7 +349,7 @@ app.post('/api/Alocacao', authenticateToken, async (req: AuthenticatedRequest, r
                         ID_LOTACAO: alocacaoExistente.ID_LOTACAO,
                         ID_FUNCAO: alocacaoExistente.ID_FUNCAO,
                         DATA_INICIO: alocacaoExistente.DATA_INICIO,
-                        DATA_ARQUIVAMENTO: new Date(), // Nome correto do campo
+                        DATA_ARQUIVAMENTO: getBrasiliaTimestamp(), // Nome correto do campo
                     }
                 });
 
@@ -587,7 +594,7 @@ app.post('/api/reports/saved', authenticateToken, async (req: AuthenticatedReque
                 NOME: name,
                 USUARIO: req.user?.usuario || 'Sistema',
                 CONFIGURACAO: JSON.stringify(config),
-                DATA_CRIACAO: new Date()
+                DATA_CRIACAO: getBrasiliaTimestamp()
             }
         });
         res.json({ success: true, data: newReport });
@@ -780,7 +787,27 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
     const { reportName } = req.params;
     try {
         let result: any = {};
-        if (reportName === 'dashboardPessoal') {
+        if (reportName === 'revisoesPendentes') {
+            const timeZone = 'America/Sao_Paulo';
+            // Get current date in Brasília timezone
+            const now = new Date();
+            const zonedNow = utcToZonedTime(now, timeZone);
+            const endOfDayBrasilia = endOfDay(zonedNow);
+            // Convert end-of-day Brasília time back to UTC for database comparison
+            const today = zonedTimeToUtc(endOfDayBrasilia, timeZone);
+
+            result = await prisma.atendimento.findMany({
+                where: {
+                    STATUS_PEDIDO: 'Aguardando',
+                    DATA_AGENDAMENTO: {
+                        lte: today
+                    }
+                },
+                orderBy: {
+                    DATA_AGENDAMENTO: 'asc'
+                }
+            });
+        } else if (reportName === 'dashboardPessoal') {
             const totalContratos = await prisma.contrato.count();
             const totalServidores = await prisma.servidor.count();
             const servidoresGroup = await prisma.servidor.groupBy({ by: ['VINCULO'], _count: { VINCULO: true } });

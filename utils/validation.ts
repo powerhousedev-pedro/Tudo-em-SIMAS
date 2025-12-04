@@ -87,14 +87,13 @@ export const validation = {
   // --- FORMATTING (Display) ---
 
   formatDate: (value: any) => {
-    if (!value) return 'N/A';
+    if (!value) return '';
     try {
       const date = new Date(value);
-      if (isNaN(date.getTime())) return 'N/A';
-      // Use UTC to avoid timezone shifts when displaying simple dates
-      return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+      if (isNaN(date.getTime())) return value; // Validação explícita
+      return date.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     } catch (e) {
-      return 'N/A';
+      return value; // Retorna o valor original se a formatação falhar
     }
   },
 

@@ -3,16 +3,6 @@
 import { EntityConfig, DropdownOptions } from './types';
 import { validation } from './utils/validation';
 
-// Helper to format Date
-const formatDate = (val: any) => {
-  if (!val) return '';
-  try {
-    return new Date(val).toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // Force UTC parsing as per legacy
-  } catch (e) {
-    return val;
-  }
-};
-
 export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
   'GPRGP': ['painelVagas'],
   'GGT': [],
@@ -134,12 +124,11 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     manualPk: true, // CPF é inserido manualmente
     filterBy: 'BAIRRO',
     cardDisplay: (item: any) => {
-        // Legacy: Nome | CPF, Idade | Escolaridade, Formação (se houver) | Bairro
         const age = validation.calculateAge(item.DATA_DE_NASCIMENTO);
         const ageText = age !== null ? ` | ${age} anos` : '';
         const formacaoText = item.FORMACAO ? ` | ${item.FORMACAO}` : '';
         return {
-            title: item.NOME,
+            title: validation.capitalizeName(item.NOME),
             subtitle: `CPF: ${validation.formatCPF(item.CPF)}${ageText}`,
             details: `Escolaridade: ${item.ESCOLARIDADE || 'N/A'}${formacaoText}\nBairro: ${item.BAIRRO || 'N/A'}`
         };
@@ -152,10 +141,9 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_CONTRATO',
     pkPrefix: 'CTT',
     cardDisplay: (item: any) => ({
-      // Legacy: ID, Nome Pessoa, Nome Funcao
       title: `Contrato: ${item.ID_CONTRATO}`,
-      subtitle: item.NOME_PESSOA || item.CPF,
-      details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${formatDate(item.DATA_DO_CONTRATO)}`,
+      subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
+      details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${validation.formatDate(item.DATA_DO_CONTRATO)}`,
     })
   },
   'Vaga': {
@@ -164,16 +152,15 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'VAG',
     filterBy: 'LOTACAO_NOME',
     cardDisplay: (item: any) => {
-        // Legacy enriched: LOTACAO_NOME, EDITAL_NOME, CARGO_NOME, STATUS_VAGA, REVERVADA_PARA
         let details = `Edital: ${item.EDITAL_NOME || 'N/A'}`;
         if (item.STATUS_VAGA === 'Reservada') {
-            details += `\nReservada para: ${item.RESERVADA_PARA_NOME || item.RESERVADA_PARA_CPF || '...'}`;
+            details += `\nReservada para: ${validation.capitalizeName(item.RESERVADA_PARA_NOME || item.RESERVADA_PARA_CPF || '...')}`;
         }
         return {
             title: item.CARGO_NOME || 'Vaga',
             subtitle: item.LOTACAO_NOME || 'Lotação N/A',
             details: details,
-            status: item.STATUS_VAGA // Disponível, Ocupada, Bloqueada, Reservada, Em Aviso Prévio
+            status: item.STATUS_VAGA
         };
     }
   },
@@ -185,7 +172,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       cardDisplay: (item: any) => ({
           title: item.EDITAL,
           subtitle: `Proc: ${item.PROCESSO}`,
-          details: `Vigência: ${formatDate(item.INICIO)} - ${formatDate(item.TERMINO)}\nCogestora: ${item.COGESTORA || 'N/A'}`
+          details: `Vigência: ${validation.formatDate(item.INICIO)} - ${validation.formatDate(item.TERMINO)}\nCogestora: ${item.COGESTORA || 'N/A'}`
       })
   },
   'Exercicio': { 
@@ -203,11 +190,10 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   'Servidor': {
     title: 'Servidores',
     pk: 'MATRICULA',
-    manualPk: true, // Matrícula é manual
+    manualPk: true,
     filterBy: 'VINCULO',
     cardDisplay: (item: any) => ({
-      // Legacy: Name, Matricula (enriched with Cargo/Pessoa in backend)
-      title: item.NOME_PESSOA || 'Servidor',
+      title: validation.capitalizeName(item.NOME_PESSOA || 'Servidor'),
       subtitle: `Matrícula: ${item.PREFIXO_MATRICULA ? item.PREFIXO_MATRICULA + '-' : ''}${item.MATRICULA}`,
       details: `${item.VINCULO}\nCargo Efetivo: ${item.NOME_CARGO || item.ID_CARGO}`
     })
@@ -217,10 +203,9 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_ALOCACAO',
     pkPrefix: 'ALC',
     cardDisplay: (item: any) => ({
-        // Legacy: Pessoa, Lotacao, Funcao
-        title: item.NOME_PESSOA,
+        title: validation.capitalizeName(item.NOME_PESSOA),
         subtitle: item.NOME_LOTACAO,
-        details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${formatDate(item.DATA_INICIO)}`
+        details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${validation.formatDate(item.DATA_INICIO)}`
     })
   },
   'Nomeacao': { 
@@ -228,10 +213,9 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_NOMEACAO', 
     pkPrefix: 'NOM', 
     cardDisplay: (item: any) => ({
-        // Legacy: Servidor, Cargo Comissionado
-        title: item.NOME_SERVIDOR,
+        title: validation.capitalizeName(item.NOME_SERVIDOR),
         subtitle: item.NOME_CARGO_COMISSIONADO || item.ID_CARGO_COMISSIONADO,
-        details: `Data Nomeação: ${formatDate(item.DATA_DA_NOMEACAO)}`
+        details: `Data Nomeação: ${validation.formatDate(item.DATA_DA_NOMEACAO)}`
     }) 
   },
   'CargoComissionado': { 
@@ -261,7 +245,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_TURMA', 
     pkPrefix: 'TUR', 
     cardDisplay: (item: any) => ({
-        // Legacy: Nome Turma, Nome Capacitacao
         title: item.NOME_TURMA,
         subtitle: item.NOME_CAPACITACAO || `Capacitação ID: ${item.ID_CAPACITACAO}`,
         details: `ID Turma: ${item.ID_TURMA}`
@@ -273,7 +256,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'ENC', 
     cardDisplay: (item: any) => ({
         title: item.NOME_TURMA || `Turma ID: ${item.ID_TURMA}`,
-        subtitle: `Encontro: ${formatDate(item.DATA_DE_ENCONTRO)}`,
+        subtitle: `Encontro: ${validation.formatDate(item.DATA_DE_ENCONTRO)}`,
         details: `ID Encontro: ${item.ID_ENCONTRO}`
     }) 
   },
@@ -282,11 +265,10 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_CHAMADA', 
     pkPrefix: 'CHM', 
     cardDisplay: (item: any) => ({
-        // Legacy: Pessoa, Turma, Data
-        title: item.NOME_PESSOA || item.CPF,
+        title: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
         subtitle: item.NOME_TURMA || item.ID_TURMA,
         status: item.PRESENCA,
-        details: `Data: ${formatDate(item.DATA_ENCONTRO)}`
+        details: `Data: ${validation.formatDate(item.DATA_ENCONTRO)}`
     }) 
   },
   'Visita': { 
@@ -295,8 +277,8 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'VIS', 
     cardDisplay: (item: any) => ({
         title: item.LOCAL,
-        subtitle: item.NOME_PESSOA || item.CPF,
-        details: `${formatDate(item.DATA_VISITA)}\n${item.MODALIDADE_VISITA}`
+        subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
+        details: `${validation.formatDate(item.DATA_VISITA)}\n${item.MODALIDADE_VISITA}`
     }) 
   },
   'SolicitacaoPesquisa': { 
@@ -305,7 +287,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'SOL', 
     cardDisplay: (item: any) => ({
         title: item.OBJETO_DE_ESTUDO,
-        subtitle: item.NOME_PESSOA || item.CPF,
+        subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
         details: `Ano: ${item.ANO_ENTRADA} | Autorizado: ${item.AUTORIZO}`
     }) 
   },
@@ -314,9 +296,8 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'ID_PESQUISA', 
     pkPrefix: 'PSQ', 
     cardDisplay: (item: any) => ({
-        // Legacy: Objeto Estudo (from Solicitacao), Dates
         title: item.OBJETO_ESTUDO || `Solicitação: ${item.ID_SOLICITACAO}`,
-        subtitle: `Fim Previsto: ${formatDate(item.PREV_DATA_FIM)}`,
+        subtitle: `Fim Previsto: ${validation.formatDate(item.PREV_DATA_FIM)}`,
         details: item.MATERIAL_PENDENTE === 'Sim' ? 'Pendência de Material' : 'Material Regular'
     }) 
   },
@@ -328,9 +309,9 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'ATD',
     cardDisplay: (item: any) => ({
       title: item.TIPO_PEDIDO,
-      subtitle: item.NOME_PESSOA || item.CPF,
+      subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
       status: item.STATUS_PEDIDO,
-      details: `Entrada: ${formatDate(item.DATA_ENTRADA)}\nResponsável: ${item.RESPONSAVEL}`
+      details: `Entrada: ${validation.formatDate(item.DATA_ENTRADA)}\nResponsável: ${item.RESPONSAVEL}`
     })
   },
   'Protocolo': {
@@ -338,10 +319,9 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'ID_PROTOCOLO',
       pkPrefix: 'PRT',
       cardDisplay: (item: any) => ({
-          // Legacy: Pessoa, Detalhe Vinculo
           title: item.TIPO_DE_PROTOCOLO,
-          subtitle: item.NOME_PESSOA || item.CPF,
-          details: `${item.DETALHE_VINCULO || 'Vínculo N/A'}\nInício: ${formatDate(item.INICIO_PRAZO)}`
+          subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
+          details: `${item.DETALHE_VINCULO || 'Vínculo N/A'}\nInício: ${validation.formatDate(item.INICIO_PRAZO)}`
       })
   },
   'Lotacao': {
@@ -382,8 +362,8 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'ID_CONTRATO',
       cardDisplay: (item: any) => ({ 
           title: `Contrato Antigo: ${item.ID_CONTRATO}`, 
-          subtitle: item.NOME_PESSOA || item.CPF,
-          details: `Arquivado em: ${formatDate(item.DATA_ARQUIVAMENTO)}\nMotivo: ${item.MOTIVO_ARQUIVAMENTO || 'N/A'}`
+          subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
+          details: `Arquivado em: ${validation.formatDate(item.DATA_ARQUIVAMENTO)}\nMotivo: ${item.MOTIVO_ARQUIVAMENTO || 'N/A'}`
       })
   },
   'AlocacaoHistorico': {
@@ -392,16 +372,16 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       cardDisplay: (item: any) => ({ 
           title: `Alocação Antiga: ${item.ID_ALOCACAO}`, 
           subtitle: `Matrícula: ${item.MATRICULA}`,
-          details: `Arquivado em: ${formatDate(item.DATA_ARQUIVAMENTO)}`
+          details: `Arquivado em: ${validation.formatDate(item.DATA_ARQUIVAMENTO)}`
       })
   },
   'Inativo': {
       title: 'Servidores Inativos',
       pk: 'MATRICULA',
       cardDisplay: (item: any) => ({ 
-          title: item.NOME || `Matrícula: ${item.MATRICULA}`, 
+          title: validation.capitalizeName(item.NOME || `Matrícula: ${item.MATRICULA}`), 
           subtitle: item.CARGO || 'Cargo N/A',
-          details: `Inativado em: ${formatDate(item.DATA_INATIVACAO)}\nMotivo: ${item.MOTIVO_INATIVACAO}`
+          details: `Inativado em: ${validation.formatDate(item.DATA_INATIVACAO)}\nMotivo: ${item.MOTIVO_INATIVACAO}`
       })
   },
   'Auditoria': {
