@@ -5,13 +5,13 @@ import jwt from 'jsonwebtoken';
 import { runBackup } from './scripts/backup';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
-
 import { utcToZonedTime, zonedTimeToUtc } from '@date-fns/tz';
 import { endOfDay } from 'date-fns';
 
 const app = express();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'simas-secure-secret';
+const TIMEZONE = 'America/Sao_Paulo';
 
 app.use(cors());
 app.use(express.json() as any);
@@ -43,24 +43,36 @@ const authenticateToken = (req: any, res: any, next: NextFunction) => {
     });
 };
 
+// --- ROBUST TIMEZONE HELPERS ---
+
 const getBrasiliaTimestamp = () => {
-    return new Date(); // Best practice: Store UTC in the database
+    // Best practice: Always store and handle timestamps in UTC.
+    return new Date();
+};
+
+const getEndOfDayInBrasiliaAsUtc = () => {
+    const now = new Date(); // Current time in UTC
+    // 1. Find out what the wall-clock time is in Brasília right now.
+    const zonedNow = utcToZonedTime(now, TIMEZONE);
+    // 2. Find the end of that day in Brasília wall-clock time.
+    const endOfDayInBrasilia = endOfDay(zonedNow);
+    // 3. Convert that Brasília end-of-day time back to its corresponding UTC timestamp.
+    return zonedTimeToUtc(endOfDayInBrasilia, TIMEZONE);
 };
 
 const cleanData = (data: any) => {
     const cleaned: any = {};
-    const timeZone = 'America/Sao_Paulo';
     for (const key in data) {
         if (key === 'editToken') continue; 
         if (data[key] === "" || data[key] === null) {
             cleaned[key] = null;
         } else {
             let val = data[key];
-            // Correctly handle date-only strings by interpreting them in Brasília time
+            // If we receive a string like "2025-12-04", we must assume it's a Brasília date.
+            // This converts that local date string into the correct UTC timestamp for storage.
             if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
                 if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key)) {
-                    // Parse as Brasília local time and convert to UTC for storage
-                    val = zonedTimeToUtc(`${val}T00:00:00`, timeZone);
+                    val = zonedTimeToUtc(`${val}T00:00:00`, TIMEZONE);
                 }
             }
             cleaned[key] = val;
@@ -788,13 +800,7 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
     try {
         let result: any = {};
         if (reportName === 'revisoesPendentes') {
-            const timeZone = 'America/Sao_Paulo';
-            // Get current date in Brasília timezone
-            const now = new Date();
-            const zonedNow = utcToZonedTime(now, timeZone);
-            const endOfDayBrasilia = endOfDay(zonedNow);
-            // Convert end-of-day Brasília time back to UTC for database comparison
-            const today = zonedTimeToUtc(endOfDayBrasilia, timeZone);
+            const today = getEndOfDayInBrasiliaAsUtc();
 
             result = await prisma.atendimento.findMany({
                 where: {
