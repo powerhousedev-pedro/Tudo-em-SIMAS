@@ -407,88 +407,95 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
         const log = await prisma.auditoria.findUnique({ where: { ID_LOG: id } });
         if (!log) return res.status(404).json({ message: 'Log não encontrado.' });
         
-        // --- LOGICA DE RESTAURAÇÃO DE ARQUIVAMENTO (Tabelas Físicas) ---
-        if (log.ACAO === 'ARQUIVAR' || log.ACAO === 'INATIVAR') {
-             await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+            // Helper local para obter um modelo Prisma dentro da transação, garantindo consistência.
+            const getModelForTx = (modelName: string) => {
+                let name = modelName.charAt(0).toLowerCase() + modelName.slice(1);
+                if (name === 'solicitacaoPesquisa') name = 'solicitacaoPesquisa'; 
+                if (name === 'cargoComissionado') name = 'cargoComissionado';
+                if (name === 'relatorioSalvo') name = 'relatorioSalvo';
+                if (name === 'contratoHistorico') name = 'contratoHistorico';
+                if (name === 'alocacaoHistorico') name = 'alocacaoHistorico';
+                if (name === 'inativo') name = 'inativo';
+                return (tx as any)[name];
+            };
+
+            // --- LOGICA DE RESTAURAÇÃO DE ARQUIVAMENTO (Tabelas Físicas) ---
+            if (log.ACAO === 'ARQUIVAR' || log.ACAO === 'INATIVAR') {
                 let dataToRestore: any = null;
 
                 if (log.TABELA_AFETADA === 'Contrato') {
-                    // Busca na tabela histórica física usando findFirst porque ID_CONTRATO não é PK lá
                     const historico = await tx.contratoHistorico.findFirst({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
                     if (!historico) throw new Error("Registro não encontrado na tabela de histórico.");
-
-                    // Limpa dados de controle do histórico
                     dataToRestore = { ...historico };
-                    delete dataToRestore.ID_HISTORICO_CONTRATO; // Remover PK da histórica
+                    delete dataToRestore.ID_HISTORICO_CONTRATO;
                     delete dataToRestore.DATA_ARQUIVAMENTO;
                     delete dataToRestore.MOTIVO_ARQUIVAMENTO;
-
-                    // Insere na ativa
                     await tx.contrato.create({ data: dataToRestore });
-                    // Remove da histórica usando a PK correta encontrada
                     await tx.contratoHistorico.delete({ where: { ID_HISTORICO_CONTRATO: historico.ID_HISTORICO_CONTRATO } });
-
                 } else if (log.TABELA_AFETADA === 'Servidor') {
-                    // O ID do log é a MATRICULA
                     const oldData = JSON.parse(log.VALOR_ANTIGO || '{}');
-                    // Workaround: Buscar por CPF e filtrar em memória, pois MATRICULA pode não estar no WhereInput
                     const candidates = await tx.inativo.findMany({ where: { CPF: oldData.CPF } });
-                    // CORREÇÃO: Comparar MATRICULA_ORIGINAL com o ID do log
                     const inativo = candidates.find((c: any) => c.MATRICULA_ORIGINAL === log.ID_REGISTRO_AFETADO);
-                    
                     if (!inativo) throw new Error("Registro não encontrado na tabela de inativos.");
-
                     dataToRestore = { ...inativo };
-                    
-                    // CORREÇÃO: Mapear MATRICULA_ORIGINAL de volta para MATRICULA
                     dataToRestore.MATRICULA = inativo.MATRICULA_ORIGINAL;
-                    
-                    delete dataToRestore.ID_INATIVO; // Remover PK da histórica
+                    delete dataToRestore.ID_INATIVO;
                     delete dataToRestore.MATRICULA_ORIGINAL;
                     delete dataToRestore.DATA_INATIVACAO;
-                    delete dataToRestore.MOTIVO_INATIVACAO; // Campo correto do Schema
-                    delete dataToRestore.MOTIVO; // Caso exista
-                    delete dataToRestore.PROCESSO; // Campo extra do inativo não existente em Servidor
+                    delete dataToRestore.MOTIVO_INATIVACAO;
+                    delete dataToRestore.MOTIVO;
+                    delete dataToRestore.PROCESSO;
                     delete dataToRestore.DATA_PUBLICACAO;
-
                     await tx.servidor.create({ data: dataToRestore });
-                    // Remove usando a PK correta
                     await tx.inativo.delete({ where: { ID_INATIVO: inativo.ID_INATIVO } });
-
                 } else if (log.TABELA_AFETADA === 'Alocacao') {
                     const hist = await tx.alocacaoHistorico.findFirst({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
                     if (!hist) throw new Error("Registro histórico de alocação não encontrado.");
-
                     dataToRestore = { ...hist };
-                    delete dataToRestore.ID_HISTORICO_ALOCACAO; // Remover PK da histórica
+                    delete dataToRestore.ID_HISTORICO_ALOCACAO;
                     delete dataToRestore.DATA_ARQUIVAMENTO;
-                    // delete dataToRestore.MOTIVO_MUDANCA; // Removido pois não existe no schema atual
-
                     await tx.alocacao.create({ data: dataToRestore });
-                    // Remove usando a PK correta
                     await tx.alocacaoHistorico.delete({ where: { ID_HISTORICO_ALOCACAO: hist.ID_HISTORICO_ALOCACAO } });
                 } else {
                     throw new Error(`Restauração de arquivamento não suportada para ${log.TABELA_AFETADA}`);
                 }
-
-                // Cria log de Restauração
                 await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, dataToRestore, tx);
-             });
-
-        } 
-        // --- LOGICA DE RESTAURAÇÃO DE EXCLUSÃO SIMPLES (Baseada no JSON) ---
-        else if (log.ACAO === 'EXCLUIR') {
-            const model = getModel(log.TABELA_AFETADA);
-            const savedData = JSON.parse(log.VALOR_ANTIGO || '{}');
             
-            if (!model) throw new Error('Modelo inválido para restauração.');
-            
-            await model.create({ data: savedData });
-            await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, savedData);
-        }
-        else {
-             throw new Error('Tipo de ação não permite restauração automática.');
-        }
+            } 
+            // --- LOGICA DE RESTAURAÇÃO DE EXCLUSÃO SIMPLES (Baseada no JSON) ---
+            else if (log.ACAO === 'EXCLUIR') {
+                const model = getModelForTx(log.TABELA_AFETADA);
+                const savedData = JSON.parse(log.VALOR_ANTIGO || '{}');
+                if (!model) throw new Error('Modelo inválido para restauração.');
+                await model.create({ data: savedData });
+                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, savedData, tx);
+            }
+            // --- Desfaz uma EDIÇÃO, voltando para o valor antigo ---
+            else if (log.ACAO === 'EDITAR') {
+                const model = getModelForTx(log.TABELA_AFETADA);
+                if (!model) throw new Error('Modelo inválido para restauração.');
+                const pkField = getEntityPk(log.TABELA_AFETADA);
+                const recordId = log.ID_REGISTRO_AFETADO;
+                const originalData = JSON.parse(log.VALOR_ANTIGO || '{}');
+                delete originalData[pkField];
+                await model.update({ where: { [pkField]: recordId }, data: originalData });
+                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, JSON.parse(log.VALOR_NOVO || '{}'), originalData, tx);
+            }
+            // --- Desfaz uma CRIAÇÃO, deletando o registro ---
+            else if (log.ACAO === 'CRIAR') {
+                const model = getModelForTx(log.TABELA_AFETADA);
+                if (!model) throw new Error('Modelo inválido para restauração.');
+                const pkField = getEntityPk(log.TABELA_AFETADA);
+                const recordId = log.ID_REGISTRO_AFETADO;
+                const createdRecord = JSON.parse(log.VALOR_NOVO || '{}');
+                await model.delete({ where: { [pkField]: recordId } });
+                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, recordId, createdRecord, null, tx);
+            }
+            else {
+                 throw new Error('Tipo de ação não permite restauração automática.');
+            }
+        });
 
         res.json({ success: true, message: 'Registro restaurado com sucesso.' });
     } catch (e: any) { 
