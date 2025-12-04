@@ -28,6 +28,7 @@ dist-ssr
 /forclone
 
 # Env files
+*.env
 .env
 .env.*
 !.env.example
