@@ -53,7 +53,7 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0 pr-6">
             {/* Título Curto do Card: Cera Pro Medium, Uppercase */}
-            <h4 className={`font-medium text-sm uppercase tracking-normal leading-snug ${selected && !blockedOverride ? 'text-simas-cyan' : (blockedOverride ? 'text-white' : 'text-simas-dark')}`}>
+            <h4 className={`font-medium text-sm tracking-normal leading-snug ${selected && !blockedOverride ? 'text-simas-cyan' : (blockedOverride ? 'text-white' : 'text-simas-dark')}`}>
                 {title}
             </h4>
             {/* Subtítulo: Normal/Sentence Case */}
