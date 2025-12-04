@@ -489,6 +489,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 if (!model) throw new Error('Modelo inválido para restauração.');
                 const pkField = getEntityPk(log.TABELA_AFETADA);
                 const recordId = log.ID_REGISTRO_AFETADO;
+                const createdRecord = JSON.parse(log.VALOR_NOVO || '{}');
                 await model.delete({ where: { [pkField]: recordId } });
                 await tx.auditoria.delete({ where: { ID_LOG: id } });
             }

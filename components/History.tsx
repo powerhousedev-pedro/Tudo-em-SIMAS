@@ -468,96 +468,99 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
                 
                 const getActionStyling = (action: string) => {
                     switch (action) {
-                        case 'CRIAR': return { bg: 'bg-green-50/40', border: 'border-green-200', text: 'text-green-700', icon: 'fa-plus' };
-                        case 'EDITAR': return { bg: 'bg-blue-50/40', border: 'border-blue-200', text: 'text-blue-700', icon: 'fa-pencil-alt' };
-                        case 'EXCLUIR': return { bg: 'bg-red-50/40', border: 'border-red-200', text: 'text-red-700', icon: 'fa-trash-alt' };
-                        case 'ARQUIVAR': return { bg: 'bg-orange-50/40', border: 'border-orange-200', text: 'text-orange-700', icon: 'fa-archive' };
-                        case 'INATIVAR': return { bg: 'bg-gray-100/60', border: 'border-gray-200', text: 'text-gray-700', icon: 'fa-user-slash' };
-                        case 'RESTAURAR': return { bg: 'bg-cyan-50/40', border: 'border-cyan-200', text: 'text-cyan-700', icon: 'fa-history' };
-                        default: return { bg: 'bg-white', border: 'border-gray-200', text: 'text-gray-800', icon: 'fa-question-circle' };
+                        case 'CRIAR': return { bg: 'bg-green-100', text: 'text-green-800', icon: 'fa-plus' };
+                        case 'EDITAR': return { bg: 'bg-blue-100', text: 'text-blue-800', icon: 'fa-pencil-alt' };
+                        case 'EXCLUIR': return { bg: 'bg-red-100', text: 'text-red-800', icon: 'fa-trash-alt' };
+                        case 'ARQUIVAR': return { bg: 'bg-orange-100', text: 'text-orange-800', icon: 'fa-archive' };
+                        case 'INATIVAR': return { bg: 'bg-gray-200', text: 'text-gray-800', icon: 'fa-user-slash' };
+                        case 'RESTAURAR': return { bg: 'bg-cyan-100', text: 'text-cyan-800', icon: 'fa-history' };
+                        default: return { bg: 'bg-gray-100', text: 'text-gray-800', icon: 'fa-question-circle' };
                     }
                 };
 
                 const styles = getActionStyling(action);
+                let oldData: Record<string, any> = {};
+                let newData: Record<string, any> = {};
+                try { oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}'); } catch (e) {}
+                try { newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}'); } catch (e) {}
+
+                const allKeys = [...Object.keys(oldData), ...Object.keys(newData)];
+                const uniqueKeys = [...new Set(allKeys)].sort();
+
+                const renderValue = (value: any) => {
+                    if (value === null || value === undefined || value === '') return <span className="text-gray-400 italic text-xs">(Vazio)</span>;
+                    const strValue = String(value);
+                    if (strValue.length > 150) {
+                         return <span className="text-xs text-gray-600" title={strValue}>{strValue.substring(0, 150)}...</span>;
+                    }
+                    return <span className="text-sm text-gray-800">{strValue}</span>;
+                };
 
                 return (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
-                         <div className={`w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] border animate-slide-in ${styles.bg} ${styles.border}`}>
-                            <div className={`p-5 border-b ${styles.border} flex justify-between items-center bg-white/50`}>
-                                <div>
-                                    <h3 className={`font-bold text-lg ${styles.text} flex items-center gap-2`}>
+                         <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] border border-gray-200 animate-slide-in">
+                            {/* Header */}
+                            <div className="flex justify-between items-center p-5 border-b border-gray-100">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${styles.bg} ${styles.text}`}>
                                         <i className={`fas ${styles.icon}`}></i>
-                                        Detalhes da Auditoria
-                                    </h3>
-                                    <p className="text-xs text-gray-500 mt-1">{selectedAudit.TABELA_AFETADA} - {action}</p>
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-lg text-simas-dark">
+                                            {action.charAt(0).toUpperCase() + action.slice(1).toLowerCase()} em {selectedAudit.TABELA_AFETADA}
+                                        </h3>
+                                        <p className="text-xs text-gray-400">
+                                            Por <span className="font-bold">{selectedAudit.USUARIO}</span> em {new Date(selectedAudit.DATA_HORA).toLocaleString('pt-BR')}
+                                        </p>
+                                    </div>
                                 </div>
-                                <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-gray-200 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
+                                <button onClick={() => setSelectedAudit(null)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition-colors text-gray-500"><i className="fas fa-times"></i></button>
                             </div>
-                            <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
-                                {(() => {
-                                    let oldData: Record<string, any> = {};
-                                    let newData: Record<string, any> = {};
-                                    try {
-                                        oldData = JSON.parse(selectedAudit.VALOR_ANTIGO || '{}');
-                                    } catch (e) {
-                                        console.error('Failed to parse VALOR_ANTIGO:', e);
-                                    }
-                                    try {
-                                        newData = JSON.parse(selectedAudit.VALOR_NOVO || '{}');
-                                    } catch (e) {
-                                        console.error('Failed to parse VALOR_NOVO:', e);
-                                    }
-
-                                    
-                                    if (action === 'RESTAURAR') {
-                                        return (
-                                            <>
-                                                <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 text-center mb-4">
-                                                    <p className="text-xs text-cyan-800 font-semibold">Esta ação reverteu um estado anterior. O resultado é o seguinte:</p>
-                                                </div>
-                                                {Object.keys(newData).sort().map(key => (
-                                                    <div key={key} className="flex flex-col border-b border-gray-50 last:border-0 pb-3 last:pb-0">
-                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{key.replace(/_/g, ' ')}</span>
-                                                        <span className="text-gray-800 font-medium text-sm">{String(newData[key] || '')}</span>
-                                                    </div>
-                                                ))}
-                                            </>
-                                        );
-                                    }
-                                    
-                                    const displayData: Record<string, any> = (action === 'EXCLUIR' || action === 'ARQUIVAR' || action === 'INATIVAR') ? oldData : (action === 'CRIAR' ? newData : { ...oldData, ...newData });
-                                    
-                                    return Object.keys(displayData).sort().map(key => {
-                                        if (key === 'ID_LOG' || key === 'DATA_CRIACAO') return null;
-                                        let content;
-                                        if (action === 'EDITAR') {
+                            
+                            {/* Content */}
+                            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                                <div className="grid grid-cols-2 gap-x-6">
+                                    {/* Coluna Antes */}
+                                    <div className="flex flex-col">
+                                        <h4 className="font-bold text-gray-500 border-b border-gray-200 pb-2 mb-3">Antes</h4>
+                                        <div className="space-y-3">
+                                        {action !== 'CRIAR' ? uniqueKeys.map(key => {
                                             const oldVal = oldData[key];
                                             const newVal = newData[key];
-                                            if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
-                                                content = (
-                                                    <div className="flex flex-col items-start bg-yellow-50 p-2 rounded border border-yellow-100 mt-1">
-                                                        <span className="line-through text-gray-400 text-xs mb-1">{String(oldVal || '(Vazio)')}</span>
-                                                        <span className="text-simas-dark font-bold text-sm">{String(newVal || '(Vazio)')}</span>
-                                                    </div>
-                                                );
-                                            } else {
-                                                content = <span className="text-gray-600 font-medium text-sm">{String(newVal || '')}</span>;
-                                            }
-                                        } else {
-                                            content = <span className="text-gray-800 font-medium text-sm">{String(displayData[key] || '')}</span>;
-                                        }
-                                        return (
-                                            <div key={key} className="flex flex-col border-b border-gray-50 last:border-0 pb-3 last:pb-0">
-                                                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">{key.replace(/_/g, ' ')}</span>
-                                                {content}
-                                            </div>
-                                        );
-                                    });
-                                })()}
+                                            const isChanged = action === 'EDITAR' && JSON.stringify(oldVal) !== JSON.stringify(newVal);
+                                            
+                                            return (
+                                                <div key={`old-${key}`} className={`p-2 rounded-lg ${isChanged ? 'bg-red-50/50' : ''}`}>
+                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">{key.replace(/_/g, ' ')}</p>
+                                                    {renderValue(oldVal)}
+                                                </div>
+                                            );
+                                        }) : <p className="text-xs text-gray-400 italic text-center p-4">Nenhum dado anterior.</p>}
+                                        </div>
+                                    </div>
+                                    {/* Coluna Depois */}
+                                    <div className="flex flex-col">
+                                         <h4 className="font-bold text-gray-500 border-b border-gray-200 pb-2 mb-3">Depois</h4>
+                                         <div className="space-y-3">
+                                        {action !== 'EXCLUIR' && action !== 'ARQUIVAR' && action !== 'INATIVAR' ? uniqueKeys.map(key => {
+                                            const oldVal = oldData[key];
+                                            const newVal = newData[key];
+                                            const isChanged = action === 'EDITAR' && JSON.stringify(oldVal) !== JSON.stringify(newVal);
+
+                                            return (
+                                                <div key={`new-${key}`} className={`p-2 rounded-lg ${isChanged ? 'bg-green-50/60' : ''}`}>
+                                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">{key.replace(/_/g, ' ')}</p>
+                                                    {renderValue(newVal)}
+                                                </div>
+                                            );
+                                        }) : <p className="text-xs text-gray-400 italic text-center p-4">Nenhum dado posterior.</p>}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                          </div>
                     </div>
-                )
+                );
             })()}
 
             {/* Restore Confirmation Modal */}
