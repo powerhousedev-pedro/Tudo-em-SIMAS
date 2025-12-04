@@ -461,7 +461,6 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 } else {
                     throw new Error(`Restauração de arquivamento não suportada para ${log.TABELA_AFETADA}`);
                 }
-                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, dataToRestore, tx);
                 await tx.auditoria.delete({ where: { ID_LOG: id } });
             
             } 
@@ -471,7 +470,6 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 const savedData = JSON.parse(log.VALOR_ANTIGO || '{}');
                 if (!model) throw new Error('Modelo inválido para restauração.');
                 await model.create({ data: savedData });
-                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, null, savedData, tx);
                 await tx.auditoria.delete({ where: { ID_LOG: id } });
             }
             // --- Desfaz uma EDIÇÃO, voltando para o valor antigo ---
@@ -483,7 +481,6 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 const originalData = JSON.parse(log.VALOR_ANTIGO || '{}');
                 delete originalData[pkField];
                 await model.update({ where: { [pkField]: recordId }, data: originalData });
-                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, log.ID_REGISTRO_AFETADO, JSON.parse(log.VALOR_NOVO || '{}'), originalData, tx);
                 await tx.auditoria.delete({ where: { ID_LOG: id } });
             }
             // --- Desfaz uma CRIAÇÃO, deletando o registro ---
@@ -492,9 +489,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 if (!model) throw new Error('Modelo inválido para restauração.');
                 const pkField = getEntityPk(log.TABELA_AFETADA);
                 const recordId = log.ID_REGISTRO_AFETADO;
-                const createdRecord = JSON.parse(log.VALOR_NOVO || '{}');
                 await model.delete({ where: { [pkField]: recordId } });
-                await auditAction(usuario, 'RESTAURAR', log.TABELA_AFETADA, recordId, createdRecord, null, tx);
                 await tx.auditoria.delete({ where: { ID_LOG: id } });
             }
             else {
