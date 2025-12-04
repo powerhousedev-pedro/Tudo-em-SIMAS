@@ -5,8 +5,7 @@ import jwt from 'jsonwebtoken';
 import { runBackup } from './scripts/backup';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { utcToZonedTime, zonedTimeToUtc } from '@date-fns/tz';
-import { endOfDay } from 'date-fns';
+import { DateTime } from 'luxon';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -43,36 +42,38 @@ const authenticateToken = (req: any, res: any, next: NextFunction) => {
     });
 };
 
-// --- ROBUST TIMEZONE HELPERS ---
+// --- ROBUST TIMEZONE HELPERS WITH LUXON ---
 
 const getBrasiliaTimestamp = () => {
-    // Best practice: Always store and handle timestamps in UTC.
-    return new Date();
+    // Return a standard JS Date object in UTC. Best practice for storage.
+    return DateTime.utc().toJSDate();
 };
 
 const getEndOfDayInBrasiliaAsUtc = () => {
-    const now = new Date(); // Current time in UTC
-    // 1. Find out what the wall-clock time is in Brasília right now.
-    const zonedNow = utcToZonedTime(now, TIMEZONE);
-    // 2. Find the end of that day in Brasília wall-clock time.
-    const endOfDayInBrasilia = endOfDay(zonedNow);
-    // 3. Convert that Brasília end-of-day time back to its corresponding UTC timestamp.
-    return zonedTimeToUtc(endOfDayInBrasilia, TIMEZONE);
+    // Get the current time, set it to Brasília's timezone, find the end of that day,
+    // and return it as a standard JS Date object (in UTC).
+    return DateTime.now().setZone(TIMEZONE).endOf('day').toJSDate();
 };
 
 const cleanData = (data: any) => {
     const cleaned: any = {};
     for (const key in data) {
-        if (key === 'editToken') continue; 
+        if (key === 'editToken') continue;
         if (data[key] === "" || data[key] === null) {
             cleaned[key] = null;
         } else {
             let val = data[key];
-            // If we receive a string like "2025-12-04", we must assume it's a Brasília date.
-            // This converts that local date string into the correct UTC timestamp for storage.
+            // If we get a date string "YYYY-MM-DD", interpret it as a Brasília date
+            // and convert it to a proper UTC timestamp for storage.
             if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
                 if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(key)) {
-                    val = zonedTimeToUtc(`${val}T00:00:00`, TIMEZONE);
+                    const dt = DateTime.fromISO(val, { zone: TIMEZONE });
+                    if (dt.isValid) {
+                        val = dt.toJSDate();
+                    } else {
+                        // Keep the original string or set to null based on your requirements
+                        val = null;
+                    }
                 }
             }
             cleaned[key] = val;
