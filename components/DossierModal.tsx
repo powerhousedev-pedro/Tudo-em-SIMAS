@@ -80,10 +80,10 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
             <div className="flex justify-between items-start">
                 <div className="flex gap-6 items-center">
                      <div className="w-20 h-20 rounded-full bg-white text-simas-dark flex items-center justify-center text-3xl font-black shadow-lg print:border-2 print:border-black print:shadow-none">
-                         {p.NOME?.charAt(0) || '?'}
+                         {(p.NOME_SOCIAL || p.NOME)?.charAt(0) || '?'}
                      </div>
                      <div>
-                         <h1 className="text-3xl font-bold tracking-tight mb-2 print:text-black">{p.NOME}</h1>
+                         <h1 className="text-3xl font-bold tracking-tight mb-2 print:text-black">{p.NOME_SOCIAL || p.NOME}</h1>
                          <div className="flex items-center gap-3">
                              <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border print:border-black print:bg-transparent print:text-black ${badgeColors[data.tipoPerfil] || 'bg-gray-500'}`}>
                                  {data.tipoPerfil}

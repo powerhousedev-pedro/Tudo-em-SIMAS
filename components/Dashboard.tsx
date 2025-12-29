@@ -193,6 +193,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         if (payload.TELEFONE && !normalizedPhone) return showToast('error', 'Telefone inválido.');
         payload.TELEFONE = normalizedPhone || "";
         payload.NOME = validation.capitalizeName(payload.NOME);
+        if (payload.NOME_SOCIAL) payload.NOME_SOCIAL = validation.capitalizeName(payload.NOME_SOCIAL);
     }
 
     if (activeTab === 'Cargo' && payload.SALARIO) {

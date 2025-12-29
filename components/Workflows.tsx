@@ -459,7 +459,7 @@ export const Workflows: React.FC<WorkflowsProps> = ({ showToast }) => {
                                     disabled={isEditing} // Cannot change person once flow starts
                                 >
                                     <option value="">Selecione uma pessoa...</option>
-                                    {people.map(p => <option key={p.CPF} value={p.CPF}>{p.NOME} ({p.CPF})</option>)}
+                                    {people.map(p => <option key={p.CPF} value={p.CPF}>{(p.NOME_SOCIAL || p.NOME)} ({p.CPF})</option>)}
                                 </select>
                             </div>
 

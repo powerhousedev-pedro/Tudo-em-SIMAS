@@ -26,6 +26,19 @@ export interface DropdownOptions {
 
 export type RecordData = { [key: string]: any };
 
+export interface PessoaData {
+  CPF: string;
+  NOME: string;
+  NOME_SOCIAL?: string;
+  SEXO?: string;
+  DATA_DE_NASCIMENTO?: string | Date;
+  EMAIL?: string;
+  TELEFONE?: string;
+  ESCOLARIDADE?: string;
+  FORMACAO?: string;
+  BAIRRO?: string;
+}
+
 export enum AppRoute {
   LOGIN = 'login',
   DASHBOARD = 'dashboard',
@@ -45,7 +58,7 @@ export interface DossierHistoryItem {
 }
 
 export interface DossierData {
-  pessoal: RecordData;
+  pessoal: PessoaData;
   tipoPerfil: string;
   vinculosAtivos: any[];
   historico: DossierHistoryItem[];

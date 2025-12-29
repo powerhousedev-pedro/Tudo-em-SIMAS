@@ -12,16 +12,18 @@ datasource db {
 
 // --- USERS & AUTH ---
 model Usuario {
-  usuario   String  @id
-  senha     String
-  papel     String  // COORDENAÇÃO, GGT, GPRGP, GDEP
-  isGerente Boolean @default(false)
+  usuario          String           @id
+  senha            String
+  papel            String // COORDENAÇÃO, GGT, GPRGP, GDEP
+  isGerente        Boolean          @default(false)
+  relatoriosSalvos RelatorioSalvo[]
 }
 
 // --- CORE ENTITIES (Base) ---
 model Pessoa {
   CPF                String   @id
   NOME               String
+  NOME_SOCIAL        String?
   SEXO               String?
   DATA_DE_NASCIMENTO DateTime?
   EMAIL              String?
