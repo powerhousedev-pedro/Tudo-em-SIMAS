@@ -23,9 +23,10 @@ const parseDatabaseUrl = (url: string) => {
 export const runBackup = async () => {
     console.log('Iniciando processo de backup do banco de dados...');
 
-    const envPath = path.resolve(__dirname, '../../../server/prisma/.env');
+    // O arquivo .env fica na raiz da pasta server
+    const envPath = path.resolve(__dirname, '../../.env');
     if (!fs.existsSync(envPath)) {
-        console.error('ERRO: Arquivo .env não encontrado em server/prisma/.env');
+        console.error(`ERRO: Arquivo .env não encontrado em ${envPath}`);
         return;
     }
 

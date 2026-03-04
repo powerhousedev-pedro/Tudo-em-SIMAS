@@ -279,6 +279,19 @@ export const api = {
       return request(`/${entity}/unique/${field}`);
   },
 
+  // --- ASSINATURA DO USUÁRIO ---
+  getUserSignature: async () => {
+      return request('/user/signature');
+  },
+
+  saveUserSignature: async (signature: string) => {
+      return request('/user/signature', 'POST', { signature });
+  },
+
+  toggleUserSignatureLock: async (usuarioId: string) => {
+      return request(`/Usuario/${usuarioId}/toggle-signature-lock`, 'POST');
+  },
+
   // --- RELATÓRIOS SALVOS (Meus Relatórios) ---
   
   getSavedReports: async () => {

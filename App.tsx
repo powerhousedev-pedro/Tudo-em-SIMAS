@@ -11,6 +11,7 @@ import { ToastContainer, ToastMessage } from './components/Toast';
 import { UserAdminModal } from './components/UserAdminModal';
 import { ActionExecutionModal } from './components/ActionExecutionModal';
 import { NotificationCenter } from './components/NotificationCenter';
+import { SignatureModal } from './components/SignatureModal';
 import { UserSession, AppRoute } from './types';
 import { Logo } from './components/Logo';
 import { usePendingReviews, useSystemAlerts } from './hooks/useSimasData';
@@ -28,6 +29,7 @@ const MainLayout: React.FC<{
     const { data: systemAlerts = [] } = useSystemAlerts();
     
     const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+    const [showSignatureModal, setShowSignatureModal] = useState(false);
     const [actionAtendimentoId, setActionAtendimentoId] = useState<string | null>(null);
 
     const showUserAdmin = session.isGerente || session.papel === 'COORDENAÇÃO';
@@ -57,7 +59,6 @@ const MainLayout: React.FC<{
 
                 <nav className="hidden md:flex items-center gap-2 p-1.5 bg-white/5 rounded-full backdrop-blur-sm border border-white/5">
                   {[
-                    { to: AppRoute.DASHBOARD, label: 'Dashboard', icon: 'fas fa-columns' },
                     { to: AppRoute.WORKFLOWS, label: 'Fluxos', icon: 'fas fa-exchange-alt' },
                     { to: AppRoute.HISTORY, label: 'Histórico', icon: 'fas fa-history' },
                     { to: AppRoute.REPORTS, label: 'Relatórios', icon: 'fas fa-chart-pie' }
@@ -90,6 +91,14 @@ const MainLayout: React.FC<{
                    </div>
                    
                    <div className="flex items-center gap-3 border-l border-white/10 pl-6 h-8">
+                      <button 
+                        onClick={() => setShowSignatureModal(true)} 
+                        className="w-8 h-8 rounded-full hover:bg-white/10 text-gray-300 hover:text-white transition-all"
+                        title="Minha Assinatura"
+                      >
+                          <i className="fas fa-signature text-sm"></i>
+                      </button>
+
                       <button 
                         onClick={() => setShowNotificationCenter(true)} 
                         className={`relative w-8 h-8 rounded-full hover:bg-white/10 transition-all flex items-center justify-center ${hasCritical ? 'text-red-400 animate-pulse' : 'text-gray-300 hover:text-white'}`}
@@ -151,6 +160,28 @@ const MainLayout: React.FC<{
                     }}
                 />
             )}
+
+            {showSignatureModal && (
+                <SignatureModal 
+                    onClose={() => setShowSignatureModal(false)}
+                    showToast={showToast}
+                />
+            )}
+
+            {/* Floating Edição Avançada Button */}
+            <NavLink
+                to={`/${AppRoute.DASHBOARD}`}
+                className={({ isActive }) => `
+                    fixed bottom-8 right-8 z-[90] flex items-center gap-3 px-6 py-4 rounded-full font-bold uppercase tracking-widest text-xs shadow-2xl transition-all duration-300 transform hover:scale-105 border border-white/10
+                    ${isActive 
+                        ? 'bg-simas-cyan text-white shadow-glow' 
+                        : 'bg-simas-dark text-white hover:bg-simas-blue'}
+                `}
+                title="Edição Avançada"
+            >
+                <i className="fas fa-layer-group text-sm"></i>
+                <span>Edição Avançada</span>
+            </NavLink>
         </div>
     );
 };

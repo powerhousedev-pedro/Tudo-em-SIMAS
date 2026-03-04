@@ -116,10 +116,9 @@ export const DossierModal: React.FC<DossierModalProps> = ({ cpf, onClose }) => {
                         <i className="fas fa-user-circle"></i> Dados Pessoais
                     </h3>
                     <div className="space-y-4">
-                        <InfoRow label="Data de Nascimento" value={`${validation.formatDate(p.DATA_DE_NASCIMENTO)} (${validation.calculateAge(p.DATA_DE_NASCIMENTO) || '?'} anos)`} />
+                        <InfoRow label="Data de Nascimento" value={`${p.DATA_DE_NASCIMENTO ? validation.formatDate(p.DATA_DE_NASCIMENTO) : 'N/A'} (${p.DATA_DE_NASCIMENTO ? validation.calculateAge(String(p.DATA_DE_NASCIMENTO)) || '?' : '?'} anos)`} />
                         <InfoRow label="Telefone" value={validation.formatPhone(p.TELEFONE || '')} />
                         <InfoRow label="Email" value={p.EMAIL} />
-                        <InfoRow label="Endereço (Bairro)" value={p.BAIRRO} />
                         <InfoRow label="Escolaridade" value={p.ESCOLARIDADE} />
                         <InfoRow label="Formação" value={p.FORMACAO} />
                     </div>

@@ -16,6 +16,8 @@ model Usuario {
   senha            String
   papel            String // COORDENAÇÃO, GGT, GPRGP, GDEP
   isGerente        Boolean          @default(false)
+  assinatura       String?          @db.LongText
+  podeAssinar      Boolean          @default(true)
   relatoriosSalvos RelatorioSalvo[]
 }
 
@@ -30,7 +32,6 @@ model Pessoa {
   TELEFONE           String?
   ESCOLARIDADE       String?
   FORMACAO           String?
-  BAIRRO             String?
 
   // Relations
   contratos    Contrato[]

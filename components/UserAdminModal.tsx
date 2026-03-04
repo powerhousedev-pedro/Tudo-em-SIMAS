@@ -258,13 +258,13 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                             }
 
                             return (
-                                <div key={user.usuario} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all">
-                                    <div>
+                                <div key={user.usuario} className="relative bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center group hover:shadow-md transition-all overflow-hidden">
+                                    <div className="truncate pr-8">
                                         <div className="flex items-center gap-2">
-                                            <div className="w-8 h-8 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center font-bold text-xs">
+                                            <div className="w-8 h-8 rounded-full bg-simas-cloud text-simas-dark flex items-center justify-center font-bold text-xs shrink-0">
                                                 {user.usuario.charAt(0).toUpperCase()}
                                             </div>
-                                            <h4 className="font-bold text-simas-dark text-sm">{user.usuario}</h4>
+                                            <h4 className="font-bold text-simas-dark text-sm truncate">{user.usuario}</h4>
                                         </div>
                                         <div className="mt-2 flex gap-2">
                                             <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-md uppercase">{user.papel}</span>
@@ -272,23 +272,44 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                                         </div>
                                     </div>
                                     
-                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 backdrop-blur-sm p-1.5 rounded-xl shadow-sm border border-gray-100">
+                                        {isSuperAdmin && (
+                                            <button 
+                                                onClick={async () => {
+                                                    try {
+                                                        const res = await api.toggleUserSignatureLock(user.usuario);
+                                                        if (res.success) {
+                                                            showToast('success', res.message);
+                                                            loadUsers();
+                                                        } else {
+                                                            showToast('error', res.message || 'Erro ao alterar assinatura');
+                                                        }
+                                                    } catch (e: any) {
+                                                        showToast('error', 'Erro ao alterar: ' + e.message);
+                                                    }
+                                                }}
+                                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${user.podeAssinar ? 'text-gray-400 hover:text-red-500 hover:bg-red-50' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'}`}
+                                                title={user.podeAssinar ? "Bloquear Assinatura" : "Liberar Assinatura"}
+                                            >
+                                                <i className={`fas ${user.podeAssinar ? 'fa-lock' : 'fa-lock-open'} text-xs`}></i>
+                                            </button>
+                                        )}
                                         {canEdit && (
                                             <button 
                                                 onClick={() => setResetUser({ id: user.id, usuario: user.usuario })}
-                                                className="w-8 h-8 rounded-lg text-gray-300 hover:text-simas-blue hover:bg-simas-blue/10 flex items-center justify-center transition-all"
-                                                title="Redefinir Senha (Admin)"
+                                                className="w-7 h-7 rounded-lg text-gray-400 hover:text-simas-blue hover:bg-simas-blue/10 flex items-center justify-center transition-all"
+                                                title="Redefinir Senha"
                                             >
-                                                <i className="fas fa-pencil-alt text-sm"></i>
+                                                <i className="fas fa-key text-xs"></i>
                                             </button>
                                         )}
                                         {canDelete && (
                                             <button 
                                                 onClick={() => setUserToDelete(user.id)}
-                                                className="w-8 h-8 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all"
+                                                className="w-7 h-7 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-all"
                                                 title="Excluir Usuário"
                                             >
-                                                <i className="fas fa-trash-alt text-sm"></i>
+                                                <i className="fas fa-trash-alt text-xs"></i>
                                             </button>
                                         )}
                                     </div>

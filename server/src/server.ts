@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import express, { Request as ExpressRequest, Response as ExpressResponse, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -238,6 +240,78 @@ app.post('/api/auth/login', async (req: any, res: any) => {
     } catch (e: any) {
         console.error("Login error (DB Connection or Query):", e);
         res.status(500).json({ message: 'O servidor encontrou um erro ao processar o login. Tente novamente mais tarde.' });
+    }
+});
+
+// --- USER SIGNATURE ROUTES ---
+app.get('/api/user/signature', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const usuario = req.user?.usuario;
+        if (!usuario) return res.status(401).json({ message: 'Usuário não autenticado.' });
+
+        const user = await prisma.usuario.findUnique({
+            where: { usuario },
+            select: { assinatura: true, podeAssinar: true }
+        });
+
+        if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
+
+        res.json({ signature: user.assinatura, podeAssinar: user.podeAssinar });
+    } catch (e: any) {
+        console.error("Error fetching signature:", e);
+        res.status(500).json({ message: 'Erro ao buscar assinatura.' });
+    }
+});
+
+app.post('/api/user/signature', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const usuario = req.user?.usuario;
+        const { signature } = req.body;
+
+        if (!usuario) return res.status(401).json({ message: 'Usuário não autenticado.' });
+
+        const user = await prisma.usuario.findUnique({ where: { usuario } });
+        if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
+        
+        if (!user.podeAssinar) {
+             return res.status(403).json({ message: 'Você não tem permissão para alterar sua assinatura.' });
+        }
+
+        await prisma.usuario.update({
+            where: { usuario },
+            data: { assinatura: signature, podeAssinar: false }
+        });
+
+        res.json({ success: true, message: 'Assinatura salva com sucesso.' });
+    } catch (e: any) {
+        console.error("Error saving signature:", e);
+        res.status(500).json({ message: 'Erro ao salvar assinatura.' });
+    }
+});
+
+app.post('/api/Usuario/:id/toggle-signature-lock', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { id } = req.params;
+    const userRole = req.user?.papel;
+    const isGerente = req.user?.isGerente;
+
+    if (userRole !== 'COORDENAÇÃO' || !isGerente) {
+        return res.status(403).json({ message: 'Apenas gerentes da coordenação podem gerenciar assinaturas.' });
+    }
+
+    try {
+        const user = await prisma.usuario.findUnique({ where: { usuario: id } });
+        if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
+
+        const newState = !user.podeAssinar;
+        await prisma.usuario.update({
+            where: { usuario: id },
+            data: { podeAssinar: newState }
+        });
+        
+        const actionMsg = newState ? 'liberada' : 'bloqueada';
+        res.json({ success: true, message: `Assinatura ${actionMsg} com sucesso.`, podeAssinar: newState });
+    } catch (e: any) {
+        res.status(500).json({ message: 'Erro ao alterar status da assinatura.' });
     }
 });
 

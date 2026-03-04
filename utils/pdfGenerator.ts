@@ -102,10 +102,9 @@ export const generateDossierPDF = (data: DossierData) => {
     currentY += 5;
     
     const personalRows = [
-        ['Nascimento', validation.formatDate(data.pessoal.DATA_DE_NASCIMENTO)],
-        ['Telefone', validation.formatPhone(data.pessoal.TELEFONE)],
+        ['Nascimento', data.pessoal.DATA_DE_NASCIMENTO ? validation.formatDate(data.pessoal.DATA_DE_NASCIMENTO) : 'N/A'],
+        ['Telefone', data.pessoal.TELEFONE ? validation.formatPhone(data.pessoal.TELEFONE) : 'N/A'],
         ['Email', data.pessoal.EMAIL || 'N/A'],
-        ['Bairro', data.pessoal.BAIRRO || 'N/A'],
         ['Escolaridade', data.pessoal.ESCOLARIDADE || 'N/A'],
         ['Formação', data.pessoal.FORMACAO || 'N/A']
     ];

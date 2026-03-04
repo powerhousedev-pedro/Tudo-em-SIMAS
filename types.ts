@@ -36,7 +36,6 @@ export interface PessoaData {
   TELEFONE?: string;
   ESCOLARIDADE?: string;
   FORMACAO?: string;
-  BAIRRO?: string;
 }
 
 export enum AppRoute {

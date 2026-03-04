@@ -50,6 +50,7 @@ export const FK_MAPPING: { [field: string]: string } = {
 export const FIELD_LABELS: Record<string, Record<string, string>> = {
   'Global': {
       'NOME': 'Nome Completo',
+      'NOME_SOCIAL': 'Nome Social',
       'CPF': 'CPF',
       'MATRICULA': 'Matrícula',
       'TELEFONE': 'Telefone de Contato',
@@ -122,7 +123,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     title: 'Pessoas',
     pk: 'CPF',
     manualPk: true, // CPF é inserido manualmente
-    filterBy: 'BAIRRO',
+    filterBy: 'NOME',
     cardDisplay: (item: any) => {
         const age = validation.calculateAge(item.DATA_DE_NASCIMENTO);
         const ageText = age !== null ? ` | ${age} anos` : '';
@@ -130,7 +131,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
         return {
             title: validation.capitalizeName(item.NOME_SOCIAL || item.NOME),
             subtitle: `CPF: ${validation.formatCPF(item.CPF)}${ageText}`,
-            details: `Escolaridade: ${item.ESCOLARIDADE || 'N/A'}${formacaoText}\nBairro: ${item.BAIRRO || 'N/A'}`
+            details: `Escolaridade: ${item.ESCOLARIDADE || 'N/A'}${formacaoText}`
         };
     }
   },
@@ -396,7 +397,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
 };
 
 export const DATA_MODEL: { [key: string]: string[] } = {
-  "Pessoa": ["CPF", "NOME", "NOME_SOCIAL", "SEXO", "DATA_DE_NASCIMENTO", "EMAIL", "TELEFONE", "ESCOLARIDADE", "FORMACAO", "BAIRRO"],
+  "Pessoa": ["CPF", "NOME", "NOME_SOCIAL", "SEXO", "DATA_DE_NASCIMENTO", "EMAIL", "TELEFONE", "ESCOLARIDADE", "FORMACAO"],
   "Servidor": ["MATRICULA", "PREFIXO_MATRICULA", "CPF", "ID_CARGO", "DATA_MATRICULA", "VINCULO"],
   "Contrato": ["ID_CONTRATO", "ID_VAGA", "CPF", "DATA_DO_CONTRATO", "ID_FUNCAO"],
   "Vaga": ["ID_VAGA", "ID_LOTACAO", "ID_EDITAL", "ID_CARGO", "BLOQUEADA"],
