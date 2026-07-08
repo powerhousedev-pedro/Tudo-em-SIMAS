@@ -4,7 +4,9 @@ import express, { Request as ExpressRequest, Response as ExpressResponse, NextFu
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { runBackup } from './scripts/backup';
+import { geocodeAddress } from './utils/geocoding';
 import cron from 'node-cron';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
@@ -59,10 +61,21 @@ const getEndOfDayInBrasiliaAsUtc = () => {
 
 const cleanData = (data: any) => {
     const cleaned: any = {};
+    const globalIgnore = ['editToken', 'NOME_PESSOA', 'IS_TEMP', 'NOME_FUNCAO', 'POSTO_ESCOLARIDADE', 'EDITAL_NOME', 'LOTACAO_NOME', 'POSTO_NOME'];
+    const booleanFields = ['AFRODESCENDENTE', 'PCD', 'USUARIO_ASSISTENCIA', 'BLOQUEADA', 'GRAVISSIMO', 'isGerente'];
+
     for (const key in data) {
-        if (key === 'editToken') continue;
+        if (globalIgnore.includes(key)) continue;
+        
         if (data[key] === "" || data[key] === null) {
-            cleaned[key] = null;
+            if (booleanFields.includes(key)) {
+                cleaned[key] = false;
+            } else {
+                cleaned[key] = null;
+            }
+        } else if (typeof data[key] === 'object' && !Array.isArray(data[key]) && !(data[key] instanceof Date)) {
+            // Ignore nested objects (like related entities loaded by include)
+            continue;
         } else {
             let val = data[key];
             // If we get a date string "YYYY-MM-DD", interpret it as a Brasília date
@@ -99,6 +112,7 @@ const getModel = (modelName: string) => {
     let name = modelName.charAt(0).toLowerCase() + modelName.slice(1);
     if (name === 'solicitacaoPesquisa') name = 'solicitacaoPesquisa'; 
     if (name === 'cargoComissionado') name = 'cargoComissionado';
+    if (name === 'postoTrabalho') name = 'postoTrabalho';
     if (name === 'relatorioSalvo') name = 'relatorioSalvo';
     // Mapeamento correto para tabelas históricas
     if (name === 'contratoHistorico') name = 'contratoHistorico';
@@ -115,11 +129,19 @@ function getEntityPk(entity: string): string {
         'Alocacao': 'ID_ALOCACAO',
         'Contrato': 'ID_CONTRATO',
         'Vaga': 'ID_VAGA',
-        'Reserva': 'ID_RESERVA',
         'Protocolo': 'ID_PROTOCOLO',
-        'RelatorioSalvo': 'ID_RELATORIO'
+        'RelatorioSalvo': 'ID_RELATORIO',
+        'PostoTrabalho': 'ID_POSTO_TRABALHO',
+        'CargoComissionado': 'ID_CARGO_COMISSIONADO',
+        'ContratoHistorico': 'ID_HISTORICO_CONTRATO',
+        'AlocacaoHistorico': 'ID_HISTORICO_ALOCACAO',
+        'SolicitacaoPesquisa': 'ID_SOLICITACAO',
+        'Substituto': 'ID_SUBSTITUTO',
+        'Auditoria': 'ID_LOG',
+        'AuditoriaLGPD': 'ID_LOG_LGPD'
     };
     if (pks[entity]) return pks[entity];
+    // Fallback normalizer for simple names
     return `ID_${entity.toUpperCase()}`;
 }
 
@@ -159,6 +181,30 @@ const getFriendlyErrorMessage = (error: any): string => {
 
 // --- AUDIT SYSTEM ---
 
+const auditLGPDAction = async (
+    usuario: string,
+    acao: 'LEITURA' | 'CRIACAO' | 'EDICAO' | 'EXCLUSAO' | 'RESTAURACAO' | 'EXPORTACAO',
+    tabela: string,
+    idRegistro: string,
+    prismaClient: any = prisma
+) => {
+    try {
+        await prismaClient.auditoriaLGPD.create({
+            data: {
+                ID_LOG_LGPD: generateId('LGP'),
+                DATA_HORA: getBrasiliaTimestamp(),
+                USUARIO: usuario,
+                ACAO: acao,
+                TABELA_AFETADA: tabela,
+                ID_REGISTRO_AFETADO: String(idRegistro),
+                CAMPO_AFETADO: 'N/A'
+            }
+        });
+    } catch (e) {
+        console.error("Falha ao registrar auditoria LGPD:", e);
+    }
+};
+
 const auditAction = async (
     usuario: string, 
     acao: 'CRIAR' | 'EDITAR' | 'EXCLUIR' | 'ARQUIVAR' | 'INATIVAR' | 'RESTAURAR', 
@@ -182,6 +228,15 @@ const auditAction = async (
                 VALOR_NOVO: newVal ? JSON.stringify(newVal) : ''
             }
         });
+
+        // Mapeia ações do hotfix para a LGPD
+        let acaoLGPD: any = 'EDICAO';
+        if (acao === 'CRIAR') acaoLGPD = 'CRIACAO';
+        if (acao === 'EXCLUIR' || acao === 'ARQUIVAR' || acao === 'INATIVAR') acaoLGPD = 'EXCLUSAO';
+        if (acao === 'RESTAURAR') acaoLGPD = 'RESTAURACAO';
+        
+        await auditLGPDAction(usuario, acaoLGPD, tabela, idRegistro, prismaClient);
+
     } catch (e) {
         console.error("Falha ao registrar auditoria:", e);
         throw e; // Relança o erro para abortar a transação
@@ -190,12 +245,16 @@ const auditAction = async (
 
 // --- CRON JOBS (DAILY ROUTINES) ---
 
-cron.schedule('0 0 * * *', async () => {
+import * as jobScheduler from './services/jobScheduler';
+
+cron.schedule('5 0 * * *', async () => {
     console.log('Executando rotinas diárias agendadas...');
     try {
         await runBackup();
+        await jobScheduler.processarArquivamentosAgendados();
+        await jobScheduler.processarTerminosDeEditais();
     } catch (error) {
-        console.error('ERRO: Falha ao executar backup diário:', error);
+        console.error('ERRO: Falha ao executar rotinas diárias:', error);
     }
 });
 
@@ -243,78 +302,6 @@ app.post('/api/auth/login', async (req: any, res: any) => {
     }
 });
 
-// --- USER SIGNATURE ROUTES ---
-app.get('/api/user/signature', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    try {
-        const usuario = req.user?.usuario;
-        if (!usuario) return res.status(401).json({ message: 'Usuário não autenticado.' });
-
-        const user = await prisma.usuario.findUnique({
-            where: { usuario },
-            select: { assinatura: true, podeAssinar: true }
-        });
-
-        if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
-
-        res.json({ signature: user.assinatura, podeAssinar: user.podeAssinar });
-    } catch (e: any) {
-        console.error("Error fetching signature:", e);
-        res.status(500).json({ message: 'Erro ao buscar assinatura.' });
-    }
-});
-
-app.post('/api/user/signature', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    try {
-        const usuario = req.user?.usuario;
-        const { signature } = req.body;
-
-        if (!usuario) return res.status(401).json({ message: 'Usuário não autenticado.' });
-
-        const user = await prisma.usuario.findUnique({ where: { usuario } });
-        if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
-        
-        if (!user.podeAssinar) {
-             return res.status(403).json({ message: 'Você não tem permissão para alterar sua assinatura.' });
-        }
-
-        await prisma.usuario.update({
-            where: { usuario },
-            data: { assinatura: signature, podeAssinar: false }
-        });
-
-        res.json({ success: true, message: 'Assinatura salva com sucesso.' });
-    } catch (e: any) {
-        console.error("Error saving signature:", e);
-        res.status(500).json({ message: 'Erro ao salvar assinatura.' });
-    }
-});
-
-app.post('/api/Usuario/:id/toggle-signature-lock', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    const { id } = req.params;
-    const userRole = req.user?.papel;
-    const isGerente = req.user?.isGerente;
-
-    if (userRole !== 'COORDENAÇÃO' || !isGerente) {
-        return res.status(403).json({ message: 'Apenas gerentes da coordenação podem gerenciar assinaturas.' });
-    }
-
-    try {
-        const user = await prisma.usuario.findUnique({ where: { usuario: id } });
-        if (!user) return res.status(404).json({ message: 'Usuário não encontrado.' });
-
-        const newState = !user.podeAssinar;
-        await prisma.usuario.update({
-            where: { usuario: id },
-            data: { podeAssinar: newState }
-        });
-        
-        const actionMsg = newState ? 'liberada' : 'bloqueada';
-        res.json({ success: true, message: `Assinatura ${actionMsg} com sucesso.`, podeAssinar: newState });
-    } catch (e: any) {
-        res.status(500).json({ message: 'Erro ao alterar status da assinatura.' });
-    }
-});
-
 // --- CENTRALIZED ARCHIVING ROUTES (PHYSICAL TABLES + AUDIT) ---
 
 // 1. Arquivamento de Contrato
@@ -322,7 +309,7 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
     const { CPF, MOTIVO } = req.body;
     const usuario = req.user?.usuario || 'Desconhecido';
 
-    if (!CPF || !MOTIVO) return res.status(400).json({ message: 'CPF e Motivo são obrigatórios.' });
+    if (!CPF || !MOTIVO) return res.status(400).json({ message: 'Identificador (CPF) e Motivo são obrigatórios.' });
 
     try {
         await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -360,6 +347,55 @@ app.post('/api/Contrato/arquivar', authenticateToken, async (req: AuthenticatedR
     }
 });
 
+app.post('/api/Contrato/mover', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    const { CPF, NOVA_VAGA_ID, MOTIVO } = req.body;
+    const usuario = req.user?.usuario || 'Desconhecido';
+
+    if (!CPF || !NOVA_VAGA_ID) return res.status(400).json({ message: 'Identificador, Nova Vaga e Motivo são obrigatórios.' });
+
+    try {
+        await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+            const contratoAtivo = await tx.contrato.findFirst({ where: { CPF } });
+            
+            if (!contratoAtivo) throw new Error("Contrato ativo não encontrado.");
+
+            // 1. Arquiva o contrato atual
+            const dadosParaHistorico = {
+                ID_HISTORICO_CONTRATO: generateId('HTC'),
+                ID_CONTRATO: contratoAtivo.ID_CONTRATO,
+                CPF: contratoAtivo.CPF,
+                ID_VAGA: contratoAtivo.ID_VAGA,
+                ID_FUNCAO: contratoAtivo.ID_FUNCAO,
+                DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
+                DATA_ARQUIVAMENTO: getBrasiliaTimestamp(),
+                MOTIVO_ARQUIVAMENTO: MOTIVO || 'Movimentação para outra vaga'
+            };
+            
+            await tx.contratoHistorico.create({ data: dadosParaHistorico });
+            await auditAction(usuario, 'ARQUIVAR', 'Contrato', contratoAtivo.ID_CONTRATO, contratoAtivo, null, tx);
+            await tx.contrato.delete({ where: { ID_CONTRATO: contratoAtivo.ID_CONTRATO } });
+
+            // 2. Cria novo contrato na nova vaga
+            const vagaExists = await tx.vaga.findUnique({ where: { ID_VAGA: NOVA_VAGA_ID } });
+            if (!vagaExists) throw new Error("A nova vaga selecionada não existe.");
+
+            const novoContratoData = {
+                ...contratoAtivo,
+                ID_CONTRATO: generateId('CTT'),
+                ID_VAGA: NOVA_VAGA_ID,
+                DATA_DO_CONTRATO: new Date()
+            };
+            
+            const novoContrato = await tx.contrato.create({ data: novoContratoData });
+            await auditAction(usuario, 'CRIAR', 'Contrato', novoContrato.ID_CONTRATO, null, novoContrato, tx);
+        });
+
+        res.json({ success: true, message: 'Contrato movido com sucesso.' });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
 // 2. Inativação de Servidor
 app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { MATRICULA, MOTIVO } = req.body;
@@ -391,10 +427,10 @@ app.post('/api/Servidor/inativar', authenticateToken, async (req: AuthenticatedR
                 ID_INATIVO: generateId('INA'), // Gerando PK
                 MATRICULA_ORIGINAL: servidor.MATRICULA, // CORREÇÃO: Schema diz MATRICULA_ORIGINAL
                 CPF: servidor.CPF,
-                ID_CARGO: servidor.ID_CARGO,
+                ID_FUNCAO: servidor.ID_FUNCAO,
                 DATA_MATRICULA: servidor.DATA_MATRICULA,
-                VINCULO: servidor.VINCULO,
-                PREFIXO_MATRICULA: servidor.PREFIXO_MATRICULA,
+                VINCULO_ANTERIOR: servidor.VINCULO,
+                PREFIXO_ANTERIOR: servidor.PREFIXO_MATRICULA,
                 DATA_INATIVACAO: getBrasiliaTimestamp(),
                 MOTIVO_INATIVACAO: MOTIVO || 'Inativação'
             };
@@ -517,15 +553,15 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
 
             // --- LOGICA DE RESTAURAÇÃO DE ARQUIVAMENTO (Tabelas Físicas) ---
             if (log.ACAO === 'ARQUIVAR' || log.ACAO === 'INATIVAR') {
-                let dataToRestore: any = null;
-
                 if (log.TABELA_AFETADA === 'Contrato') {
                     const historico = await tx.contratoHistorico.findFirst({ where: { ID_CONTRATO: log.ID_REGISTRO_AFETADO } });
                     if (!historico) throw new Error("Registro não encontrado na tabela de histórico.");
-                    dataToRestore = { ...historico };
+                    
+                    const dataToRestore: any = { ...historico };
                     delete dataToRestore.ID_HISTORICO_CONTRATO;
                     delete dataToRestore.DATA_ARQUIVAMENTO;
                     delete dataToRestore.MOTIVO_ARQUIVAMENTO;
+
                     await tx.contrato.create({ data: dataToRestore });
                     await tx.contratoHistorico.delete({ where: { ID_HISTORICO_CONTRATO: historico.ID_HISTORICO_CONTRATO } });
                 } else if (log.TABELA_AFETADA === 'Servidor') {
@@ -533,7 +569,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                     const candidates = await tx.inativo.findMany({ where: { CPF: oldData.CPF } });
                     const inativo = candidates.find((c: any) => c.MATRICULA_ORIGINAL === log.ID_REGISTRO_AFETADO);
                     if (!inativo) throw new Error("Registro não encontrado na tabela de inativos.");
-                    dataToRestore = { ...inativo };
+                    const dataToRestore: any = { ...inativo };
                     dataToRestore.MATRICULA = inativo.MATRICULA_ORIGINAL;
                     delete dataToRestore.ID_INATIVO;
                     delete dataToRestore.MATRICULA_ORIGINAL;
@@ -547,7 +583,7 @@ app.post('/api/Auditoria/:id/restore', authenticateToken, async (req: Authentica
                 } else if (log.TABELA_AFETADA === 'Alocacao') {
                     const hist = await tx.alocacaoHistorico.findFirst({ where: { ID_ALOCACAO: log.ID_REGISTRO_AFETADO } });
                     if (!hist) throw new Error("Registro histórico de alocação não encontrado.");
-                    dataToRestore = { ...hist };
+                    const dataToRestore: any = { ...hist };
                     delete dataToRestore.ID_HISTORICO_ALOCACAO;
                     delete dataToRestore.DATA_ARQUIVAMENTO;
                     await tx.alocacao.create({ data: dataToRestore });
@@ -671,6 +707,646 @@ app.get('/api/reports/saved', authenticateToken, async (req: AuthenticatedReques
     }
 });
 
+import { generateAmostragem } from './services/amostragem';
+
+app.post('/api/amostragem/gerar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { origemId, tipoOrigem } = req.body;
+        if (!origemId || !tipoOrigem) {
+            return res.status(400).json({ message: 'Dados inválidos para amostragem.' });
+        }
+        const resultado = await generateAmostragem(origemId, tipoOrigem);
+        
+        // Find existing lancamentos for the current month for these CPFs
+        const hoje = new Date();
+        const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        
+        const lancamentos = await prisma.lancamentoAmostragem.findMany({
+            where: {
+                CPF: { in: resultado.cpfs },
+                TIMESTAMP: { gte: primeiroDiaMesAtual }
+            }
+        });
+
+        res.json({ success: true, data: resultado, lancamentos });
+    } catch (e: any) {
+        console.error(e);
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.post('/api/amostragem/lancamento', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { cpf } = req.body;
+        if (!cpf) return res.status(400).json({ message: 'CPF inválido.' });
+
+        const hoje = new Date();
+        const primeiroDiaMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+        const existente = await prisma.lancamentoAmostragem.findFirst({
+            where: {
+                CPF: cpf,
+                TIMESTAMP: { gte: primeiroDiaMesAtual }
+            }
+        });
+
+        if (existente) {
+            return res.status(400).json({ message: 'Lançamento já existe para este mês.' });
+        }
+
+        const lancamento = await prisma.lancamentoAmostragem.create({
+            data: { ID_LANCAMENTO: generateId('LAN'), CPF: cpf, STATUS: false }
+        });
+
+        res.json({ success: true, lancamento });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.put('/api/amostragem/lancamento/toggle/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { id } = req.params;
+        const lancamento = await prisma.lancamentoAmostragem.findUnique({ where: { ID_LANCAMENTO: id } });
+        if (!lancamento) return res.status(404).json({ message: 'Lançamento não encontrado.' });
+
+        const atualizado = await prisma.lancamentoAmostragem.update({
+            where: { ID_LANCAMENTO: id },
+            data: { STATUS: !lancamento.STATUS }
+        });
+
+        res.json({ success: true, lancamento: atualizado });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.post('/api/amostragem/validar', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { idAmostragem, validada, justificativa, idInc } = req.body;
+        if (!idAmostragem) return res.status(400).json({ message: 'Amostragem inválida.' });
+
+        const existingValidacao = await prisma.validacaoAmostragem.findUnique({
+            where: { ID_AMOSTRAGEM: idAmostragem }
+        });
+
+        const validacao = await prisma.validacaoAmostragem.upsert({
+            where: { ID_AMOSTRAGEM: idAmostragem },
+            update: {
+                VALIDADA: validada,
+                JUSTIFICATIVA: justificativa,
+                ID_INC: idInc || null
+            },
+            create: {
+                ID_VALIDACAO: generateId('VAL'),
+                ID_AMOSTRAGEM: idAmostragem,
+                VALIDADA: validada,
+                JUSTIFICATIVA: justificativa,
+                ID_INC: idInc || null
+            }
+        });
+
+        await auditAction(
+            req.user?.usuario || 'Sistema',
+            existingValidacao ? 'EDITAR' : 'CRIAR',
+            'ValidacaoAmostragem',
+            validacao.ID_VALIDACAO,
+            existingValidacao,
+            validacao
+        );
+
+        res.json({ success: true, validacao });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.get('/api/amostragem/invalidas', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const validacoesInvalidas = await prisma.validacaoAmostragem.findMany({
+            where: {
+                VALIDADA: false,
+                OR: [
+                    { ID_INC: null },
+                    { ID_INC: '' }
+                ]
+            },
+            include: { amostragem: true }
+        });
+
+        const origens = validacoesInvalidas.map(v => v.amostragem.ORIGEM_ID);
+        res.json({ success: true, origens });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.get('/api/inconformidades/:origemId', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { origemId } = req.params;
+        const inconformidades = await prisma.inconformidade.findMany({
+            where: {
+                OR: [
+                    { ID_LOTACAO: origemId },
+                    { ID_PROCESSO: origemId },
+                    { ID_TERMO: origemId }
+                ]
+            },
+            orderBy: { TIMESTAMP: 'desc' }
+        });
+        res.json({ success: true, inconformidades });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.get('/api/timeline/:origemId', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { origemId } = req.params;
+        const { tipo } = req.query; // 'lotacao', 'edital', 'vinculacao', 'cogestora'
+        
+        let eventos: any[] = [];
+        
+        let lotacaoIds: string[] = [];
+        let editalIds: string[] = [];
+        
+        if (tipo === 'cogestora') {
+            const editais = await prisma.edital.findMany({ where: { ID_COGESTORA: origemId } });
+            editalIds = editais.map(e => e.ID_EDITAL);
+        } else if (tipo === 'edital') {
+            editalIds = [origemId];
+        } else if (tipo === 'lotacao') {
+            lotacaoIds = [origemId];
+        }
+
+        // 1. Inconformidades
+        const inconformidadesWhere: any = {};
+        if (tipo === 'cogestora') {
+            inconformidadesWhere.ID_TERMO = { in: editalIds };
+        } else {
+            inconformidadesWhere.OR = [
+                { ID_LOTACAO: origemId },
+                { ID_PROCESSO: origemId },
+                { ID_TERMO: origemId }
+            ];
+        }
+
+        const inconformidades = await prisma.inconformidade.findMany({
+            where: inconformidadesWhere,
+            include: {
+                edital: { include: { cogestora: true } },
+                lotacao: true
+            }
+        });
+        
+        inconformidades.forEach(inc => {
+            eventos.push({
+                id: inc.ID_INC,
+                tipo: 'inconformidade',
+                timestamp: inc.TIMESTAMP,
+                titulo: `Inconformidade: ${inc.TIPO}`,
+                descricao: inc.MOTIVO,
+                resolvido: inc.RESOLVIDO,
+                tipo_inconformidade: inc.TIPO,
+                idLotacao: inc.ID_LOTACAO,
+                idProcesso: inc.ID_PROCESSO,
+                idTermo: inc.ID_TERMO,
+                chain: inc.CHAIN,
+                nomeEdital: inc.edital?.EDITAL,
+                numeroEdital: inc.edital?.NUMERO,
+                nomeCogestora: inc.edital?.cogestora?.NOME,
+                nomeLotacao: inc.lotacao?.LOTACAO
+            });
+        });
+
+        // 2. Amostragens e seus processos/inconformidades
+        const amostragensWhere: any = {};
+        if (tipo === 'cogestora') {
+            amostragensWhere.ORIGEM_ID = { in: editalIds };
+        } else {
+            amostragensWhere.ORIGEM_ID = origemId;
+        }
+
+        const amostragens = await prisma.amostragem.findMany({
+            where: amostragensWhere,
+            include: { 
+                validacao: {
+                    include: {
+                        inconformidade: {
+                            include: {
+                                edital: { include: { cogestora: true } },
+                                lotacao: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        amostragens.forEach(a => {
+            if (a.validacao && a.validacao.ID_INC) {
+                eventos.push({
+                    id: a.validacao.ID_VALIDACAO,
+                    tipo: 'amostragem_validada',
+                    timestamp: a.TIMESTAMP, 
+                    titulo: 'Inconformidade Vinculada (Amostragem)',
+                    descricao: `Justificativa: ${a.validacao.JUSTIFICATIVA}\nInc. ID: ${a.validacao.ID_INC}\nProcesso: ${a.validacao.inconformidade?.ID_PROCESSO || 'N/A'}`,
+                    status: a.validacao.VALIDADA ? 'Validada' : 'Não Validada',
+                    nomeEdital: a.validacao.inconformidade?.edital?.EDITAL,
+                    numeroEdital: a.validacao.inconformidade?.edital?.NUMERO,
+                    nomeCogestora: a.validacao.inconformidade?.edital?.cogestora?.NOME,
+                    nomeLotacao: a.validacao.inconformidade?.lotacao?.LOTACAO
+                });
+            } else if (a.validacao) {
+                 eventos.push({
+                    id: a.validacao.ID_VALIDACAO,
+                    tipo: 'amostragem_validada',
+                    timestamp: a.TIMESTAMP,
+                    titulo: 'Amostragem Validada',
+                    descricao: `Status: ${a.validacao.VALIDADA ? 'Validada' : 'Não Validada'}`,
+                    status: a.validacao.VALIDADA ? 'Validada' : 'Não Validada'
+                });
+            } else {
+                 eventos.push({
+                    id: a.ID_AMOSTRAGEM,
+                    tipo: 'amostragem',
+                    timestamp: a.TIMESTAMP,
+                    titulo: 'Amostragem Gerada',
+                    descricao: 'Amostragem mensal gerada.'
+                });
+            }
+        });
+
+        // 3. Processos N:M
+        const processosWhere: any = {};
+        if (tipo === 'cogestora') {
+            processosWhere.editais = { some: { ID_EDITAL: { in: editalIds } } };
+        } else if (tipo === 'edital') {
+            processosWhere.editais = { some: { ID_EDITAL: origemId } };
+        } else if (tipo === 'lotacao') {
+            processosWhere.lotacoes = { some: { ID_LOTACAO: origemId } };
+        } else if (tipo === 'vinculacao') {
+            const lotacoesVinculacao = await prisma.lotacao.findMany({ where: { ID_VINCULACAO: origemId } });
+            const lotIds = lotacoesVinculacao.map(l => l.ID_LOTACAO);
+            processosWhere.lotacoes = { some: { ID_LOTACAO: { in: lotIds } } };
+        }
+
+        const processos = await prisma.processo.findMany({
+            where: processosWhere,
+            include: {
+                editais: { include: { cogestora: true } }
+            }
+        });
+
+        processos.forEach(proc => {
+            const cogestoraName = proc.editais.length > 0 ? proc.editais[0].cogestora?.NOME : null;
+            eventos.push({
+                id: proc.ID_PROCESSO + '_proc',
+                uuid: proc.ID_PROCESSO,
+                tipo: 'processo',
+                timestamp: proc.TIMESTAMP || proc.DATA_PUBLICACAO || new Date(),
+                titulo: 'Processo SEI',
+                descricao: `Processo: ${proc.NUMERO}\nStatus: ${proc.STATUS_ENCAMINHAMENTO || 'N/A'}\nTítulo: ${proc.TITULO || 'N/A'}`,
+                idProcesso: proc.NUMERO,
+                nomeCogestora: cogestoraName,
+                resolvido: proc.RESOLVIDO,
+                chain: proc.CHAIN
+            });
+        });
+
+        // 4. Eventos Fundacionais (Criação/Término de Editais e Lotações)
+        const now = new Date();
+
+        if (tipo === 'cogestora') {
+            const editaisCogestora = await prisma.edital.findMany({ where: { ID_COGESTORA: origemId }, include: { cogestora: true } });
+            editaisCogestora.forEach(ed => {
+                eventos.push({
+                    id: ed.ID_EDITAL + '_criado',
+                    tipo: 'info',
+                    timestamp: ed.INICIO || ed.TIMESTAMP || new Date(),
+                    titulo: 'Edital Criado',
+                    descricao: `Edital ${ed.EDITAL} foi registrado no sistema.`,
+                    nomeEdital: ed.EDITAL,
+                    numeroEdital: ed.NUMERO,
+                    nomeCogestora: ed.cogestora?.NOME
+                });
+                if (ed.TERMINO && now > ed.TERMINO) {
+                    eventos.push({
+                        id: ed.ID_EDITAL + '_termino',
+                        tipo: 'alerta',
+                        timestamp: ed.TERMINO,
+                        titulo: 'Edital Finalizado',
+                        descricao: `O prazo do edital ${ed.EDITAL} expirou.`,
+                        nomeEdital: ed.EDITAL,
+                        numeroEdital: ed.NUMERO,
+                        nomeCogestora: ed.cogestora?.NOME
+                    });
+                }
+            });
+        } else if (tipo === 'edital') {
+            const ed = await prisma.edital.findUnique({ where: { ID_EDITAL: origemId }, include: { cogestora: true } });
+            if (ed) {
+                eventos.push({
+                    id: ed.ID_EDITAL + '_criado',
+                    tipo: 'info',
+                    timestamp: ed.INICIO || ed.TIMESTAMP || new Date(),
+                    titulo: 'Edital Criado',
+                    descricao: `Edital ${ed.EDITAL} foi registrado no sistema.`,
+                    nomeEdital: ed.EDITAL,
+                    numeroEdital: ed.NUMERO,
+                    nomeCogestora: ed.cogestora?.NOME
+                });
+                if (ed.TERMINO && now > ed.TERMINO) {
+                    eventos.push({
+                        id: ed.ID_EDITAL + '_termino',
+                        tipo: 'alerta',
+                        timestamp: ed.TERMINO,
+                        titulo: 'Edital Finalizado',
+                        descricao: `O prazo do edital ${ed.EDITAL} expirou.`,
+                        nomeEdital: ed.EDITAL,
+                        numeroEdital: ed.NUMERO,
+                        nomeCogestora: ed.cogestora?.NOME
+                    });
+                }
+            }
+        } else if (tipo === 'vinculacao') {
+            const lotacoesVinc = await prisma.lotacao.findMany({ where: { ID_VINCULACAO: origemId } });
+            lotacoesVinc.forEach(lot => {
+                eventos.push({
+                    id: lot.ID_LOTACAO + '_criada',
+                    tipo: 'info',
+                    timestamp: lot.TIMESTAMP || new Date(),
+                    titulo: 'Lotação Registrada',
+                    descricao: `A lotação ${lot.LOTACAO} passou a integrar esta vinculação.`,
+                    nomeLotacao: lot.LOTACAO
+                });
+            });
+
+            // Editais que fornecem vagas para essa vinculação
+            const vagasVinculacao = await prisma.vaga.findMany({
+                where: { ID_LOTACAO: { in: lotacoesVinc.map(l => l.ID_LOTACAO) } },
+                select: { ID_EDITAL: true }
+            });
+            const uniqueEditalIds = Array.from(new Set(vagasVinculacao.map(v => v.ID_EDITAL)));
+            const editaisVinc = await prisma.edital.findMany({ where: { ID_EDITAL: { in: uniqueEditalIds } }, include: { cogestora: true } });
+            
+            editaisVinc.forEach(ed => {
+                eventos.push({
+                    id: ed.ID_EDITAL + '_criado_vinc',
+                    tipo: 'info',
+                    timestamp: ed.INICIO || ed.TIMESTAMP || new Date(),
+                    titulo: 'Edital Ativo na Vinculação',
+                    descricao: `O Edital ${ed.EDITAL} começou a fornecer vagas para esta vinculação.`,
+                    nomeEdital: ed.EDITAL,
+                    numeroEdital: ed.NUMERO,
+                    nomeCogestora: ed.cogestora?.NOME
+                });
+                if (ed.TERMINO && now > ed.TERMINO) {
+                    eventos.push({
+                        id: ed.ID_EDITAL + '_termino_vinc',
+                        tipo: 'alerta',
+                        timestamp: ed.TERMINO,
+                        titulo: 'Edital Finalizado',
+                        descricao: `O prazo do edital ${ed.EDITAL}, que fornecia vagas para esta vinculação, expirou.`,
+                        nomeEdital: ed.EDITAL,
+                        numeroEdital: ed.NUMERO,
+                        nomeCogestora: ed.cogestora?.NOME
+                    });
+                }
+            });
+        } else if (tipo === 'lotacao') {
+            const lot = await prisma.lotacao.findUnique({ where: { ID_LOTACAO: origemId } });
+            if (lot) {
+                eventos.push({
+                    id: lot.ID_LOTACAO + '_criada',
+                    tipo: 'info',
+                    timestamp: lot.TIMESTAMP || new Date(),
+                    titulo: 'Lotação Registrada',
+                    descricao: `A lotação ${lot.LOTACAO} foi criada.`,
+                    nomeLotacao: lot.LOTACAO
+                });
+            }
+        }
+
+        // Ordenar decrescente
+        eventos.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        res.json({ success: true, eventos });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.get('/api/processos/:numero', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { numero } = req.params;
+        const processo = await prisma.processo.findUnique({
+            where: { NUMERO: numero },
+            include: { processosFilhos: true, processoPai: true }
+        });
+        res.json({ success: true, processo });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.get('/api/processos_all', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const processos = await prisma.processo.findMany({
+            orderBy: { TIMESTAMP: 'asc' }
+        });
+        res.json({ success: true, processos });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.post('/api/processos', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { NUMERO, STATUS_ENCAMINHAMENTO, TITULO, TEXTO_LEGENDA, DATA_PUBLICACAO, FILHO_DE, idLotacao, idEdital, resolvido, chain } = req.body;
+        if (!NUMERO) return res.status(400).json({ message: 'Número do processo é obrigatório.' });
+
+        if (chain) {
+            const procAnterior = await prisma.processo.findUnique({ where: { ID_PROCESSO: chain } });
+            if (procAnterior && procAnterior.RESOLVIDO) {
+                return res.status(400).json({ message: 'Não é possível encadear em um processo já resolvido/concluído.' });
+            }
+        }
+
+        const data: any = {
+            NUMERO,
+            STATUS_ENCAMINHAMENTO,
+            TITULO,
+            TEXTO_LEGENDA,
+            RESOLVIDO: resolvido || false,
+            CHAIN: chain || null
+        };
+
+        if (DATA_PUBLICACAO) {
+            data.DATA_PUBLICACAO = new Date(DATA_PUBLICACAO);
+        }
+        if (FILHO_DE) {
+            data.FILHO_DE = FILHO_DE;
+        }
+
+        const connections: any = {};
+        if (idLotacao) {
+            connections.lotacoes = { connect: Array.isArray(idLotacao) ? idLotacao.map((id: string) => ({ ID_LOTACAO: id })) : { ID_LOTACAO: idLotacao } };
+        }
+        if (idEdital) {
+            connections.editais = { connect: Array.isArray(idEdital) ? idEdital.map((id: string) => ({ ID_EDITAL: id })) : { ID_EDITAL: idEdital } };
+        }
+
+        const existingProcesso = await prisma.processo.findUnique({ where: { NUMERO } });
+
+        const processo = await prisma.processo.upsert({
+            where: { NUMERO },
+            update: {
+                ...data,
+                ...connections
+            },
+            create: {
+                ...data,
+                ID_PROCESSO: existingProcesso?.ID_PROCESSO || generateId('PRO'),
+                ...connections
+            }
+        });
+        
+        await auditAction(
+            req.user?.usuario || 'Sistema',
+            existingProcesso ? 'EDITAR' : 'CRIAR',
+            'Processo',
+            processo.ID_PROCESSO,
+            existingProcesso,
+            processo
+        );
+        
+        res.json({ success: true, processo });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.post('/api/inconformidades', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { resolvido, tipo, idProcesso, idTermo, idLotacao, motivo, chain } = req.body;
+        if (!tipo || !motivo) {
+            return res.status(400).json({ message: 'Tipo e motivo são obrigatórios.' });
+        }
+        
+        if (!idTermo && !idLotacao) {
+            return res.status(400).json({ message: 'É obrigatório vincular a Inconformidade a um Edital (idTermo) ou a uma Lotação (idLotacao).' });
+        }
+        
+        // Verifica se a inconformidade anterior está resolvida, se for passar chain
+        if (chain) {
+            const incAnterior = await prisma.inconformidade.findUnique({ where: { ID_INC: chain } });
+            if (incAnterior && incAnterior.RESOLVIDO) {
+                return res.status(400).json({ message: 'Não é possível encadear em uma inconformidade já resolvida.' });
+            }
+        }
+
+        let processoUuid = null;
+        if (idProcesso) {
+            // Tenta encontrar o processo pelo UUID ou pelo Número SEI
+            const processoEncontrado = await prisma.processo.findFirst({
+                where: {
+                    OR: [
+                        { ID_PROCESSO: idProcesso },
+                        { NUMERO: idProcesso }
+                    ]
+                }
+            });
+            if (processoEncontrado) {
+                processoUuid = processoEncontrado.ID_PROCESSO;
+            } else {
+                return res.status(400).json({ message: 'Processo não encontrado. Crie o processo primeiro.' });
+            }
+        }
+
+        const novaInc = await prisma.inconformidade.create({
+            data: {
+                ID_INC: generateId('INC'),
+                RESOLVIDO: resolvido || false,
+                TIPO: tipo,
+                ID_PROCESSO: processoUuid,
+                ID_TERMO: idTermo || null,
+                ID_LOTACAO: idLotacao || null,
+                MOTIVO: motivo,
+                CHAIN: chain || null
+            }
+        });
+        
+        await auditAction(
+            req.user?.usuario || 'Sistema',
+            'CRIAR',
+            'Inconformidade',
+            novaInc.ID_INC,
+            null,
+            novaInc
+        );
+        
+        res.json({ success: true, inconformidade: novaInc });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
+app.put('/api/inconformidades/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const { id } = req.params;
+        const { resolvido, tipo, idProcesso, idTermo, idLotacao, motivo, chain } = req.body;
+        
+        const existingInc = await prisma.inconformidade.findUnique({ where: { ID_INC: id } });
+        if (!existingInc) return res.status(404).json({ message: 'Inconformidade não encontrada.' });
+
+        let processoUuid = existingInc.ID_PROCESSO;
+        if (idProcesso !== undefined && idProcesso !== null && idProcesso !== '') {
+            // Tenta encontrar o processo pelo UUID ou pelo Número SEI
+            const processoEncontrado = await prisma.processo.findFirst({
+                where: {
+                    OR: [
+                        { ID_PROCESSO: idProcesso },
+                        { NUMERO: idProcesso }
+                    ]
+                }
+            });
+            if (processoEncontrado) {
+                processoUuid = processoEncontrado.ID_PROCESSO;
+            } else {
+                return res.status(400).json({ message: 'Processo não encontrado. Crie o processo primeiro.' });
+            }
+        } else if (idProcesso === '' || idProcesso === null) {
+            processoUuid = null;
+        }
+
+        const updatedInc = await prisma.inconformidade.update({
+            where: { ID_INC: id },
+            data: {
+                RESOLVIDO: resolvido !== undefined ? resolvido : existingInc.RESOLVIDO,
+                TIPO: tipo || existingInc.TIPO,
+                ID_PROCESSO: processoUuid,
+                ID_TERMO: idTermo !== undefined ? idTermo : existingInc.ID_TERMO,
+                ID_LOTACAO: idLotacao !== undefined ? idLotacao : existingInc.ID_LOTACAO,
+                MOTIVO: motivo || existingInc.MOTIVO,
+                CHAIN: chain !== undefined ? chain : existingInc.CHAIN
+            }
+        });
+
+        await auditAction(
+            req.user?.usuario || 'Sistema',
+            'EDITAR',
+            'Inconformidade',
+            updatedInc.ID_INC,
+            existingInc,
+            updatedInc
+        );
+
+        res.json({ success: true, inconformidade: updatedInc });
+    } catch (e: any) {
+        res.status(500).json({ message: getFriendlyErrorMessage(e) });
+    }
+});
+
 app.post('/api/reports/saved', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { name, config } = req.body;
     if (!name || !config) return res.status(400).json({ message: 'Dados inválidos.' });
@@ -723,11 +1399,78 @@ app.get('/api/:entity/unique/:field', authenticateToken, async (req: any, res: a
     }
 });
 
-app.get('/api/alerts', authenticateToken, async (req: any, res: any) => {
-    res.json([]);
+import * as onDemandAlerts from './services/onDemandAlerts';
+
+app.get('/api/alerts', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
+    try {
+        const user = req.user; // Obtém o objeto de usuário do token
+        if (!user) {
+            // Embora o authenticateToken já bloqueie, é uma boa prática verificar.
+            return res.status(401).json([]);
+        }
+
+        // Chama as funções do serviço em paralelo para otimizar
+        const [
+            contratos, 
+            vagas,
+            editais
+        ] = await Promise.all([
+            onDemandAlerts.verificarContratosProximosDoFim(user),
+            onDemandAlerts.verificarVagasOciosas(user),
+            onDemandAlerts.verificarEditaisProximosDoFim(user)
+        ]);
+
+        // Junta os resultados de todas as rotinas em um único array
+        const allAlerts = [...contratos, ...vagas, ...editais];
+        
+        res.json(allAlerts);
+
+    } catch (e: any) {
+        console.error("ERRO: Falha ao gerar alertas on-demand:", e);
+        // Retorna um erro 500 para o cliente, indicando que algo deu errado no servidor
+        res.status(500).json({ message: "Erro ao buscar alertas do sistema." });
+    }
 });
 
 // --- GENERIC CRUD ROUTES ---
+
+app.get('/api/utils/cep/:cep', authenticateToken, async (req: any, res: any) => {
+    try {
+        const cleanCep = req.params.cep.replace(/\D/g, '');
+        if (cleanCep.length !== 8) return res.status(400).json({ message: 'CEP inválido' });
+        const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+        if (!response.ok) return res.status(500).json({ message: 'Erro ao buscar dados do CEP' });
+        const data = await response.json();
+        res.json(data);
+    } catch (e: any) {
+        res.status(500).json({ message: 'Erro ao buscar dados do CEP' });
+    }
+});
+
+app.get('/api/utils/cep/busca/:logradouro', authenticateToken, async (req: any, res: any) => {
+    try {
+        let logradouro = req.params.logradouro;
+        
+        // Remove everything after a comma (usually numbers and complements)
+        if (logradouro.includes(',')) {
+            logradouro = logradouro.split(',')[0];
+        }
+        
+        // Remove any remaining standalone numbers and trim
+        logradouro = logradouro.replace(/[0-9]/g, '').trim();
+
+        if (!logradouro || logradouro.length < 3) {
+            return res.status(400).json({ message: 'Logradouro deve ter pelo menos 3 caracteres úteis para busca' });
+        }
+        // Assuming RJ / Rio de Janeiro as default for this system.
+        const response = await fetch(`https://viacep.com.br/ws/RJ/Rio de Janeiro/${encodeURIComponent(logradouro)}/json/`);
+        if (!response.ok) return res.status(500).json({ message: 'Erro ao buscar CEP por logradouro na API externa' });
+        const data = await response.json();
+        res.json(data); // Returns an array of matches
+    } catch (e: any) {
+        res.status(500).json({ message: 'Erro interno ao buscar CEP por logradouro' });
+    }
+});
 
 app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
     const { entity } = req.params;
@@ -735,9 +1478,14 @@ app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
 
     try {
-        if (entity === 'Auditoria') {
-            const userRole = req.user?.papel;
-            const isGerente = req.user?.isGerente;
+        const userRole = req.user?.papel;
+        const isGerente = req.user?.isGerente;
+
+        if (entity === 'AuditoriaLGPD') {
+            if (userRole !== 'COORDENAÇÃO' || !isGerente) {
+                return res.status(403).json({ message: 'Acesso negado. Apenas gerentes da coordenação podem acessar a auditoria LGPD.' });
+            }
+        } else if (['Auditoria', 'Inativo', 'ContratoHistorico', 'AlocacaoHistorico'].includes(entity)) {
             if (userRole !== 'COORDENAÇÃO' && !isGerente) {
                 return res.status(403).json({ message: 'Acesso negado.' });
             }
@@ -747,10 +1495,8 @@ app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res
             where: { OR: [{ [getEntityPk(entity)]: { contains: req.query.search } }] }
         } : { where: {} };
 
-        if (entity === 'Auditoria') {
-            const userRole = req.user?.papel;
+        if (entity === 'Auditoria' || entity === 'AuditoriaLGPD') {
             const isCoord = userRole === 'COORDENAÇÃO';
-            const isGerente = req.user?.isGerente;
             if (!isCoord && isGerente && userRole) {
                 const teamUsers = await prisma.usuario.findMany({ where: { papel: userRole }, select: { usuario: true } });
                 const teamUsernames = teamUsers.map((u: any) => u.usuario);
@@ -759,30 +1505,70 @@ app.get('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, res
         }
         
         const inclusions: any = {};
-        if (entity === 'Vaga') inclusions.include = { lotacao: true, cargo: true, edital: true };
-        if (entity === 'Contrato') inclusions.include = { vaga: true, pessoa: true, funcao: true };
-        if (entity === 'Alocacao') inclusions.include = { servidor: true, lotacao: true, funcao: true };
-        if (entity === 'Servidor') inclusions.include = { pessoa: true, cargo: true };
+        if (entity === 'Vaga') inclusions.include = { lotacao: { include: { vinculacao: true } }, postoTrabalho: true, edital: true, contrato: { include: { pessoa: { include: { notas: true } } } } };
+        if (entity === 'Contrato') inclusions.include = { vaga: true, pessoa: { include: { notas: true } }, funcao: true };
+        if (entity === 'Alocacao') inclusions.include = { servidor: { include: { pessoa: { include: { notas: true } } } }, lotacao: true, funcao: true };
+        if (entity === 'Servidor') inclusions.include = { pessoa: { include: { notas: true } }, funcao: true };
+        if (entity === 'Edital') inclusions.include = { cogestora: true };
+        if (entity === 'Lotacao') inclusions.include = { vinculacao: true };
 
-        const data = await model.findMany({ ...query, ...inclusions });
+        let data;
+        data = await model.findMany({ ...query, ...inclusions });
         
         const flatData = data.map((item: any) => {
             const flat = { ...item };
+            if (entity === 'Edital') {
+                flat.NOME_COGESTORA = item.cogestora?.NOME;
+            }
             if (entity === 'Vaga') {
                 flat.LOTACAO_NOME = item.lotacao?.LOTACAO;
-                flat.CARGO_NOME = item.cargo?.NOME_CARGO;
+                flat.POSTO_NOME = item.postoTrabalho?.NOME_POSTO;
                 flat.EDITAL_NOME = item.edital?.EDITAL;
+                
+                // Determina o status da Vaga para ser consumido pelo frontend
+                if (item.BLOQUEADA) {
+                    flat.STATUS_VAGA = 'Bloqueada';
+                } else if (item.contrato && item.contrato.length > 0) {
+                    flat.STATUS_VAGA = 'Ocupada';
+                } else {
+                    flat.STATUS_VAGA = 'Aberta';
+                }
             }
             if (entity === 'Contrato') {
                 flat.NOME_PESSOA = item.pessoa?.NOME;
                 flat.NOME_FUNCAO = item.funcao?.FUNCAO;
+                if (userRole === 'GDEP') {
+                    if (flat.pessoa) {
+                        flat.pessoa.ENDERECO = '*** (Oculto - LGPD)';
+                        flat.pessoa.CEP = '***';
+                    }
+                }
             }
             if (entity === 'Servidor') {
                 flat.NOME_PESSOA = item.pessoa?.NOME;
-                flat.NOME_CARGO = item.cargo?.NOME_CARGO;
+                flat.NOME_FUNCAO = item.funcao?.FUNCAO;
+                if (userRole === 'GDEP') {
+                    if (flat.pessoa) {
+                        flat.pessoa.ENDERECO = '*** (Oculto - LGPD)';
+                        flat.pessoa.CEP = '***';
+                    }
+                }
+            }
+            if (entity === 'Pessoa' && userRole === 'GDEP') {
+                flat.ENDERECO = '*** (Oculto - LGPD)';
+                flat.CEP = '***';
+            }
+            if (entity === 'Usuario') {
+                delete flat.senha;
+                delete flat.assinatura;
             }
             return flat;
         });
+
+        // Registrar a leitura caso seja uma listagem sensível
+        if (['Pessoa', 'Servidor', 'Contrato', 'Inativo', 'ContratoHistorico', 'AlocacaoHistorico'].includes(entity)) {
+             auditLGPDAction(req.user?.usuario || 'Desconhecido', 'LEITURA', entity, 'LISTAGEM_GERAL');
+        }
 
         res.json(flatData);
     } catch (e: any) {
@@ -795,12 +1581,55 @@ app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, re
     const { entity } = req.params;
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
+
+    if (req.user?.papel === 'GABINETE' || req.user?.papel === 'GACP') {
+        return res.status(403).json({ message: 'Acesso negado. O perfil é somente leitura.' });
+    }
+
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
     try {
         let data = cleanData(req.body);
+
+        if (entity === 'Contrato' || entity === 'Servidor') {
+            const cpfToCheck = data.CPF;
+            if (cpfToCheck) {
+                const orConditions = [];
+                if (cpfToCheck) {
+                    const cleanCpf = cpfToCheck.replace(/\D/g, '');
+                    const maskedCpf = cleanCpf.length === 11 ? cleanCpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : cpfToCheck;
+                    orConditions.push({ CPF: cleanCpf });
+                    orConditions.push({ CPF: maskedCpf });
+                }
+
+                if (orConditions.length > 0) {
+                    const notas = await prisma.nota.findFirst({
+                        where: { OR: orConditions, GRAVISSIMO: true }
+                    });
+                    if (notas) {
+                        return res.status(403).json({ message: 'Bloqueio: Esta pessoa possui uma infração gravíssima e não pode ser vinculada.' });
+                    }
+                }
+            }
+        }
+
         if (entity === 'Usuario' && data.senha) {
             const salt = await bcrypt.genSalt(10);
             data.senha = await bcrypt.hash(data.senha, salt);
+        }
+        if ((entity === 'Pessoa' || entity === 'Vinculacao' || entity === 'Cogestora' || entity === 'Lotacao') && (data.ENDERECO || data.CEP || data.BAIRRO)) {
+            const coords = await geocodeAddress(
+                data.ENDERECO, 
+                data.CEP, 
+                data.BAIRRO, 
+                data.NUMERO, 
+                data.CIDADE, 
+                data.ESTADO, 
+                data.PAIS
+            );
+            if (coords) {
+                data.LATITUDE = coords.latitude;
+                data.LONGITUDE = coords.longitude;
+            }
         }
         const result = await model.create({ data });
         if (entity !== 'Auditoria') {
@@ -814,18 +1643,47 @@ app.post('/api/:entity', authenticateToken, async (req: AuthenticatedRequest, re
 });
 
 app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    const { entity, id } = req.params;
+    let { entity, id } = req.params;
+
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
+
+    if (req.user?.papel === 'GABINETE' || req.user?.papel === 'GACP') {
+        return res.status(403).json({ message: 'Acesso negado. O perfil é somente leitura.' });
+    }
+
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
     try {
         const { editToken, ...rawData } = req.body;
         const data = cleanData(rawData);
         const pkField = getEntityPk(entity);
+
         const oldRecord = await model.findUnique({ where: { [pkField]: id } });
         if (entity === 'Usuario' && data.senha) {
             const salt = await bcrypt.genSalt(10);
             data.senha = await bcrypt.hash(data.senha, salt);
+        }
+        if (entity === 'Pessoa' || entity === 'Vinculacao' || entity === 'Cogestora' || entity === 'Lotacao') {
+            const cepChanged = data.CEP !== undefined && data.CEP !== oldRecord?.CEP;
+            const enderecoChanged = data.ENDERECO !== undefined && data.ENDERECO !== oldRecord?.ENDERECO;
+            const bairroChanged = data.BAIRRO !== undefined && data.BAIRRO !== oldRecord?.BAIRRO;
+            const numeroChanged = data.NUMERO !== undefined && data.NUMERO !== oldRecord?.NUMERO;
+            
+            if (cepChanged || enderecoChanged || bairroChanged || numeroChanged) {
+                const coords = await geocodeAddress(
+                    data.ENDERECO !== undefined ? data.ENDERECO : oldRecord?.ENDERECO, 
+                    data.CEP !== undefined ? data.CEP : oldRecord?.CEP,
+                    data.BAIRRO !== undefined ? data.BAIRRO : oldRecord?.BAIRRO,
+                    data.NUMERO !== undefined ? data.NUMERO : oldRecord?.NUMERO,
+                    data.CIDADE !== undefined ? data.CIDADE : oldRecord?.CIDADE,
+                    data.ESTADO !== undefined ? data.ESTADO : oldRecord?.ESTADO,
+                    data.PAIS !== undefined ? data.PAIS : oldRecord?.PAIS
+                );
+                if (coords) {
+                    data.LATITUDE = coords.latitude;
+                    data.LONGITUDE = coords.longitude;
+                }
+            }
         }
         const result = await model.update({ where: { [pkField]: id }, data: data });
         if (entity !== 'Auditoria') {
@@ -838,15 +1696,45 @@ app.put('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest,
 });
 
 app.delete('/api/:entity/:id', authenticateToken, async (req: AuthenticatedRequest, res: any) => {
-    const { entity, id } = req.params;
+    let { entity, id } = req.params;
+
     const model = getModel(entity);
     const usuario = req.user?.usuario || 'Desconhecido';
+
+    if (req.user?.papel === 'GABINETE' || req.user?.papel === 'GACP') {
+        return res.status(403).json({ message: 'Acesso negado. O perfil é somente leitura.' });
+    }
+
     if (!model) return res.status(400).json({ message: `Entidade ${entity} inválida` });
     try {
         const pkField = getEntityPk(entity);
         const oldRecord = await model.findUnique({ where: { [pkField]: id } });
         if (!oldRecord) throw new Error('Record to delete does not exist');
-        await model.delete({ where: { [pkField]: id } });
+
+        if (entity === 'Vaga') {
+            await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+                const contratoAtivo = await tx.contrato.findFirst({ where: { ID_VAGA: id } });
+                if (contratoAtivo) {
+                    const dadosParaHistorico = {
+                        ID_HISTORICO_CONTRATO: generateId('HTC'),
+                        ID_CONTRATO: contratoAtivo.ID_CONTRATO,
+                        CPF: contratoAtivo.CPF,
+                        ID_VAGA: contratoAtivo.ID_VAGA,
+                        ID_FUNCAO: contratoAtivo.ID_FUNCAO,
+                        DATA_DO_CONTRATO: contratoAtivo.DATA_DO_CONTRATO,
+                        DATA_ARQUIVAMENTO: getBrasiliaTimestamp(),
+                        MOTIVO_ARQUIVAMENTO: 'Vaga excluída'
+                    };
+                    await tx.contratoHistorico.create({ data: dadosParaHistorico });
+                    await auditAction(usuario, 'ARQUIVAR', 'Contrato', contratoAtivo.ID_CONTRATO, contratoAtivo, null, tx);
+                    await tx.contrato.delete({ where: { ID_CONTRATO: contratoAtivo.ID_CONTRATO } });
+                }
+                await tx.vaga.delete({ where: { ID_VAGA: id } });
+            });
+        } else {
+            await model.delete({ where: { [pkField]: id } });
+        }
+
         if (entity !== 'Auditoria') {
             await auditAction(usuario, 'EXCLUIR', entity, id, oldRecord, null);
         }
@@ -875,19 +1763,7 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
     try {
         let result: any = {};
         if (reportName === 'revisoesPendentes') {
-            const today = getEndOfDayInBrasiliaAsUtc();
-
-            result = await prisma.atendimento.findMany({
-                where: {
-                    STATUS_PEDIDO: 'Aguardando',
-                    DATA_AGENDAMENTO: {
-                        lte: today
-                    }
-                },
-                orderBy: {
-                    DATA_AGENDAMENTO: 'asc'
-                }
-            });
+            result = []; // Fluxo removido
         } else if (reportName === 'dashboardPessoal') {
             const totalContratos = await prisma.contrato.count();
             const totalServidores = await prisma.servidor.count();
@@ -902,14 +1778,7 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
             const lotacaoData = Object.entries(lotacaoCounts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
             result = { totais: { contratados: totalContratos, servidores: totalServidores, total: totalContratos + totalServidores }, graficos: { vinculo: vinculoData, lotacao: lotacaoData } };
         } else if (reportName === 'painelVagas') {
-            const vagas = await prisma.vaga.findMany({ include: { lotacao: true, cargo: true, edital: true } });
-            const activeReservations = await prisma.reserva.findMany({ where: { STATUS: 'Ativa' } });
-            const activeResMap = new Map(activeReservations.map((r: any) => [r.ID_VAGA, r.ID_ATENDIMENTO]));
-            const atendimentos = await prisma.atendimento.findMany({ where: { ID_ATENDIMENTO: { in: Array.from(activeResMap.values()) } }, select: { ID_ATENDIMENTO: true, CPF: true } });
-            const atendMap = new Map(atendimentos.map((a: any) => [a.ID_ATENDIMENTO, a.CPF]));
-            const cpfs = atendimentos.map((a: any) => a.CPF).filter((c: any) => c);
-            const pessoas = await prisma.pessoa.findMany({ where: { CPF: { in: cpfs } }, select: { CPF: true, NOME: true } });
-            const pessoaMap = new Map(pessoas.map((p: any) => [p.CPF, p.NOME]));
+            const vagas = await prisma.vaga.findMany({ include: { lotacao: { include: { vinculacao: true } }, postoTrabalho: true, edital: true } });
             const contratos = await prisma.contrato.findMany({ select: { ID_VAGA: true, CPF: true } });
             const ocupadaMap = new Set(contratos.map((c: any) => c.ID_VAGA));
             const quantitativoMap = new Map();
@@ -919,29 +1788,109 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
                 let reservadaPara = null;
                 if (v.BLOQUEADA) status = 'Bloqueada';
                 else if (ocupadaMap.has(v.ID_VAGA)) status = 'Ocupada';
-                else if (activeResMap.has(v.ID_VAGA)) {
-                    status = 'Reservada';
-                    const atdId = activeResMap.get(v.ID_VAGA);
-                    const cpf = atendMap.get(atdId);
-                    reservadaPara = pessoaMap.get(cpf);
-                }
-                panorama.push({ ID_VAGA: v.ID_VAGA, STATUS: status, VINCULACAO: v.lotacao?.VINCULACAO || 'N/A', LOTACAO_OFICIAL: v.lotacao?.LOTACAO || 'N/A', NOME_CARGO: v.cargo?.NOME_CARGO || 'N/A', RESERVADA_PARA: reservadaPara, OCUPANTE: status === 'Ocupada' ? 'Ocupada' : null });
+                
+                panorama.push({ ID_VAGA: v.ID_VAGA, STATUS: status, VINCULACAO: v.lotacao?.vinculacao?.NOME || 'N/A', LOTACAO_OFICIAL: v.lotacao?.LOTACAO || 'N/A', NOME_CARGO: v.postoTrabalho?.NOME_POSTO || 'N/A', RESERVADA_PARA: reservadaPara, OCUPANTE: status === 'Ocupada' ? 'Ocupada' : null });
                 if (status !== 'Ocupada' && status !== 'Bloqueada') {
-                    const key = `${v.lotacao?.VINCULACAO || 'N/A'}|${v.lotacao?.LOTACAO || 'N/A'}|${v.cargo?.NOME_CARGO || 'N/A'}`;
+                    const key = `${v.lotacao?.vinculacao?.NOME || 'N/A'}|${v.lotacao?.LOTACAO || 'N/A'}|${v.cargo?.NOME_CARGO || 'N/A'}`;
                     if (!quantitativoMap.has(key)) quantitativoMap.set(key, { free: 0, reserved: [] });
                     const entry = quantitativoMap.get(key);
-                    if (status === 'Reservada') entry.reserved.push(reservadaPara || 'Anônimo');
-                    else entry.free++;
+                    entry.free++;
                 }
             });
             const quantitativo = Array.from(quantitativoMap.entries()).map(([key, val]: any) => {
                 const [vinculacao, lotacao, cargo] = key.split('|');
                 const detailsParts = [];
                 if (val.free > 0) detailsParts.push(`Livre x${val.free}`);
-                if (val.reserved.length > 0) detailsParts.push(`Reservada x${val.reserved.length} (${val.reserved.length > 0 ? val.reserved.join(', ') : '?'})`);
                 return { VINCULACAO: vinculacao, LOTACAO: lotacao, CARGO: cargo, DETALHES: detailsParts.join(', ') };
             });
             result = { panorama, quantitativo };
+        } else if (reportName === 'georeferenciamento') {
+            const userRole = req.user?.papel;
+            if (userRole !== 'COORDENAÇÃO' && userRole !== 'GABINETE') {
+                return res.status(403).json({ message: 'Acesso negado. Apenas Coordenação e Gabinete podem visualizar o mapa de georeferenciamento.' });
+            }
+            auditLGPDAction(req.user?.usuario || 'Desconhecido', 'LEITURA', 'MapaGeoreferenciamento', 'TODOS');
+
+            // --- INÍCIO GEOCODIFICAÇÃO ON-THE-FLY ---
+            // Removido para otimizar o carregamento do mapa. A geocodificação agora é feita via script externo (geocode_pessoas.ts)
+            // e de forma assíncrona durante a criação/edição dos registros no banco.
+            // --- FIM GEOCODIFICAÇÃO ON-THE-FLY ---
+
+            
+            const pessoas = await prisma.pessoa.findMany({
+                where: { LATITUDE: { not: null }, LONGITUDE: { not: null } },
+                select: {
+                    CPF: true, NOME: true, LATITUDE: true, LONGITUDE: true,
+                    servidor: { include: { funcao: true, alocacao: { include: { lotacao: true } } } },
+                    contratos: { include: { funcao: true, vaga: { include: { lotacao: true, postoTrabalho: true, edital: true } } } }
+                }
+            });
+
+            const lotacoes = await prisma.lotacao.findMany({
+                where: { LATITUDE: { not: null }, LONGITUDE: { not: null } }
+            });
+
+            const markers: any[] = [];
+
+            pessoas.forEach((p: any) => {
+                let vinculo = 'Nenhum';
+                let lotacao = 'Nenhuma';
+                let funcao = 'Nenhuma';
+                let postoTrabalho = 'Nenhum';
+                let edital = 'Nenhum';
+                let dataAdmissao = null;
+                
+                if (p.servidor) {
+                    vinculo = 'Servidor';
+                    funcao = p.servidor.funcao?.FUNCAO || 'Nenhuma';
+                    dataAdmissao = p.servidor.DATA_MATRICULA;
+                    const aloc = Array.isArray(p.servidor.alocacao) ? p.servidor.alocacao[0] : p.servidor.alocacao;
+                    if (aloc?.lotacao) lotacao = aloc.lotacao.LOTACAO;
+                } else if (p.contratos && p.contratos.length > 0) {
+                    vinculo = 'Contratado';
+                    dataAdmissao = p.contratos[0].DATA_DO_CONTRATO;
+                    funcao = p.contratos[0].funcao?.FUNCAO || 'Nenhuma';
+                    if (p.contratos[0].vaga) {
+                        if (p.contratos[0].vaga.lotacao) lotacao = p.contratos[0].vaga.lotacao.LOTACAO;
+                        if (p.contratos[0].vaga.postoTrabalho) postoTrabalho = p.contratos[0].vaga.postoTrabalho.NOME_POSTO;
+                        if (p.contratos[0].vaga.edital) edital = p.contratos[0].vaga.edital.EDITAL;
+                    }
+                }
+
+                if (!isNaN(parseFloat(p.LATITUDE)) && !isNaN(parseFloat(p.LONGITUDE))) {
+                    markers.push({
+                        type: 'pessoa',
+                        cpf: p.CPF,
+                        nome: p.NOME,
+                        latitude: parseFloat(p.LATITUDE),
+                        longitude: parseFloat(p.LONGITUDE),
+                        vinculo,
+                        lotacao,
+                        funcao,
+                        postoTrabalho,
+                        edital,
+                        dataAdmissao
+                    });
+                }
+            });
+
+            lotacoes.forEach((l: any) => {
+                if (!isNaN(parseFloat(l.LATITUDE)) && !isNaN(parseFloat(l.LONGITUDE))) {
+                    markers.push({
+                        type: 'lotacao',
+                        id: l.ID_LOTACAO,
+                        nome: l.LOTACAO,
+                        latitude: parseFloat(l.LATITUDE),
+                        longitude: parseFloat(l.LONGITUDE),
+                        tipoLotacao: l.TIPO_DA_LOTACAO,
+                        endereco: l.ENDERECO,
+                        bairro: l.BAIRRO,
+                        ehSetor: l.EH_SETOR
+                    });
+                }
+            });
+
+            result = markers;
         }
         res.json(result);
     } catch (e: any) {
@@ -949,19 +1898,391 @@ app.get('/api/reports/:reportName', authenticateToken, async (req: any, res: any
     }
 });
 
-app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any) => {
-    let { cpf } = req.params;
-    cpf = cpf.replace(/\D/g, '');
+app.get('/api/Vaga/:id/timeline', authenticateToken, async (req: any, res: any) => {
     try {
-        const pessoa = await prisma.pessoa.findUnique({ where: { CPF: cpf } });
-        if (!pessoa) return res.status(404).json({ message: `Pessoa com CPF ${cpf} não encontrada.` });
-        const contratos = await prisma.contrato.findMany({ where: { CPF: cpf }, include: { funcao: true } });
-        const servidores = await prisma.servidor.findMany({ where: { CPF: cpf }, include: { cargo: true, alocacao: { include: { lotacao: true, funcao: true } } } });
-        let tipoPerfil = 'Avulso';
+        const idVaga = req.params.id;
+        
+        // 1. Vaga info
+        const vaga = await prisma.vaga.findUnique({
+            where: { ID_VAGA: idVaga },
+            include: { lotacao: true, postoTrabalho: true, edital: true }
+        });
+        if (!vaga) return res.status(404).json({ message: 'Vaga não encontrada' });
+
+        // 2. Current Contrato
+        const contratoAtual = await prisma.contrato.findUnique({
+            where: { ID_VAGA: idVaga },
+            include: { pessoa: true, funcao: true }
+        });
+
+        // 3. ContratoHistorico
+        const historico = await prisma.contratoHistorico.findMany({
+            where: { ID_VAGA: idVaga }
+        });
+
+        // 4. Substitutos
+        const substitutos = await prisma.substituto.findMany({
+            where: { ID_VAGA: idVaga },
+            include: { pessoa: true }
+        });
+
+        // Gather all CPFs
+        const cpfs = new Set<string>();
+        if (contratoAtual?.CPF) cpfs.add(contratoAtual.CPF);
+        historico.forEach((h: any) => { if (h.CPF) cpfs.add(h.CPF); });
+        substitutos.forEach((s: any) => { if (s.CPF) cpfs.add(s.CPF); });
+
+        // 5. Protocolos for these CPFs
+        const pessoas = await prisma.pessoa.findMany({
+            where: { CPF: { in: Array.from(cpfs) } },
+            select: { CPF: true, NOME: true }
+        });
+        const pessoaMap = new Map(pessoas.map((p: any) => [p.CPF, p.NOME]));
+
+        const protocolos = await prisma.protocolo.findMany({
+            where: { CPF: { in: Array.from(cpfs) } }
+        });
+
+        let events: any[] = [];
+
+        if (contratoAtual) {
+            events.push({
+                type: 'CONTRATO_ATUAL',
+                date: contratoAtual.DATA_DO_CONTRATO,
+                title: 'Contrato Atual Iniciado',
+                description: `Entrada de ${contratoAtual.pessoa?.NOME || 'Desconhecido'}`,
+                cpf: contratoAtual.CPF
+            });
+        }
+
+        historico.forEach((h: any) => {
+            const nome = pessoaMap.get(h.CPF || '') || 'Desconhecido';
+            if (h.DATA_DO_CONTRATO) {
+                events.push({
+                    type: 'CONTRATO_HISTORICO_INICIO',
+                    date: h.DATA_DO_CONTRATO,
+                    title: 'Contrato Anterior',
+                    description: `Entrada de ${nome}`,
+                    cpf: h.CPF
+                });
+            }
+            if (h.DATA_ARQUIVAMENTO) {
+                events.push({
+                    type: 'CONTRATO_HISTORICO_FIM',
+                    date: h.DATA_ARQUIVAMENTO,
+                    title: 'Saída/Desligamento',
+                    description: `Saída de ${nome}. Motivo: ${h.MOTIVO_ARQUIVAMENTO || 'Não informado'}`,
+                    cpf: h.CPF
+                });
+            }
+        });
+
+        substitutos.forEach((s: any) => {
+            const nome = s.pessoa?.NOME || 'Desconhecido';
+            if (s.DATA_ENTRADA) {
+                events.push({
+                    type: 'SUBSTITUICAO_INICIO',
+                    date: s.DATA_ENTRADA,
+                    title: 'Início de Substituição',
+                    description: `${nome} iniciou substituição`,
+                    cpf: s.CPF
+                });
+            }
+            if (s.DATA_SAIDA) {
+                 events.push({
+                    type: 'SUBSTITUICAO_FIM',
+                    date: s.DATA_SAIDA,
+                    title: 'Fim de Substituição',
+                    description: `${nome} encerrou substituição`,
+                    cpf: s.CPF
+                });
+            }
+        });
+
+        protocolos.forEach((p: any) => {
+            if (p.INICIO_PRAZO || p.TIMESTAMP) {
+                events.push({
+                    type: 'PROTOCOLO',
+                    date: p.INICIO_PRAZO || p.TIMESTAMP,
+                    title: p.TIPO_DE_PROTOCOLO || 'Protocolo/Afastamento',
+                    description: `Registrado para ${pessoaMap.get(p.CPF || '') || 'Desconhecido'}`,
+                    cpf: p.CPF,
+                    details: p
+                });
+            }
+        });
+
+        events = events.filter(e => e.date).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        res.json({ vaga, events });
+    } catch (e: any) {
+        console.error('Erro na timeline da vaga:', e);
+        res.status(500).json({ message: 'Erro ao buscar linha do tempo da vaga' });
+    }
+});
+
+
+app.get('/api/gpmp/cockpit', authenticateToken, async (req: any, res: any) => {
+    try {
+        const vagas = await prisma.vaga.findMany({
+            include: {
+                edital: true,
+                lotacao: { include: { vinculacao: true } },
+                postoTrabalho: true,
+                contrato: { include: { pessoa: true } }
+            }
+        });
+
+        let editais = await prisma.edital.findMany();
+        // Filtrar editais vigentes (TERMINO >= hoje ou null)
+        const hojeDate = new Date();
+        hojeDate.setHours(0,0,0,0);
+        editais = editais.filter((e: any) => !e.TERMINO || new Date(e.TERMINO) >= hojeDate);
+        const editaisVigentesIds = editais.map((e: any) => e.ID_EDITAL);
+
+        // Apenas vagas de editais vigentes
+        const vagasVigentes = vagas.filter((v: any) => !v.ID_EDITAL || editaisVigentesIds.includes(v.ID_EDITAL));
+
+        const historico = await prisma.contratoHistorico.findMany({
+            where: { DATA_ARQUIVAMENTO: { gte: new Date(new Date().setDate(new Date().getDate() - 30)) } }
+        });
+        const contratosMes = await prisma.contrato.findMany({
+            where: { DATA_DO_CONTRATO: { gte: new Date(new Date().setDate(new Date().getDate() - 30)) } }
+        });
+
+        // 1. Termômetro Editais
+        let editaisNaMeta = 0;
+        let editaisSatisfatorios = 0;
+        let editaisDeficit = 0;
+
+        const editaisStats = editais.map(edital => {
+            const vagasEdital = vagasVigentes.filter((v: any) => v.ID_EDITAL === edital.ID_EDITAL && !v.BLOQUEADA);
+            const total = vagasEdital.length;
+            const ocupadas = vagasEdital.filter(v => v.contrato !== null).length;
+            
+            const ocupacaoReal = total > 0 ? (ocupadas / total) * 100 : 0;
+            const meta = edital.META_OCUPACAO || 100;
+            const satisfatorio = edital.NIVEL_SATISFATORIO || 85;
+
+            if (ocupacaoReal >= meta) editaisNaMeta++;
+            else if (ocupacaoReal >= satisfatorio) editaisSatisfatorios++;
+            else editaisDeficit++;
+
+            return { id: edital.ID_EDITAL, nome: edital.EDITAL, ocupacao: ocupacaoReal, meta, satisfatorio };
+        });
+
+        // 2. Termômetro Vacância
+        let vagasCriticas: any[] = [];
+        let vagasAlerta: any[] = [];
+        let vagasAtencao: any[] = [];
+
+        // Para calcular vacância, precisamos do último histórico da vaga.
+        // Como aproximação rápida (já que a linha do tempo busca o histórico detalhado),
+        // vamos cruzar o histórico recente das vagas desocupadas.
+        const vagasVazias = vagasVigentes.filter((v: any) => v.contrato === null && !v.BLOQUEADA);
+        
+        // Buscar o último arquivamento de cada vaga vazia
+        const ultimoHistoricoVazias = await prisma.contratoHistorico.groupBy({
+            by: ['ID_VAGA'],
+            where: { ID_VAGA: { in: vagasVazias.map(v => v.ID_VAGA) } },
+            _max: { DATA_ARQUIVAMENTO: true }
+        });
+
+        const historicoMap = new Map(ultimoHistoricoVazias.map(h => [h.ID_VAGA, h._max.DATA_ARQUIVAMENTO]));
+        const hoje = new Date().getTime();
+
+        vagasVazias.forEach(v => {
+            const dataSaida = historicoMap.get(v.ID_VAGA);
+            let diasVazios = 0;
+            if (dataSaida) {
+                diasVazios = Math.floor((hoje - new Date(dataSaida).getTime()) / (1000 * 3600 * 24));
+            } else {
+                // Vagas nunca ocupadas usam INICIO do edital (se existir) ou TIMESTAMP da vaga
+                const dataInicioStr = v.edital?.INICIO;
+                let dataBase = new Date(v.TIMESTAMP).getTime();
+                if (dataInicioStr) {
+                    const dtInicio = new Date(dataInicioStr).getTime();
+                    // So usa se a data for valida
+                    if (!isNaN(dtInicio)) dataBase = dtInicio;
+                }
+                diasVazios = Math.floor((hoje - dataBase) / (1000 * 3600 * 24));
+            }
+
+            const itemInfo = { ...v, diasVazios };
+
+            if (diasVazios >= 15) vagasCriticas.push(itemInfo);
+            else if (diasVazios >= 7) vagasAlerta.push(itemInfo);
+            else vagasAtencao.push(itemInfo);
+        });
+
+        // 3. Indicador de Cotas (Global - Simplificado para o Header, mas a tabela detalhará por Edital)
+        // Algoritmo Volátil de Cotas
+        let globaisCotas = {
+            totalVagas: vagasVigentes.filter((v: any) => !v.BLOQUEADA).length,
+            metaPCD_Absoluta: 0,
+            metaAfro_M_Absoluta: 0,
+            metaAfro_F_Absoluta: 0,
+            metaAssist_Absoluta: 0,
+            realizadoPCD: 0,
+            realizadoAfro_M: 0,
+            realizadoAfro_F: 0,
+            realizadoAssist: 0
+        };
+
+        const cotasPorEdital: any[] = [];
+
+        editais.forEach((edital: any) => {
+            const vagasEdital = vagasVigentes.filter((v: any) => v.ID_EDITAL === edital.ID_EDITAL && !v.BLOQUEADA);
+            const total = vagasEdital.length;
+            if (total === 0) return;
+
+            const ocupantes = vagasEdital.filter((v: any) => v.contrato !== null && v.contrato.pessoa !== null).map((v: any) => v.contrato.pessoa);
+
+            // Metas do Edital
+            const metaPcd = Math.ceil((edital.COTA_PCD || 0) / 100 * total);
+            const metaAfroTotal = Math.ceil((edital.COTA_AFRO || 0) / 100 * total);
+            const metaAfro_M = Math.floor(metaAfroTotal / 2);
+            const metaAfro_F = Math.ceil(metaAfroTotal / 2);
+            const metaAssist = Math.ceil((edital.COTA_ASSISTENCIA || 0) / 100 * total);
+
+            globaisCotas.metaPCD_Absoluta += metaPcd;
+            globaisCotas.metaAfro_M_Absoluta += metaAfro_M;
+            globaisCotas.metaAfro_F_Absoluta += metaAfro_F;
+            globaisCotas.metaAssist_Absoluta += metaAssist;
+
+            let cotaAtual = {
+                PCD: 0,
+                AFRO_M: 0,
+                AFRO_F: 0,
+                ASSISTENCIA: 0
+            };
+
+            // Distribuir as pessoas (Volátil)
+            ocupantes.forEach(pessoa => {
+                const isPCD = pessoa.PCD;
+                const isAssist = pessoa.USUARIO_ASSISTENCIA;
+                const isAfro = pessoa.AFRODESCENDENTE;
+                const isFeminino = pessoa.SEXO === 'Feminino';
+
+                if (!isPCD && !isAssist && !isAfro) return; // Não é cotista
+
+                // Calcular déficit de cada cota para este edital
+                const deficitAssist = metaAssist - cotaAtual.ASSISTENCIA;
+                const deficitPCD = metaPcd - cotaAtual.PCD;
+                const deficitAfro = isFeminino ? (metaAfro_F - cotaAtual.AFRO_F) : (metaAfro_M - cotaAtual.AFRO_M);
+
+                let escolhida = null;
+                let maiorDeficit = -9999;
+
+                const avaliarCota = (nome: string, deficit: number) => {
+                    if (deficit > maiorDeficit) {
+                        maiorDeficit = deficit;
+                        escolhida = nome;
+                    }
+                };
+
+                // Regra 2: Distância para preencher (maior déficit)
+                if (isAssist) avaliarCota('ASSISTENCIA', deficitAssist);
+                if (isPCD) avaliarCota('PCD', deficitPCD);
+                if (isAfro) avaliarCota(isFeminino ? 'AFRO_F' : 'AFRO_M', deficitAfro);
+
+                // Regra 3: Empate ou todas preenchidas -> Prioridade: Assist > PCD > Afro
+                if (escolhida === null || maiorDeficit <= 0) {
+                     if (isAssist) escolhida = 'ASSISTENCIA';
+                     else if (isPCD) escolhida = 'PCD';
+                     else if (isAfro) escolhida = isFeminino ? 'AFRO_F' : 'AFRO_M';
+                }
+
+                if (escolhida) (cotaAtual as any)[escolhida]++;
+            });
+
+            globaisCotas.realizadoPCD += cotaAtual.PCD;
+            globaisCotas.realizadoAfro_M += cotaAtual.AFRO_M;
+            globaisCotas.realizadoAfro_F += cotaAtual.AFRO_F;
+            globaisCotas.realizadoAssist += cotaAtual.ASSISTENCIA;
+
+            cotasPorEdital.push({
+                edital: edital.EDITAL,
+                metas: { pcd: metaPcd, afro_m: metaAfro_M, afro_f: metaAfro_F, assist: metaAssist },
+                realizado: { pcd: cotaAtual.PCD, afro_m: cotaAtual.AFRO_M, afro_f: cotaAtual.AFRO_F, assist: cotaAtual.ASSISTENCIA }
+            });
+        });
+
+        // 4. Giro e Tempo de Reposição
+        const saldoGiro = contratosMes.length - historico.length; // Positivo = Crescimento, Negativo = Retração
+
+        res.json({
+            termometroEditais: { naMeta: editaisNaMeta, satisfatorios: editaisSatisfatorios, deficit: editaisDeficit, lista: editaisStats },
+            vacancia: {
+                criticas: vagasCriticas.sort((a,b) => b.diasVazios - a.diasVazios),
+                alerta: vagasAlerta.sort((a,b) => b.diasVazios - a.diasVazios),
+                atencao: vagasAtencao.sort((a,b) => b.diasVazios - a.diasVazios)
+            },
+            giro: { admissoes: contratosMes.length, desligamentos: historico.length, saldo: saldoGiro },
+            cotas: { global: globaisCotas, porEdital: cotasPorEdital }
+        });
+    } catch (e: any) {
+        console.error('Erro no Cockpit GPMP:', e);
+        res.status(500).json({ message: 'Erro ao gerar dados do Cockpit' });
+    }
+});
+
+app.get('/api/Pessoa/:id/dossier', authenticateToken, async (req: any, res: any) => {
+    let identifier = req.params.id;
+    let identifierClean = identifier;
+    let identifierMasked = identifier;
+
+    if (/^[\d.-]+$/.test(identifier)) {
+        identifierClean = identifier.replace(/\D/g, '');
+        if (identifierClean.length === 11) {
+            identifierMasked = identifierClean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+        }
+    }
+
+    const userRole = req.user?.papel;
+    const isGerente = req.user?.isGerente;
+
+    try {
+        let pessoa: any = await prisma.pessoa.findFirst({ 
+            where: { 
+                OR: [
+                    { CPF: identifierClean },
+                    { CPF: identifierMasked }
+                ]
+            },
+            include: { notas: { orderBy: { DATA_CRIACAO: 'desc' } } }
+        });
+        let isTemp = false;
+
+        if (!pessoa) return res.status(404).json({ message: `Pessoa com identificador ${identifier} não encontrada.` });
+        
+        if (userRole === 'GDEP') {
+            pessoa.ENDERECO = '*** (Oculto - LGPD)';
+            pessoa.CEP = '***';
+        }
+
+        const orConditions = [];
+        if (pessoa.CPF) {
+            const clean = pessoa.CPF.replace(/\D/g, '');
+            const masked = clean.length === 11 ? clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : pessoa.CPF;
+            orConditions.push({ CPF: clean });
+            orConditions.push({ CPF: masked });
+        }
+
+        // Se por acaso não tiver CPF nem ID (teoricamente impossível), não deve buscar contratos
+        if (orConditions.length === 0) {
+             return res.json({ pessoal: pessoa, tipoPerfil: isTemp ? 'Candidato' : 'Avulso', vinculosAtivos: [], historico: [], atividadesEstudantis: { capacitacoes: [] } });
+        }
+
+        const contratos = await prisma.contrato.findMany({ where: { OR: orConditions }, include: { funcao: true, vaga: { include: { lotacao: true, postoTrabalho: true, exercicio: { include: { lotacao: true } } } } } });
+        const servidores = await prisma.servidor.findMany({ where: { OR: orConditions }, include: { funcao: true, alocacao: { include: { lotacao: true, funcao: true } } } });
+        
+        let tipoPerfil = isTemp ? 'Candidato' : 'Avulso';
         if (servidores.length > 0) tipoPerfil = 'Servidor';
         else if (contratos.length > 0) tipoPerfil = 'Contratado';
+
         const vinculosAtivos: any[] = [];
-        for (const c of contratos) { vinculosAtivos.push({ tipo: 'Contrato', id_contrato: c.ID_CONTRATO, funcao: c.funcao?.FUNCAO || 'Função não definida', data_inicio: c.DATA_DO_CONTRATO, detalhes: `Vaga ${c.ID_VAGA || 'N/A'}` }); }
+        for (const c of contratos) { vinculosAtivos.push({ tipo: 'Contrato', id_contrato: c.ID_CONTRATO, funcao: c.funcao?.FUNCAO || 'Função não definida', lotacao: c.vaga?.exercicio?.lotacao?.LOTACAO || c.vaga?.lotacao?.LOTACAO || 'Sem Lotação', data_inicio: c.DATA_DO_CONTRATO, detalhes: `Vaga ${c.ID_VAGA || 'N/A'}`, escolaridade_posto: c.vaga?.postoTrabalho?.ESCOLARIDADE }); }
         
         for (const s of servidores) { 
             const sAny = s as any;
@@ -969,8 +2290,7 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any
             vinculosAtivos.push({ 
                 tipo: 'Servidor', 
                 matricula: sAny.MATRICULA, 
-                cargo_efetivo: sAny.cargo?.NOME_CARGO || 'Cargo não definido', 
-                salario: sAny.cargo?.SALARIO, 
+                funcao_efetiva: sAny.funcao?.FUNCAO || 'Função não definida', 
                 funcao_atual: aloc?.funcao?.FUNCAO || 'Sem função comissionada', 
                 alocacao_atual: aloc?.lotacao?.LOTACAO || 'Sem Lotação', 
                 data_admissao: sAny.DATA_MATRICULA, 
@@ -979,47 +2299,131 @@ app.get('/api/Pessoa/:cpf/dossier', authenticateToken, async (req: any, res: any
         }
 
         const timeline: any[] = [];
-        // Agora buscamos o histórico na AUDITORIA, pois o acesso às tabelas históricas é indireto
-        const auditoriaLogs = await prisma.auditoria.findMany({
-            where: {
-                OR: [
-                    { TABELA_AFETADA: 'Contrato', ACAO: 'ARQUIVAR' },
-                    { TABELA_AFETADA: 'Servidor', ACAO: 'INATIVAR' }
-                ],
-                VALOR_ANTIGO: { contains: cpf } // Simple search within JSON
+        
+        if (userRole === 'COORDENAÇÃO' || isGerente) {
+            const auditConditions = [];
+            if (pessoa.CPF) {
+                const clean = pessoa.CPF.replace(/\D/g, '');
+                const masked = clean.length === 11 ? clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : pessoa.CPF;
+                auditConditions.push({ VALOR_ANTIGO: { contains: clean } });
+                auditConditions.push({ VALOR_ANTIGO: { contains: masked } });
             }
-        });
 
-        auditoriaLogs.forEach((log: any) => {
-            const data = JSON.parse(log.VALOR_ANTIGO || '{}');
-            if (data.CPF !== cpf) return; // Double check
+            const auditoriaLogs = await prisma.auditoria.findMany({
+                where: {
+                    OR: [
+                        { TABELA_AFETADA: 'Contrato', ACAO: 'ARQUIVAR' },
+                        { TABELA_AFETADA: 'Servidor', ACAO: 'INATIVAR' }
+                    ],
+                    AND: { OR: auditConditions }
+                }
+            });
 
-            if (log.ACAO === 'ARQUIVAR' && log.TABELA_AFETADA === 'Contrato') {
-                timeline.push({ 
-                    tipo: 'Contrato Encerrado', 
-                    data_ordenacao: data.DATA_ARQUIVAMENTO || log.DATA_HORA, 
-                    periodo: `Encerrado em ${new Date(log.DATA_HORA).getFullYear()}`, 
-                    descricao: `Contrato ${data.ID_CONTRATO}`, 
-                    detalhes: `Motivo: ${data.MOTIVO_ARQUIVAMENTO || 'Arquivo'}`, 
-                    icone: 'fa-file-contract', 
-                    cor: 'gray' 
-                });
-            } else if (log.ACAO === 'INATIVAR' && log.TABELA_AFETADA === 'Servidor') {
-                timeline.push({ 
-                    tipo: 'Inativação de Servidor', 
-                    data_ordenacao: data.DATA_INATIVACAO || log.DATA_HORA, 
-                    periodo: `Encerrado em ${new Date(log.DATA_HORA).toLocaleDateString()}`, 
-                    descricao: `Matrícula ${data.MATRICULA}`, 
-                    detalhes: `Motivo: ${data.MOTIVO_INATIVACAO || 'Inativação'}`, 
-                    icone: 'fa-user-slash', 
-                    cor: 'red' 
-                });
-            }
-        });
+            auditoriaLogs.forEach((log: any) => {
+                const data = JSON.parse(log.VALOR_ANTIGO || '{}');
+                // Considerar válido se bater com CPF do registro excluído
+                if (data.CPF !== pessoa.CPF) return;
 
-        timeline.sort((a, b) => new Date(b.data_ordenacao).getTime() - new Date(a.data_ordenacao).getTime());
-        res.json({ pessoal: pessoa, tipoPerfil, vinculosAtivos, historico: timeline, atividadesEstudantis: { capacitacoes: [] } });
+                if (log.ACAO === 'ARQUIVAR' && log.TABELA_AFETADA === 'Contrato') {
+                    timeline.push({ 
+                        tipo: 'Contrato Encerrado', 
+                        data_ordenacao: data.DATA_ARQUIVAMENTO || log.DATA_HORA, 
+                        periodo: `Encerrado em ${new Date(log.DATA_HORA).getFullYear()}`, 
+                        descricao: `Contrato ${data.ID_CONTRATO}`, 
+                        detalhes: `Motivo: ${data.MOTIVO_ARQUIVAMENTO || 'Arquivo'}`, 
+                        icone: 'fa-file-contract', 
+                        cor: 'gray' 
+                    });
+                } else if (log.ACAO === 'INATIVAR' && log.TABELA_AFETADA === 'Servidor') {
+                    timeline.push({ 
+                        tipo: 'Inativação de Servidor', 
+                        data_ordenacao: data.DATA_INATIVACAO || log.DATA_HORA, 
+                        periodo: `Encerrado em ${new Date(log.DATA_HORA).toLocaleDateString()}`, 
+                        descricao: `Matrícula ${data.MATRICULA}`, 
+                        detalhes: `Motivo: ${data.MOTIVO_INATIVACAO || 'Inativação'}`, 
+                        icone: 'fa-user-slash', 
+                        cor: 'red' 
+                    });
+                }
+            });
+
+            timeline.sort((a, b) => new Date(b.data_ordenacao).getTime() - new Date(a.data_ordenacao).getTime());
+        }
+
+        auditLGPDAction(req.user?.usuario || 'Desconhecido', 'LEITURA', 'Dossier', identifier);
+
+        res.json({ pessoal: pessoa, tipoPerfil, vinculosAtivos, historico: timeline, notas: pessoa.notas || [], atividadesEstudantis: { capacitacoes: [] } });
     } catch (e: any) { res.status(500).json({ message: 'Erro Dossiê: ' + e.message }); }
+});
+
+app.post('/api/Pessoa/:id/nota', authenticateToken, async (req: any, res: any) => {
+    try {
+        const identifier = req.params.id;
+        const { OBS, GRAVISSIMO } = req.body;
+
+        let cpfToSave = null;
+        let idTempToSave = null;
+
+        let identifierClean = identifier;
+        let identifierMasked = identifier;
+
+        if (/^[\d.-]+$/.test(identifier)) {
+            identifierClean = identifier.replace(/\D/g, '');
+            if (identifierClean.length === 11) {
+                identifierMasked = identifierClean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+            }
+        }
+
+        const pessoa = await prisma.pessoa.findFirst({ where: { OR: [{ CPF: identifierClean }, { CPF: identifierMasked }] } });
+        if (pessoa) {
+            cpfToSave = pessoa.CPF;
+        } else {
+            return res.status(404).json({ message: 'Pessoa não encontrada' });
+        }
+
+        const newNota = await prisma.nota.create({
+            data: {
+                ID_NOTA: `NTX${Date.now()}`,
+                CPF: cpfToSave,
+                GRAVISSIMO: Boolean(GRAVISSIMO),
+                OBS: OBS
+            }
+        });
+
+        await auditAction(req.user?.usuario || 'Desconhecido', 'CRIAR', 'Nota', newNota.ID_NOTA, null, newNota);
+
+        res.json(newNota);
+    } catch (e: any) {
+        res.status(500).json({ message: 'Erro ao criar nota: ' + e.message });
+    }
+});
+
+app.get('/api/search/pessoas', authenticateToken, async (req: any, res: any) => {
+    const q = req.query.q as string;
+    if (!q || q.length < 3) return res.json([]);
+    try {
+        const orConditions: any[] = [{ NOME: { contains: q } }];
+        
+        const clean = q.replace(/\D/g, '');
+        if (clean.length > 0) {
+            orConditions.push({ CPF: { contains: clean } });
+            if (clean.length === 11) {
+                const masked = clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+                orConditions.push({ CPF: { contains: masked } });
+            }
+        }
+        
+        const pessoas = await prisma.pessoa.findMany({
+            where: {
+                OR: orConditions
+            },
+            take: 20
+        });
+
+        res.json(pessoas);
+    } catch (e: any) {
+        res.status(500).json({ message: 'Erro na busca.' });
+    }
 });
 
 const PORT = process.env.PORT || 3000;

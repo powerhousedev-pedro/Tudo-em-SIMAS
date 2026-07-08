@@ -16,6 +16,7 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
+    "types": ["vite/client"],
     "paths": {
       "@/*": ["./*"]
     }
@@ -25,13 +26,14 @@
     "App.tsx",
     "constants.ts",
     "types.ts",
-    "components",
-    "services",
-    "utils",
-    "hooks",
-    "lib",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "services/**/*.ts",
+    "utils/**/*.ts",
+    "hooks/**/*.ts",
+    "lib/**/*.ts",
     "declarations.d.ts"
   ],
-  "exclude": ["node_modules", "dist", "server", "src", "vite.config.ts"],
+  "exclude": ["node_modules", "dist", "server"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

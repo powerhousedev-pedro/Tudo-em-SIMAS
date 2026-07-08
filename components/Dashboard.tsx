@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, DROPDOWN_STRUCTURES, BOOLEAN_FIELD_CONFIG, PERMISSOES_POR_PAPEL } from '../constants';
+import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, DROPDOWN_OPTIONS, BOOLEAN_FIELD_CONFIG, PERMISSOES_POR_PAPEL } from '../constants';
 import { useDashboardData, useMutateEntity, useToggleVagaLock } from '../hooks/useSimasData';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -9,7 +9,9 @@ import { validation } from '../utils/validation';
 import { businessLogic } from '../utils/businessLogic';
 import { DossierModal } from './DossierModal';
 import { ExerciseSelectionModal } from './ExerciseSelectionModal';
+import { SelectionModal } from './SelectionModal';
 import { ConfirmModal } from './ConfirmModal';
+import { api } from '../services/api';
 
 interface DashboardProps {
   showToast: (type: 'success' | 'error' | 'info', message: string) => void;
@@ -29,10 +31,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
   // --- PERMISSIONS ---
   const canDelete = session.papel === 'COORDENAÇÃO' || session.isGerente;
+  const isUserReadOnly = session.papel === 'GACP';
 
   // --- COMPUTED VALUES (Role Filtering) ---
   const tabs = useMemo(() => {
-      const allKeys = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && k !== 'Atendimento');
+      const allKeys = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria');
       const userPermissions = PERMISSOES_POR_PAPEL[session.papel] || [];
       
       if (userPermissions.includes('TODAS')) {
@@ -62,8 +65,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const [dossierCpf, setDossierCpf] = useState<string | null>(null);
   const [exerciseVagaId, setExerciseVagaId] = useState<string | null>(null);
   
+  // CEP Search and Override State
+  const [cepDataToConfirm, setCepDataToConfirm] = useState<{ logradouro: string, bairro: string, cep?: string, complemento?: string, localidade?: string, uf?: string } | null>(null);
+  const [isSearchingCep, setIsSearchingCep] = useState(false);
+  const [cepSearchResults, setCepSearchResults] = useState<any[]>([]);
+  const [showCepSearchModal, setShowCepSearchModal] = useState(false);
+
   // Delete Confirmation State
   const [itemToDelete, setItemToDelete] = useState<{item: any, entity: string} | null>(null);
+  const [archiveReason, setArchiveReason] = useState<string>('');
+  const [moveVagaContratoItem, setMoveVagaContratoItem] = useState<any>(null);
+  const [availableVagas, setAvailableVagas] = useState<any[]>([]);
+  const [showVagaSelection, setShowVagaSelection] = useState(false);
+
+  const [estadosIbge, setEstadosIbge] = useState<any[]>([]);
+  const [cidadesIbge, setCidadesIbge] = useState<any[]>([]);
+  const [isLoadingCidades, setIsLoadingCidades] = useState(false);
+
+  useEffect(() => {
+      const loadEstados = async () => {
+          const data = await api.getEstados();
+          setEstadosIbge(data);
+      };
+      loadEstados();
+  }, []);
+
+  useEffect(() => {
+      const loadCidades = async () => {
+          if (formData.PAIS === 'Brasil' && formData.ESTADO) {
+              setIsLoadingCidades(true);
+              const data = await api.getCidades(formData.ESTADO);
+              setCidadesIbge(data);
+              setIsLoadingCidades(false);
+          } else {
+              setCidadesIbge([]);
+          }
+      };
+      loadCidades();
+  }, [formData.ESTADO, formData.PAIS]);
 
   const popoverRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
@@ -159,20 +198,136 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       setSelectedItems(prev => ({ ...prev, [activeTab]: pkValue }));
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    const config = ENTITY_CONFIGS[activeTab];
+
+    // Block editing PK if in edit mode (PKs should be immutable during update)
+    if (isEditing && name === config.pk) return;
+
     let processedValue = value;
 
     if (name === 'CPF') processedValue = validation.maskCPF(value);
     else if (name === 'TELEFONE') processedValue = validation.maskPhone(value);
     else if (name === 'SALARIO') processedValue = validation.maskCurrency(value);
+    else if (name === 'CEP') processedValue = validation.maskCEP(value);
 
     if (activeTab === 'Servidor' && name === 'VINCULO') {
          const prefix = getPrefixForVinculo(value);
          setFormData(prev => ({ ...prev, [name]: processedValue, 'PREFIXO_MATRICULA': prefix }));
+    } else if (name === 'PAIS') {
+         const isBrasil = processedValue === 'Brasil';
+         setFormData(prev => ({ 
+             ...prev, 
+             [name]: processedValue,
+             // Se mudar para exterior, limpa campos específicos do Brasil para não sujar o BD
+             ...(isBrasil ? {} : {
+                 ESTADO: '',
+                 CIDADE: '',
+                 CEP: '',
+                 BAIRRO: '',
+                 NUMERO: '',
+                 COMPLEMENTO: ''
+             })
+         }));
     } else {
          setFormData(prev => ({ ...prev, [name]: processedValue }));
     }
+
+    // Auto-fill CEP logic for Entities with Address
+    if (['Pessoa', 'Vinculacao', 'Cogestora'].includes(activeTab) && name === 'CEP') {
+        const cleanCep = processedValue.replace(/\D/g, '');
+        if (cleanCep.length === 8) {
+            try {
+                const data = await api.getCepData(cleanCep);
+                if (data && !data.erro) {
+                    setFormData(prev => ({
+                        ...prev,
+                        ENDERECO: data.logradouro || prev.ENDERECO,
+                        BAIRRO: data.bairro || prev.BAIRRO,
+                        CIDADE: data.localidade || prev.CIDADE,
+                        ESTADO: data.uf || prev.ESTADO,
+                        PAIS: prev.PAIS || 'Brasil'
+                    }));
+                    showToast('success', 'Endereço preenchido automaticamente.');
+                }
+            } catch (err) {
+                console.error("Erro ao buscar CEP", err);
+            }
+        }
+    }
+  };
+
+  const handleConfirmCepOverwrite = () => {
+      if (cepDataToConfirm) {
+          setFormData(prev => ({
+              ...prev,
+              CEP: cepDataToConfirm.cep ? validation.maskCEP(cepDataToConfirm.cep) : prev.CEP,
+              ENDERECO: cepDataToConfirm.logradouro || prev.ENDERECO,
+              BAIRRO: cepDataToConfirm.bairro || prev.BAIRRO,
+              CIDADE: cepDataToConfirm.localidade || prev.CIDADE,
+              ESTADO: cepDataToConfirm.uf || prev.ESTADO,
+              PAIS: prev.PAIS || 'Brasil'
+          }));
+          setCepDataToConfirm(null);
+          setCepSearchResults([]);
+          showToast('success', 'Endereço atualizado com sucesso.');
+      }
+  };
+
+  const handleCancelCepOverwrite = () => {
+      if (cepDataToConfirm) {
+          setFormData(prev => ({
+              ...prev,
+              ENDERECO: prev.ENDERECO || cepDataToConfirm.logradouro || '',
+              BAIRRO: prev.BAIRRO || cepDataToConfirm.bairro || '',
+              CEP: prev.CEP || (cepDataToConfirm.cep ? validation.maskCEP(cepDataToConfirm.cep) : '')
+          }));
+          setCepDataToConfirm(null);
+          setCepSearchResults([]);
+          showToast('success', 'Apenas os campos em branco foram preenchidos.');
+      }
+  };
+
+  const handleSearchCepByLogradouro = async () => {
+      if (!formData.ENDERECO || (formData.ENDERECO as string).length < 3) {
+          showToast('error', 'Digite pelo menos 3 caracteres do endereço para buscar.');
+          return;
+      }
+      setIsSearchingCep(true);
+      try {
+          const results = await api.searchCepByLogradouro(formData.ENDERECO as string);
+          if (results && results.length > 0) {
+              setCepSearchResults(results);
+              setShowCepSearchModal(true);
+          } else {
+              showToast('error', 'Nenhum CEP encontrado para este endereço.');
+          }
+      } catch (e: any) {
+          showToast('error', 'Erro ao buscar CEP. Tente novamente mais tarde.');
+      } finally {
+          setIsSearchingCep(false);
+      }
+  };
+
+  const handleSelectCepResult = (result: any) => {
+      setShowCepSearchModal(false);
+      const hasExistingData = formData.CEP || formData.BAIRRO || (formData.ENDERECO && formData.ENDERECO !== result.logradouro);
+      if (hasExistingData) {
+          setCepDataToConfirm({ logradouro: result.logradouro, bairro: result.bairro, cep: result.cep, complemento: result.complemento, localidade: result.localidade, uf: result.uf });
+      } else {
+          setFormData(prev => ({
+              ...prev,
+              CEP: validation.maskCEP(result.cep),
+              ENDERECO: result.logradouro,
+              BAIRRO: result.bairro,
+              CIDADE: result.localidade,
+              ESTADO: result.uf,
+              PAIS: prev.PAIS || 'Brasil'
+          }));
+          setCepSearchResults([]);
+          showToast('success', 'Endereço selecionado e CEP preenchido com sucesso!');
+      }
   };
 
   const handleToggleChange = (field: string, checked: boolean) => {
@@ -187,8 +342,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     let payload = { ...formData };
 
     if (activeTab === 'Pessoa') {
-        if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
-        payload.CPF = payload.CPF.replace(/\D/g, ""); 
+        if (payload.CPF) {
+            if (!validation.validateCPF(payload.CPF)) return showToast('error', 'CPF Inválido.'); 
+            payload.CPF = payload.CPF.replace(/\D/g, ""); 
+        } else if (activeTab === 'Pessoa') {
+            return showToast('error', 'CPF é obrigatório para Pessoa.');
+        }
+
+        if (payload.CEP) payload.CEP = payload.CEP.replace(/\D/g, "");
         const normalizedPhone = validation.normalizePhoneForSave(payload.TELEFONE);
         if (payload.TELEFONE && !normalizedPhone) return showToast('error', 'Telefone inválido.');
         payload.TELEFONE = normalizedPhone || "";
@@ -196,13 +357,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
         if (payload.NOME_SOCIAL) payload.NOME_SOCIAL = validation.capitalizeName(payload.NOME_SOCIAL);
     }
 
-    if (activeTab === 'Cargo' && payload.SALARIO) {
+    if (activeTab === 'PostoTrabalho' && payload.SALARIO) {
         payload.SALARIO = payload.SALARIO.replace(/[R$\.\s]/g, '').replace(',', '.');
-    }
-
-    if (activeTab === 'Atendimento') {
-        const metadata = businessLogic.calculateAtendimentoMetadata(payload);
-        payload = { ...payload, ...metadata };
     }
 
     try {
@@ -213,7 +369,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       }
 
       if (isEditing) {
-          await updateMutation.mutateAsync({ pkValue: payload[config.pk], data: payload });
+          const pkValue = selectedItems[activeTab] || payload[config.pk];
+          await updateMutation.mutateAsync({ pkValue, data: payload });
           showToast('success', 'Atualizado!');
       } else {
           await createMutation.mutateAsync(payload);
@@ -237,6 +394,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
   const handleDeleteRequest = (e: React.MouseEvent, item: any, entityName: string) => {
     e.stopPropagation();
     setItemToDelete({ item, entity: entityName });
+    setArchiveReason('');
   };
 
   const handleConfirmDelete = async () => {
@@ -246,12 +404,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const isArchivable = ARCHIVABLE_ENTITIES.includes(entity);
     
     try {
-      await genericRemove.mutateAsync(item[config.pk]);
-      showToast('info', isArchivable ? 'Registro arquivado com sucesso.' : 'Registro excluído.');
-    } catch(err) { 
-      showToast('error', 'Erro ao processar solicitação.'); 
+      if (entity === 'Contrato') {
+          if (!archiveReason.trim()) return showToast('error', 'Motivo é obrigatório para encerrar contrato.');
+          await api.archiveContrato({ CPF: item.CPF }, archiveReason);
+          showToast('info', 'Contrato encerrado e arquivado com sucesso.');
+          queryClient.invalidateQueries({ queryKey: ['entity', 'Contrato'] });
+      } else if (entity === 'Servidor') {
+          if (!archiveReason.trim()) return showToast('error', 'Motivo é obrigatório para inativar servidor.');
+          await api.inactivateServidor(item.MATRICULA, archiveReason);
+          showToast('info', 'Servidor inativado com sucesso.');
+          queryClient.invalidateQueries({ queryKey: ['entity', 'Servidor'] });
+      } else {
+          await genericRemove.mutateAsync(item[config.pk]);
+          showToast('info', isArchivable ? 'Registro arquivado com sucesso.' : 'Registro excluído.');
+      }
+    } catch(err: any) { 
+      showToast('error', err.message || 'Erro ao processar solicitação.'); 
     } finally {
       setItemToDelete(null);
+      setArchiveReason('');
     }
   };
 
@@ -264,26 +435,80 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
       } catch (err: any) { showToast('error', err.message); }
   };
 
+  const handleOpenMoveVaga = async (e: React.MouseEvent, item: any) => {
+      e.stopPropagation();
+      setMoveVagaContratoItem(item);
+      try {
+          const vagas = await api.fetchEntity('VAGA');
+          const pessoaEscolaridade = item.pessoa?.ESCOLARIDADE;
+          const abertas = vagas.filter((v: any) => {
+              if (v.STATUS_VAGA !== 'Aberta' || v.BLOQUEADA) return false;
+              // Check Escolaridade
+              const vagaEscolaridade = v.postoTrabalho?.ESCOLARIDADE;
+              const check = businessLogic.checkEscolaridade(pessoaEscolaridade, vagaEscolaridade);
+              return check.condiz;
+          });
+          setAvailableVagas(abertas);
+          setShowVagaSelection(true);
+      } catch (err) {
+          showToast('error', 'Erro ao carregar vagas abertas.');
+      }
+  };
+
+  const handleConfirmMoveVaga = async (vagaSelecionada: any) => {
+      if (!moveVagaContratoItem) return;
+      try {
+          // Motivo is fixed here as it's an automated move action.
+          await api.moverContrato({ CPF: moveVagaContratoItem.CPF }, vagaSelecionada.ID_VAGA, 'Movimentação automática de vaga pelo painel');
+          showToast('success', 'Contrato movido para nova vaga com sucesso!');
+          queryClient.invalidateQueries({ queryKey: ['entity', 'Contrato'] });
+          queryClient.invalidateQueries({ queryKey: ['entity', 'Vaga'] });
+      } catch (e: any) {
+          showToast('error', e.message || 'Erro ao mover contrato.');
+      } finally {
+          setShowVagaSelection(false);
+          setMoveVagaContratoItem(null);
+      }
+  };
+
   // --- RENDER HELPERS ---
   const filteredTabs = useMemo(() => tabs.filter(tab => ENTITY_CONFIGS[tab].title.toLowerCase().includes(dropdownSearch.toLowerCase())), [tabs, dropdownSearch]);
   const getPrefixForVinculo = (vinculo: string) => ({ 'Extra Quadro': '60', 'Aposentado': '70', 'CLT': '29', 'Prestador de Serviços': '39' }[vinculo] || '10');
-  const getFilteredOptions = (field: string) => field === 'REMETENTE' && session.papel === 'GPRGP' ? DROPDOWN_STRUCTURES['REMETENTE'].filter((o: string) => o !== 'Prefeitura') : (DROPDOWN_OPTIONS[field] as string[]) || [];
+  const getFilteredOptions = (field: string) => (DROPDOWN_OPTIONS[field] as string[]) || [];
 
   const renderInput = (field: string) => {
     const config = ENTITY_CONFIGS[activeTab];
     const isPK = field === config.pk;
     // CRITICAL FIX: Only treat as FK if it maps to a different table than the current one
-    const isFK = FK_MAPPING[field] !== undefined && FK_MAPPING[field] !== activeTab;
+    let isFK = FK_MAPPING[field] !== undefined && FK_MAPPING[field] !== activeTab;
+
     const isCalculated = field === 'PREFIXO_MATRICULA';
 
     if ((isPK && !isEditing && !config.manualPk) || 
-        (activeTab === 'Cargo' && field === 'SALARIO' && session.papel === 'GGT') ||
-        (activeTab === 'Protocolo' && ((field === 'MATRICULA' && session.papel === 'GPRGP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
+        (activeTab === 'PostoTrabalho' && field === 'SALARIO' && session.papel === 'GGT') ||
+        (activeTab === 'Protocolo' && ((field === 'MATRICULA' && session.papel === 'GPMP') || (field === 'ID_CONTRATO' && session.papel === 'GGT')))) {
         return null;
     }
 
-    if (BOOLEAN_FIELD_CONFIG[field]) {
-        const boolConfig = BOOLEAN_FIELD_CONFIG[field];
+    // --- REGRAS DE VISIBILIDADE PROGRESSIVA (ENDEREÇO) ---
+    const currentPais = String(formData.PAIS || '').trim();
+    const isBrasil = !currentPais || currentPais === 'Brasil';
+    const addressFields = ['CEP', 'ENDERECO', 'NUMERO', 'COMPLEMENTO', 'BAIRRO'];
+
+    // PAIS sempre aparece (se estiver no modelo)
+    if (field === 'ESTADO') {
+        if (!isBrasil || !currentPais) return null;
+    }
+    if (field === 'CIDADE') {
+        if (!isBrasil || !formData.ESTADO) return null;
+    }
+    if (addressFields.includes(field)) {
+        if (isBrasil && !formData.CIDADE) return null;
+        if (!isBrasil && field !== 'ENDERECO') return null;
+        if (!isBrasil && field === 'ENDERECO' && !currentPais) return null;
+    }
+
+    if (BOOLEAN_FIELD_CONFIG[field]) {        const boolConfig = BOOLEAN_FIELD_CONFIG[field];
         let isChecked = false;
         const currentVal = formData[field];
         if (boolConfig.type === 'boolean') isChecked = !!currentVal;
@@ -351,6 +576,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const isReadOnly = (isPK && isEditing) || isCalculated || isFK;
     
     const isDateField = /DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE/i.test(field);
+    const isTextArea = /ENDERECO|DESCRICAO|JUSTIFICATIVA/i.test(field);
     const type = isDateField ? 'date' : 'text';
 
     // Placeholder logic: 
@@ -359,20 +585,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
     const placeholderText = isFK ? "Selecione na lista..." : "Digite aqui...";
 
     return (
-      <div key={field} className="relative group">
+      <div key={field} className={`${isTextArea ? 'col-span-full' : ''} relative group`}>
         <label className="block text-[10px] font-medium text-simas-dark/70 uppercase tracking-widest mb-2 ml-1">{field.replace(/_/g, ' ')}</label>
         <div className="relative">
             {isFK && <div className="absolute left-4 top-1/2 -translate-y-1/2 text-simas-cyan"><i className="fas fa-link text-xs"></i></div>}
-            <input 
-                type={type} 
-                name={field} 
-                value={formData[field] || ''} 
-                onChange={handleInputChange} 
-                className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} 
-                readOnly={isReadOnly} 
-                placeholder={placeholderText} 
-                maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)} 
-            />
+            {isTextArea ? (
+                <div className="relative">
+                    <textarea
+                        name={field}
+                        value={formData[field] || ''}
+                        onChange={handleInputChange}
+                        className={`${inputCommonClass} min-h-[100px] resize-none flex-1 ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''} ${(activeTab === 'Pessoa' && field === 'ENDERECO') ? 'pr-12' : ''}`}
+                        readOnly={isReadOnly}
+                        placeholder={placeholderText}
+                    />
+                    {(activeTab === 'Pessoa') && field === 'ENDERECO' && (
+                        <button
+                            type="button"
+                            onClick={handleSearchCepByLogradouro}
+                            disabled={isSearchingCep}
+                            className="absolute right-3 top-3 w-8 h-8 rounded-full bg-simas-cyan/10 text-simas-cyan hover:bg-simas-cyan hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-sm"
+                            title="Buscar CEP por este Endereço"
+                        >
+                            {isSearchingCep ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-search text-xs"></i>}
+                        </button>
+                    )}
+                </div>
+            ) : (isBrasil && field === 'ESTADO') ? (
+                <div className="relative">
+                    <select name={field} value={formData[field] || ''} onChange={(e) => {
+                        handleInputChange(e);
+                        // Limpa a cidade ao mudar o estado
+                        handleInputChange({ target: { name: 'CIDADE', value: '' } } as any);
+                    }} className={`${inputCommonClass} appearance-none cursor-pointer`}>
+                        <option value="">Selecione...</option>
+                        {estadosIbge.map(estado => <option key={estado.sigla} value={estado.sigla}>{estado.sigla}</option>)}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><i className="fas fa-chevron-down text-xs"></i></div>
+                </div>
+            ) : (isBrasil && field === 'CIDADE') ? (
+                <div className="relative">
+                    <select disabled={isLoadingCidades || !formData.ESTADO} name={field} value={formData[field] || ''} onChange={handleInputChange} className={`${inputCommonClass} appearance-none cursor-pointer disabled:opacity-50`}>
+                        <option value="">{isLoadingCidades ? 'Carregando...' : 'Selecione...'}</option>
+                        {cidadesIbge.map(cidade => <option key={cidade.id} value={cidade.nome}>{cidade.nome}</option>)}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"><i className="fas fa-chevron-down text-xs"></i></div>
+                </div>
+            ) : (
+                <input 
+                    type={type} 
+                    name={field} 
+                    value={formData[field] || ''} 
+                    onChange={handleInputChange} 
+                    className={`${inputCommonClass} ${isFK ? 'pl-10' : ''} ${isReadOnly ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`} 
+                    readOnly={isReadOnly} 
+                    placeholder={placeholderText} 
+                    maxLength={field === 'CPF' ? 14 : (field === 'TELEFONE' ? 15 : undefined)} 
+                />
+            )}
         </div>
       </div>
     );
@@ -421,24 +691,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
 
       {/* --- MAIN WORKSPACE --- */}
       <div className="flex-1 flex gap-8 px-8 pb-8 overflow-hidden min-h-0 z-10">
-        <div className="flex-none w-[400px] flex flex-col bg-white rounded-[2rem] shadow-soft overflow-hidden z-20 border border-white/50">
-          <div className="p-7 border-b border-gray-50 bg-white">
-            {/* Título de Seção: Cera Pro Black, Uppercase */}
-            <h2 className="text-xl font-black text-simas-dark flex items-center gap-3 tracking-brand uppercase">
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${isEditing ? 'bg-simas-cyan/10 text-simas-cyan' : 'bg-simas-blue/10 text-simas-blue'}`}><i className={`fas ${isEditing ? 'fa-pen' : 'fa-plus'} text-sm`}></i></div>
-                {isEditing ? 'Editar Registro' : 'Novo Registro'}
-            </h2>
-          </div>
-          <div className="flex-1 overflow-y-auto p-7 custom-scrollbar bg-white">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {DATA_MODEL[activeTab]?.map(field => renderInput(field))}
-              <div className="pt-6 flex gap-3">
-                {isEditing && <Button type="button" variant="ghost" onClick={() => { setIsEditing(false); }} className="flex-1">Cancelar</Button>}
-                <Button type="submit" isLoading={createMutation.isPending || updateMutation.isPending} className="flex-[2] tracking-widest">{isEditing ? 'Salvar' : 'Criar'}</Button>
+        {!isUserReadOnly && (
+            <div className="flex-none w-[400px] flex flex-col bg-white rounded-[2rem] shadow-soft overflow-hidden z-20 border border-white/50">
+              <div className="p-7 border-b border-gray-50 bg-white">
+                {/* Título de Seção: Cera Pro Black, Uppercase */}
+                <h2 className="text-xl font-black text-simas-dark flex items-center gap-3 tracking-brand uppercase">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center ${isEditing ? 'bg-simas-cyan/10 text-simas-cyan' : 'bg-simas-blue/10 text-simas-blue'}`}><i className={`fas ${isEditing ? 'fa-pen' : 'fa-plus'} text-sm`}></i></div>
+                    {isEditing ? 'Editar Registro' : 'Novo Registro'}
+                </h2>
               </div>
-            </form>
-          </div>
-        </div>
+              <div className="flex-1 overflow-y-auto p-7 custom-scrollbar bg-white">
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {DATA_MODEL[activeTab]?.map(field => renderInput(field))}
+                  <div className="pt-6 flex gap-3">
+                    {isEditing && <Button type="button" variant="ghost" onClick={() => { setIsEditing(false); }} className="flex-1">Cancelar</Button>}
+                    <Button type="submit" isLoading={createMutation.isPending || updateMutation.isPending} className="flex-[2] tracking-widest">{isEditing ? 'Salvar' : 'Criar'}</Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+        )}
 
         <div className="flex-1 overflow-x-auto flex gap-6 pb-2 items-stretch px-2 scrollbar-thin scrollbar-thumb-simas-blue scrollbar-track-transparent snap-x">
            {columnsToRender.map((entity, index) => {
@@ -533,7 +805,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        
                        // Lógica de Permissão de Exclusão/Arquivamento
                        const isArchivable = ARCHIVABLE_ENTITIES.includes(entity);
-                       const canAct = canDelete || isArchivable;
+                       const canAct = (canDelete || isArchivable) && entity !== 'Cogestora';
 
                        let exerciseData = undefined;
                        if (entity === 'Vaga') {
@@ -541,19 +813,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                        }
 
                        return (
-                         <Card 
-                            key={pkValue} 
-                            title={display.title} 
-                            subtitle={display.subtitle} 
-                            details={display.details} 
-                            status={display.status} 
-                            selected={isSelected} 
-                            onSelect={() => handleCardSelect(entity, item)} 
-                            onEdit={entity === activeTab ? () => handleEdit(item) : undefined}
-                            exerciseData={exerciseData}
-                            actions={
+                                                      <Card 
+                                                         key={pkValue} 
+                                                         title={display.title} 
+                                                         subtitle={display.subtitle} 
+                                                         details={display.details} 
+                                                         status={display.status} 
+                                                         selected={isSelected} 
+                                                         hasGraveIssue={display.hasGraveIssue}
+                                                         onSelect={() => handleCardSelect(entity, item)} 
+                                                         onEdit={entity === activeTab ? () => handleEdit(item) : undefined}
+                                                         exerciseData={exerciseData}                            actions={
                              <>
-                               {entity === 'Pessoa' && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}
+                                                                                                                               {(entity === 'Pessoa' || entity === 'Contrato' || entity === 'Servidor') && <Button variant="icon" icon="fas fa-id-card" title="Dossiê" onClick={(e) => {e.stopPropagation(); setDossierCpf(item.CPF);}} />}                               {entity === 'Contrato' && <Button variant="icon" icon="fas fa-exchange-alt" title="Mover para outra Vaga" className="text-blue-400 hover:text-blue-600 hover:bg-blue-50" onClick={(e) => handleOpenMoveVaga(e, item)} />}
                                {entity === 'Vaga' && <Button variant="icon" icon={item.BLOQUEADA ? "fas fa-lock" : "fas fa-lock-open"} className={`${item.BLOQUEADA ? "text-red-500" : ""} ${isOcupada ? "opacity-30 cursor-not-allowed text-gray-400" : ""}`} disabled={isOcupada} onClick={(e) => handleLockVaga(e, pkValue, isOcupada)} />}
                                
                                {entity !== 'Auditoria' && canAct && (
@@ -561,7 +833,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
                                         variant="icon" 
                                         icon={isArchivable ? "fas fa-file-import" : "fas fa-trash"} 
                                         className={isArchivable ? "text-orange-400 hover:text-orange-600 hover:bg-orange-50" : "text-red-300 hover:text-red-500 hover:bg-red-50"} 
-                                        title={isArchivable ? "Arquivar" : "Excluir"}
+                                        title={entity === 'Contrato' ? 'Encerrar Contrato' : entity === 'Servidor' ? 'Inativar Servidor' : isArchivable ? "Arquivar" : "Excluir"}
                                         onClick={(e) => handleDeleteRequest(e, item, entity)} 
                                    />
                                )}
@@ -589,6 +861,78 @@ export const Dashboard: React.FC<DashboardProps> = ({ showToast }) => {
             onConfirm={handleConfirmDelete} 
             onCancel={() => setItemToDelete(null)} 
             isLoading={deleteMutation.isPending} 
+          >
+              {(itemToDelete.entity === 'Contrato' || itemToDelete.entity === 'Servidor') && (
+                  <div className="mt-4">
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Motivo do Arquivamento/Inativação <span className="text-red-500">*</span></label>
+                      <input 
+                          type="text" 
+                          placeholder="Ex: Fim do contrato, Rescisão, etc."
+                          value={archiveReason}
+                          onChange={(e) => setArchiveReason(e.target.value)}
+                          className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-simas-cyan focus:bg-white transition-colors"
+                          required
+                      />
+                  </div>
+              )}
+          </ConfirmModal>
+      )}
+
+      {/* CEP Confirmation Modal */}
+      {cepDataToConfirm && (
+          <ConfirmModal
+              title="Atualizar Endereço"
+              message={`Deseja sobrescrever os dados de endereço existentes com os novos dados?\n\n${cepDataToConfirm.cep ? `CEP: ${cepDataToConfirm.cep}\n` : ''}Logradouro: ${cepDataToConfirm.logradouro}\nBairro: ${cepDataToConfirm.bairro}\n\nSe você clicar em "Cancelar", apenas os campos que estiverem em branco serão preenchidos.`}
+              onConfirm={handleConfirmCepOverwrite}
+              onCancel={handleCancelCepOverwrite}
+          />
+      )}
+
+      {/* Modal: Resultados de Busca de CEP */}
+      {showCepSearchModal && (
+          <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-slide-up flex flex-col max-h-[80vh]">
+                  <header className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                      <h3 className="font-bold text-simas-dark uppercase tracking-tight">Selecione o Endereço</h3>
+                      <button type="button" onClick={() => setShowCepSearchModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><i className="fas fa-times"></i></button>
+                  </header>
+                  <div className="overflow-y-auto p-4 space-y-2">
+                      {cepSearchResults.map((result: any, index: number) => (
+                          <button
+                              type="button"
+                              key={index}
+                              onClick={() => handleSelectCepResult(result)}
+                              className="w-full p-4 border border-gray-200 rounded-xl hover:border-simas-cyan hover:bg-simas-cyan/5 transition-all text-left flex flex-col gap-1 outline-none focus:ring-2 focus:ring-simas-cyan"
+                          >
+                              <span className="font-bold text-simas-dark text-sm">{result.logradouro}</span>
+                              {result.complemento && <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded w-fit">Ref: {result.complemento}</span>}
+                              <span className="text-xs text-gray-500">
+                                  Bairro: {result.bairro}
+                                  {result.localidade && ` - ${result.localidade}`}
+                                  {result.uf && `/${result.uf}`}
+                              </span>
+                              <span className="text-xs font-mono text-simas-cyan mt-1 block">CEP: {validation.maskCEP(result.cep)}</span>
+                          </button>
+                      ))}
+                  </div>
+                  <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0 flex">
+                      <Button type="button" variant="secondary" className="flex-1 py-3" onClick={() => setShowCepSearchModal(false)}>Cancelar</Button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Vaga Selection Modal for Mover Contrato */}
+      {showVagaSelection && (
+          <SelectionModal
+              entity="Vaga"
+              items={availableVagas}
+              title="Selecione a Nova Vaga"
+              onSelect={handleConfirmMoveVaga}
+              onClose={() => {
+                  setShowVagaSelection(false);
+                  setMoveVagaContratoItem(null);
+              }}
           />
       )}
     </div>

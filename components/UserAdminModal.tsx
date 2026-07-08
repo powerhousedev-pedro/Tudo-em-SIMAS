@@ -186,7 +186,8 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                       <option value="" disabled>Selecione o nível...</option>
                       <option value="COORDENAÇÃO">COORDENAÇÃO</option>
                       <option value="GGT">GGT</option>
-                      <option value="GPRGP">GPRGP</option>
+                      <option value="GPMP">GPMP</option>
+                      <option value="GACP">GACP</option>
                       <option value="GDEP">GDEP</option>
                     </select>
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
@@ -273,27 +274,6 @@ export const UserAdminModal: React.FC<UserAdminModalProps> = ({ onClose, session
                                     </div>
                                     
                                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 backdrop-blur-sm p-1.5 rounded-xl shadow-sm border border-gray-100">
-                                        {isSuperAdmin && (
-                                            <button 
-                                                onClick={async () => {
-                                                    try {
-                                                        const res = await api.toggleUserSignatureLock(user.usuario);
-                                                        if (res.success) {
-                                                            showToast('success', res.message);
-                                                            loadUsers();
-                                                        } else {
-                                                            showToast('error', res.message || 'Erro ao alterar assinatura');
-                                                        }
-                                                    } catch (e: any) {
-                                                        showToast('error', 'Erro ao alterar: ' + e.message);
-                                                    }
-                                                }}
-                                                className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${user.podeAssinar ? 'text-gray-400 hover:text-red-500 hover:bg-red-50' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'}`}
-                                                title={user.podeAssinar ? "Bloquear Assinatura" : "Liberar Assinatura"}
-                                            >
-                                                <i className={`fas ${user.podeAssinar ? 'fa-lock' : 'fa-lock-open'} text-xs`}></i>
-                                            </button>
-                                        )}
                                         {canEdit && (
                                             <button 
                                                 onClick={() => setResetUser({ id: user.id, usuario: user.usuario })}

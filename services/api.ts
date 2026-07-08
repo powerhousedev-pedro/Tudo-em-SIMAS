@@ -9,7 +9,7 @@ const TOKEN_KEY = 'simas_auth_token';
 const ENTITY_MAP: Record<string, string> = {
     'LOTAÇÕES': 'Lotacao', 'LOTACAO': 'Lotacao',
     'FUNÇÃO': 'Funcao', 'FUNCAO': 'Funcao',
-    'CARGOS': 'Cargo', 'CARGO': 'Cargo',
+    'POSTOS': 'PostoTrabalho', 'POSTO': 'PostoTrabalho', 'POSTO_TRABALHO': 'PostoTrabalho',
     'VAGAS': 'Vaga', 'VAGA': 'Vaga',
     'EXERCÍCIO': 'Exercicio', 'EXERCICIO': 'Exercicio',
     'CAPACITAÇÃO': 'Capacitacao', 'CAPACITACAO': 'Capacitacao',
@@ -24,9 +24,9 @@ const ENTITY_MAP: Record<string, string> = {
     'CONTRATO_HISTORICO': 'ContratoHistorico',
     'PESSOA': 'Pessoa', 'SERVIDOR': 'Servidor', 'CONTRATO': 'Contrato',
     'ALOCACAO': 'Alocacao', 'PROTOCOLO': 'Protocolo', 'CHAMADA': 'Chamada',
-    'ATENDIMENTO': 'Atendimento', 'ENCONTRO': 'Encontro', 'AUDITORIA': 'Auditoria',
-    'USUARIO': 'Usuario', 'RESERVA': 'Reserva', 'PESQUISA': 'Pesquisa',
-    'RELATORIO_SALVO': 'RelatorioSalvo'
+    'ENCONTRO': 'Encontro', 'AUDITORIA': 'Auditoria',
+    'AUDITORIALGPD': 'AuditoriaLGPD', 'USUARIO': 'Usuario', 'PESQUISA': 'Pesquisa',
+    'RELATORIO_SALVO': 'RelatorioSalvo', 'SUBSTITUTO': 'Substituto'
 };
 
 // HELPERS DE ENDPOINT
@@ -128,13 +128,17 @@ async function request(endpoint: string, method: string = 'GET', body?: any, sig
 export const api = {
   login: async (usuario: string, senha: string) => request('/auth/login', 'POST', { usuario, senha }),
 
-  fetchEntity: async (entityName: string, searchTerm = '', page = 1, limit = 0): Promise<any[]> => {
+  fetchEntity: async (entityName: string, searchTerm = '', page = 1, limit = 0, extraParams: Record<string, string> = {}): Promise<any[]> => {
     const baseEndpoint = getEndpoint(entityName);
     // Prep for server-side pagination, currently query is just search
     const queryParams = new URLSearchParams();
     if (searchTerm) queryParams.append('search', searchTerm);
     if (page > 1) queryParams.append('page', page.toString());
     if (limit > 0) queryParams.append('limit', limit.toString());
+    
+    Object.entries(extraParams).forEach(([key, value]) => {
+        queryParams.append(key, value);
+    });
 
     const queryString = queryParams.toString();
     const fullUrl = baseEndpoint + (queryString ? `?${queryString}` : '');
@@ -187,7 +191,23 @@ export const api = {
       });
   },
 
+  archiveContrato: async (identifier: { CPF?: string }, motivo: string) => {
+      return request('/Contrato/arquivar', 'POST', { ...identifier, MOTIVO: motivo });
+  },
+
+  moverContrato: async (identifier: { CPF?: string }, novaVagaId: string, motivo: string) => {
+      return request('/Contrato/mover', 'POST', { ...identifier, NOVA_VAGA_ID: novaVagaId, MOTIVO: motivo });
+  },
+
+  inactivateServidor: async (matricula: string, motivo: string) => {
+      return request('/Servidor/inativar', 'POST', { MATRICULA: matricula, MOTIVO: motivo });
+  },
+
   getDossiePessoal: async (cpf: string): Promise<DossierData> => request(`/Pessoa/${cpf}/dossier`),
+
+  addNotaDossie: async (cpf: string, data: { OBS: string, GRAVISSIMO: boolean }): Promise<any> => {
+      return request(`/Pessoa/${cpf}/nota`, 'POST', data);
+  },
 
   restoreAuditLog: async (idLog: string) => {
     return request(`/Auditoria/${idLog}/restore`, 'POST');
@@ -209,65 +229,19 @@ export const api = {
       return request('/alerts');
   },
 
-  getActionContext: async (idAtendimento: string): Promise<ActionContext> => {
-    const atendimentos = await api.fetchEntity('Atendimento'); 
-    const atd = atendimentos.find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
-    
-    if (!atd) throw new Error("Atendimento não encontrado");
-
-    const lookups: any = {};
-    const fields: any = {};
-    
-    const acao = `${atd.TIPO_DE_ACAO}:${atd.ENTIDADE_ALVO}`;
-    const promises: Promise<any>[] = [];
-
-    // Busca dependências enriquecidas diretamente
-    // React Query will eventually handle these dependencies via useQuery prefetching
-    if (acao.includes('Contrato')) {
-        promises.push(api.fetchEntity('Vaga').then(d => lookups['Vaga'] = d));
-        promises.push(api.fetchEntity('Funcao').then(d => lookups['Funcao'] = d));
-    } else if (acao.includes('Alocacao')) {
-        promises.push(api.fetchEntity('Lotacao').then(d => lookups['Lotacao'] = d));
-        promises.push(api.fetchEntity('Funcao').then(d => lookups['Funcao'] = d));
-    } else if (acao.includes('Nomeacao')) {
-        promises.push(api.fetchEntity('CargoComissionado').then(d => lookups['CargoComissionado'] = d));
-    }
-    
-    await Promise.all(promises);
-
-    return { atendimento: atd, lookups, fields };
-  },
-
-  executeAction: async (idAtendimento: string, data: any) => {
-      const atendimentos = await api.fetchEntity('Atendimento');
-      const atd = atendimentos.find((a: any) => a.ID_ATENDIMENTO === idAtendimento);
-      
-      if (!atd) throw new Error("Atendimento não encontrado");
-
-      const targetEntity = getDbName(atd.ENTIDADE_ALVO);
-
-      if (atd.TIPO_DE_ACAO === 'INATIVAR' && targetEntity === 'Servidor') {
-          await request('/Servidor/inativar', 'POST', data);
-      } else if (atd.TIPO_DE_ACAO === 'EDITAR' && targetEntity === 'Contrato') {
-          await request('/Contrato/arquivar', 'POST', { CPF: data.CPF, MOTIVO: atd.TIPO_PEDIDO });
-          if (!data.ID_CONTRATO) data.ID_CONTRATO = validation.generateLegacyId('CTT');
-          await api.createRecord('Contrato', data);
-      } else if (atd.TIPO_DE_ACAO === 'CRIAR') {
-          await api.createRecord(atd.ENTIDADE_ALVO, data);
-      } else {
-          if (atd.TIPO_DE_ACAO === 'EDITAR' && data.ID_ALOCACAO) {
-               await api.createRecord('Alocacao', data); 
-          } else {
-               const pkKey = targetEntity === 'Contrato' ? 'ID_CONTRATO' : `ID_${atd.ENTIDADE_ALVO.toUpperCase()}`;
-               if (data[pkKey]) await api.updateRecord(atd.ENTIDADE_ALVO, pkKey, data[pkKey], data);
-          }
-      }
-      
-      await api.updateRecord('Atendimento', 'ID_ATENDIMENTO', idAtendimento, { STATUS_AGENDAMENTO: 'Concluído' });
-      return { success: true, message: 'Ação executada com sucesso.' };
-  },
-  
   getReportData: async (reportName: string): Promise<ReportData> => request(`/reports/${reportName}`),
+
+  getVagaTimeline: async (vagaId: string): Promise<any> => {
+      return request(`/Vaga/${vagaId}/timeline`);
+  },
+
+  getGpmpCockpit: async (): Promise<any> => {
+      return request('/gpmp/cockpit');
+  },
+
+  searchPessoas: async (query: string): Promise<any[]> => {
+      return request(`/search/pessoas?q=${encodeURIComponent(query)}`);
+  },
 
   // Novo método para o Gerador Personalizado com Joins
   generateCustomReport: async (primaryEntity: string, joins: string[]) => {
@@ -277,19 +251,6 @@ export const api = {
   // Novo método para Autocomplete de valores únicos
   getUniqueValues: async (entity: string, field: string) => {
       return request(`/${entity}/unique/${field}`);
-  },
-
-  // --- ASSINATURA DO USUÁRIO ---
-  getUserSignature: async () => {
-      return request('/user/signature');
-  },
-
-  saveUserSignature: async (signature: string) => {
-      return request('/user/signature', 'POST', { signature });
-  },
-
-  toggleUserSignatureLock: async (usuarioId: string) => {
-      return request(`/Usuario/${usuarioId}/toggle-signature-lock`, 'POST');
   },
 
   // --- RELATÓRIOS SALVOS (Meus Relatórios) ---
@@ -304,5 +265,71 @@ export const api = {
 
   deleteSavedReport: async (id: string) => {
       return request(`/reports/saved/${id}`, 'DELETE');
+  },
+
+  // --- INTEGRAÇÕES EXTERNAS ---
+  getCepData: async (cep: string) => {
+      return request(`/utils/cep/${cep}`);
+  },
+
+  searchCepByLogradouro: async (logradouro: string) => {
+      return request(`/utils/cep/busca/${encodeURIComponent(logradouro)}`);
+  },
+
+  getEstados: async () => {
+      try {
+          const response = await fetch('https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome');
+          return await response.json();
+      } catch (e) {
+          console.error("Erro ao buscar estados do IBGE", e);
+          return [];
+      }
+  },
+
+  getCidades: async (uf: string) => {
+      try {
+          const response = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
+          return await response.json();
+      } catch (e) {
+          console.error("Erro ao buscar cidades do IBGE", e);
+          return [];
+      }
+  },
+
+  generateAmostragem: async (origemId: string, tipoOrigem: string) => {
+      return request('/amostragem/gerar', 'POST', { origemId, tipoOrigem });
+  },
+  createLancamento: async (cpf: string) => {
+      return request('/amostragem/lancamento', 'POST', { cpf });
+  },
+  toggleLancamento: async (id: string) => {
+      return request(`/amostragem/lancamento/toggle/${id}`, 'PUT');
+  },
+  validarAmostragem: async (idAmostragem: string, validada: boolean, justificativa: string, idInc?: string) => {
+      return request('/amostragem/validar', 'POST', { idAmostragem, validada, justificativa, idInc });
+  },
+  getInvalidAmostragens: async () => {
+      return request('/amostragem/invalidas', 'GET');
+  },
+  getInconformidades: async (origemId: string) => {
+      return request(`/inconformidades/${origemId}`, 'GET');
+  },
+  createInconformidade: async (data: { resolvido?: boolean, tipo: string, idProcesso?: string, idTermo?: string, idLotacao?: string, motivo: string, chain?: string }) => {
+      return request('/inconformidades', 'POST', data);
+  },
+  updateInconformidade: async (id: string, data: { resolvido?: boolean, tipo?: string, idProcesso?: string, idTermo?: string, idLotacao?: string, motivo?: string, chain?: string }) => {
+      return request(`/inconformidades/${id}`, 'PUT', data);
+  },
+  getTimeline: async (origemId: string, tipo: string) => {
+      return request(`/timeline/${origemId}?tipo=${tipo}`, 'GET');
+  },
+  getProcesso: async (numero: string) => {
+      return request(`/processos/${encodeURIComponent(numero)}`, 'GET');
+  },
+  getAllProcessos: async () => {
+      return request('/processos_all', 'GET');
+  },
+  saveProcesso: async (data: any) => {
+      return request('/processos', 'POST', data);
   }
 };

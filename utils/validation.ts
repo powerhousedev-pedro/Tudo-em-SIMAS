@@ -84,6 +84,38 @@ export const validation = {
     }).format(floatValue);
   },
 
+  maskCEP: (value: string) => {
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{5})(\d)/, '$1-$2')
+      .replace(/(-\d{3})\d+?$/, '$1');
+  },
+
+  maskCBO: (value: string) => {
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{4})(\d)/, '$1-$2')
+      .replace(/(-\d{2})\d+?$/, '$1');
+  },
+
+  formatAddress: (item: any): string => {
+    if (!item || (!item.ENDERECO && !item.CEP && !item.BAIRRO && !item.CIDADE)) return 'N/A';
+    
+    let address = item.ENDERECO || '';
+    if (item.NUMERO) address += `, ${item.NUMERO}`;
+    else if (address) address += ', s/n';
+    
+    if (item.COMPLEMENTO) address += ` - ${item.COMPLEMENTO}`;
+    if (item.BAIRRO) address += ` - ${item.BAIRRO}`;
+    if (item.CIDADE) {
+        address += ` - ${item.CIDADE}`;
+        if (item.ESTADO) address += `/${item.ESTADO}`;
+    }
+    if (item.CEP) address += ` - CEP: ${item.CEP}`;
+    
+    return address.replace(/^[\s,-]+/, '').trim() || 'N/A';
+  },
+
   // --- FORMATTING (Display) ---
 
   formatDate: (value: any) => {
@@ -101,6 +133,12 @@ export const validation = {
     if (!value) return "";
     const padded = value.toString().replace(/\D/g, "").padStart(11, '0');
     return padded.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  },
+
+  formatCEP: (value: string) => {
+    if (!value) return "";
+    const clean = value.toString().replace(/\D/g, "");
+    return clean.replace(/(\d{5})(\d{3})/, "$1-$2");
   },
 
   formatPhone: (value: string) => {

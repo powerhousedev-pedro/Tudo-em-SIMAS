@@ -2,7 +2,12 @@
 export default {
   content: [
     "./index.html",
-    "./**/*.{js,ts,jsx,tsx}",
+    "./*.{js,ts,jsx,tsx}",
+    "./components/**/*.{js,ts,jsx,tsx}",
+    "./hooks/**/*.{js,ts,jsx,tsx}",
+    "./lib/**/*.{js,ts,jsx,tsx}",
+    "./services/**/*.{js,ts,jsx,tsx}",
+    "./utils/**/*.{js,ts,jsx,tsx}"
   ],
   theme: {
     extend: {
@@ -44,6 +49,7 @@ export default {
       },
       animation: {
         'slide-in': 'slideIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
+        'slide-in-right': 'slideInRight 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
         'fade-in': 'fadeIn 0.6s ease-out forwards',
         'float': 'float 6s ease-in-out infinite',
       },
@@ -51,6 +57,10 @@ export default {
         slideIn: {
           '0%': { transform: 'translateY(20px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        slideInRight: {
+          '0%': { transform: 'translateX(100%)' },
+          '100%': { transform: 'translateX(0)' },
         },
         fadeIn: {
           '0%': { opacity: '0' },

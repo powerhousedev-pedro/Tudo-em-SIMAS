@@ -8,11 +8,12 @@ interface ConfirmModalProps {
   onConfirm: () => void;
   onCancel: () => void;
   isLoading?: boolean;
+  children?: React.ReactNode;
 }
 
-export const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onConfirm, onCancel, isLoading }) => {
+export const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onConfirm, onCancel, isLoading, children }) => {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
       <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 border border-white/20 animate-slide-in">
         <div className="flex flex-col items-center text-center">
           <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mb-4 border border-red-100">
@@ -23,6 +24,12 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, onCo
             {message}
           </p>
           
+          {children && (
+            <div className="w-full mb-6 text-left">
+               {children}
+            </div>
+          )}
+
           <div className="flex gap-3 w-full">
             <Button 
               variant="secondary" 

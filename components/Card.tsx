@@ -13,6 +13,7 @@ interface CardProps {
       label: string;
       onEdit: () => void;
   };
+  hasGraveIssue?: boolean;
 }
 
 const STATUS_STYLES: { [key: string]: string } = {
@@ -30,7 +31,7 @@ const STATUS_STYLES: { [key: string]: string } = {
 
 const DEFAULT_STATUS_STYLE = 'bg-gray-100 text-gray-500 border-gray-200';
 
-export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, status, selected, onSelect, onEdit, actions, exerciseData }) => {
+export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, status, selected, onSelect, onEdit, actions, exerciseData, hasGraveIssue }) => {
   
   const colorClass = status ? (STATUS_STYLES[status] || DEFAULT_STATUS_STYLE) : '';
   
@@ -48,10 +49,16 @@ export const Card: React.FC<CardProps> = memo(({ title, subtitle, details, statu
           : `bg-white border-slate-200 hover:border-simas-cyan/50 shadow-sm hover:shadow-md border-l-simas-cyan`}
         ${borderOverride}
         ${blockedOverride}
+        ${hasGraveIssue ? 'bg-red-50/50 border-red-200 border-l-red-600 border-l-[6px] shadow-red-100/50' : ''}
       `}
     >
-      <div className="flex justify-between items-start">
-        <div className="flex-1 min-w-0 pr-6">
+      <div className="flex justify-between items-start mb-2">
+        <div className="flex-1 min-w-0 pr-6 flex flex-col gap-1">
+            {hasGraveIssue && (
+                <span className="inline-block bg-red-100 text-red-700 font-bold text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full border border-red-200 w-max mb-1 shadow-sm">
+                    <i className="fas fa-exclamation-triangle mr-1"></i> PROBLEMA GRAVE
+                </span>
+            )}
             {/* Título Curto do Card: Cera Pro Medium, Uppercase */}
             <h4 className={`font-medium text-sm tracking-normal leading-snug ${selected && !blockedOverride ? 'text-simas-cyan' : (blockedOverride ? 'text-white' : 'text-simas-dark')}`}>
                 {title}

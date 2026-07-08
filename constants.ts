@@ -1,13 +1,16 @@
-
-
 import { EntityConfig, DropdownOptions } from './types';
 import { validation } from './utils/validation';
 
 export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
-  'GPRGP': ['painelVagas'],
+  'GPMP': ['painelVagas'],
+  'GACP': ['painelVagas'],
   'GGT': [],
   'GDEP': [],
   'COORDENAÇÃO': [
+    'painelVagas',
+    'dashboardPessoal'
+  ],
+  'GABINETE': [
     'painelVagas',
     'dashboardPessoal'
   ]
@@ -15,9 +18,11 @@ export const REPORT_PERMISSIONS: { [role: string]: string[] } = {
 
 export const PERMISSOES_POR_PAPEL: { [role: string]: string[] } = {
   'COORDENAÇÃO': ['TODAS'],
-  'GGT': ['Pessoa', 'Servidor', 'Alocacao', 'Nomeacao', 'CargoComissionado', 'Atendimento', 'Protocolo', 'Lotacao', 'Cargo', 'Funcao', 'Inativo', 'Auditoria'],
-  'GPRGP': ['Pessoa', 'Contrato', 'Vaga', 'Edital', 'Exercicio', 'Atendimento', 'Protocolo', 'Lotacao', 'Cargo', 'Funcao', 'ContratoHistorico', 'Auditoria'],
-  'GDEP': ['Pessoa', 'Capacitacao', 'Turma', 'Encontro', 'Chamada', 'Visita', 'SolicitacaoPesquisa', 'Pesquisa', 'Lotacao', 'Auditoria']
+  'GGT': ['Pessoa', 'Servidor', 'Alocacao', 'Nomeacao', 'CargoComissionado', 'Protocolo', 'Lotacao', 'PostoTrabalho', 'Funcao', 'Inativo', 'Auditoria'],
+  'GPMP': ['Pessoa', 'Contrato', 'Vaga', 'Edital', 'Cogestora', 'Exercicio', 'Protocolo', 'Substituto', 'Lotacao', 'Vinculacao', 'PostoTrabalho', 'Funcao', 'ContratoHistorico', 'Auditoria'],
+  'GACP': ['Pessoa', 'Contrato', 'Vaga', 'Edital', 'Cogestora', 'Exercicio', 'Protocolo', 'Substituto', 'Lotacao', 'Vinculacao', 'PostoTrabalho', 'Funcao', 'ContratoHistorico', 'Auditoria'],
+  'GDEP': ['Pessoa', 'Capacitacao', 'Turma', 'Encontro', 'Chamada', 'Visita', 'SolicitacaoPesquisa', 'Pesquisa', 'Lotacao', 'Auditoria'],
+  'GABINETE': []
 };
 
 export const READ_ONLY_ENTITIES = [
@@ -33,18 +38,19 @@ export const FK_MAPPING: { [field: string]: string } = {
     'MATRICULA': 'Servidor',
     'ID_VAGA': 'Vaga',
     'ID_LOTACAO': 'Lotacao',
-    'ID_CARGO': 'Cargo',
+    'ID_POSTO_TRABALHO': 'PostoTrabalho',
     'ID_CONTRATO': 'Contrato',
     'ID_FUNCAO': 'Funcao',
     'ID_EDITAL': 'Edital',
+    'ID_COGESTORA': 'Cogestora',
     'ID_TURMA': 'Turma',
     'ID_CAPACITACAO': 'Capacitacao',
     'ID_ENCONTRO': 'Encontro',
     'ID_SOLICITACAO': 'SolicitacaoPesquisa',
     'ID_CARGO_COMISSIONADO': 'CargoComissionado',
-    'ID_ATENDIMENTO': 'Atendimento',
     'ID_ALOCACAO': 'Alocacao',
-    'ID_EXERCICIO': 'Exercicio'
+    'ID_EXERCICIO': 'Exercicio',
+    'ID_SUBSTITUTO': 'Substituto'
 };
 
 export const FIELD_LABELS: Record<string, Record<string, string>> = {
@@ -56,19 +62,30 @@ export const FIELD_LABELS: Record<string, Record<string, string>> = {
       'TELEFONE': 'Telefone de Contato',
       'EMAIL': 'E-mail',
       'DATA_DE_NASCIMENTO': 'Data de Nascimento',
-      'BAIRRO': 'Bairro Residencial',
+      'CEP': 'CEP (Código Postal)',
+      'ENDERECO': 'Endereço (Rua/Logradouro)',
+      'NUMERO': 'Número',
+      'COMPLEMENTO': 'Complemento',
+      'BAIRRO': 'Bairro',
+      'CIDADE': 'Cidade',
+      'ESTADO': 'Estado',
+      'PAIS': 'País',
+      'NOME_CONTATO': 'Nome do Contato Principal',
       'ESCOLARIDADE': 'Nível de Escolaridade',
       'FORMACAO': 'Formação Acadêmica',
       'SEXO': 'Gênero',
       'USUARIO': 'Usuário Responsável',
       'DATA_HORA': 'Data e Hora',
-      'ACAO': 'Ação Realizada'
+      'ACAO': 'Ação Realizada',
+      'AFRODESCENDENTE': 'Afrodescendente',
+      'PCD': 'PCD (Pessoa com Deficiência)',
+      'USUARIO_ASSISTENCIA': 'Usuário da Assistência Social'
   },
   'Contrato': {
       'ID_CONTRATO': 'Código do Contrato (Atual)',
       'DATA_DO_CONTRATO': 'Data de Início (Contrato Atual)',
       'ID_FUNCAO': 'Função Contratada',
-      'ID_VAGA': 'Vaga Vinculada'
+      'ID_VAGA': 'Vaga Vinculada',
   },
   'ContratoHistorico': {
       'ID_CONTRATO': 'Código do Contrato (Arquivo)',
@@ -91,29 +108,32 @@ export const FIELD_LABELS: Record<string, Record<string, string>> = {
   'Servidor': {
       'DATA_MATRICULA': 'Data de Admissão',
       'VINCULO': 'Tipo de Vínculo',
-      'PREFIXO_MATRICULA': 'Prefixo'
+      'PREFIXO_MATRICULA': 'Prefixo',
+      'ID_FUNCAO': 'Função Efetiva'
   },
   'Vaga': {
       'STATUS_VAGA': 'Situação da Vaga',
       'BLOQUEADA': 'Está Bloqueada?',
       'ID_LOTACAO': 'Lotação da Vaga',
-      'ID_CARGO': 'Cargo da Vaga'
+      'ID_POSTO_TRABALHO': 'Posto de Trabalho'
   },
   'Inativo': {
       'DATA_INATIVACAO': 'Data da Inativação',
       'MOTIVO': 'Motivo da Inativação',
       'PROCESSO': 'Processo Administrativo'
   },
+  'Vinculacao': {
+      'NOME': 'Nome da Vinculação'
+  },
   'Lotacao': {
       'LOTACAO': 'Nome da Lotação',
       'TIPO_DA_LOTACAO': 'Tipo de Unidade',
       'COMPLEXIDADE': 'Nível de Complexidade'
   },
-  'Atendimento': {
-      'TIPO_PEDIDO': 'Tipo de Solicitação',
-      'STATUS_PEDIDO': 'Status do Fluxo',
-      'DATA_ENTRADA': 'Data de Abertura',
-      'DATA_AGENDAMENTO': 'Data Agendada/Revisão'
+  'Substituto': {
+      'ID_SUBSTITUTO': 'Código do Substituto',
+      'DATA_ENTRADA': 'Data de Entrada',
+      'DATA_SAIDA': 'Data de Saída'
   }
 };
 
@@ -125,26 +145,46 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     manualPk: true, // CPF é inserido manualmente
     filterBy: 'NOME',
     cardDisplay: (item: any) => {
+        const isGravissimo = item.notas?.some((n: any) => n.GRAVISSIMO);
         const age = validation.calculateAge(item.DATA_DE_NASCIMENTO);
         const ageText = age !== null ? ` | ${age} anos` : '';
         const formacaoText = item.FORMACAO ? ` | ${item.FORMACAO}` : '';
+        const idText = `CPF: ${validation.formatCPF(item.CPF)}`;
+        const enderecoText = (item.ENDERECO || item.CEP || item.CIDADE) ? `\nEndereço: ${validation.formatAddress(item)}` : '';
         return {
             title: validation.capitalizeName(item.NOME_SOCIAL || item.NOME),
-            subtitle: `CPF: ${validation.formatCPF(item.CPF)}${ageText}`,
-            details: `Escolaridade: ${item.ESCOLARIDADE || 'N/A'}${formacaoText}`
+            subtitle: `${idText}${ageText}`,
+            details: `Escolaridade: ${item.ESCOLARIDADE || 'N/A'}${formacaoText}${enderecoText}`,
+            
+            hasGraveIssue: isGravissimo
         };
     }
   },
+
   
-  // --- GPRGP (Gestão de Pessoas e Contratos) ---
+  // --- GPMP (Gestão de Pessoas e Contratos) ---
   'Contrato': {
     title: 'Contratos',
     pk: 'ID_CONTRATO',
     pkPrefix: 'CTT',
+    cardDisplay: (item: any) => {
+      const isGravissimo = item.pessoa?.notas?.some((n: any) => n.GRAVISSIMO);
+      return {
+        title: `Contrato: ${item.ID_CONTRATO}`,
+        subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
+        details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${validation.formatDate(item.DATA_DO_CONTRATO)}`,
+        hasGraveIssue: isGravissimo
+      };
+    }
+  },
+  'Substituto': {
+    title: 'Substitutos',
+    pk: 'ID_SUBSTITUTO',
+    pkPrefix: 'SUB',
     cardDisplay: (item: any) => ({
-      title: `Contrato: ${item.ID_CONTRATO}`,
+      title: `Substituto: ${item.ID_SUBSTITUTO}`,
       subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
-      details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${validation.formatDate(item.DATA_DO_CONTRATO)}`,
+      details: `Vaga: ${item.ID_VAGA}\nEntrada: ${validation.formatDate(item.DATA_ENTRADA)}`
     })
   },
   'Vaga': {
@@ -153,15 +193,17 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pkPrefix: 'VAG',
     filterBy: 'LOTACAO_NOME',
     cardDisplay: (item: any) => {
+        const isGravissimo = item.contrato?.pessoa?.notas?.some((n: any) => n.GRAVISSIMO);
         let details = `Edital: ${item.EDITAL_NOME || 'N/A'}`;
         if (item.STATUS_VAGA === 'Reservada') {
             details += `\nReservada para: ${validation.capitalizeName(item.RESERVADA_PARA_NOME || item.RESERVADA_PARA_CPF || '...')}`;
         }
         return {
-            title: item.CARGO_NOME || 'Vaga',
+            title: item.POSTO_NOME || 'Vaga',
             subtitle: item.LOTACAO_NOME || 'Lotação N/A',
             details: details,
-            status: item.STATUS_VAGA
+            status: item.STATUS_VAGA,
+            hasGraveIssue: isGravissimo
         };
     }
   },
@@ -169,11 +211,20 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       title: 'Editais',
       pk: 'ID_EDITAL',
       pkPrefix: 'EDT',
-      filterBy: 'COGESTORA',
       cardDisplay: (item: any) => ({
           title: item.EDITAL,
           subtitle: `Proc: ${item.PROCESSO}`,
-          details: `Vigência: ${validation.formatDate(item.INICIO)} - ${validation.formatDate(item.TERMINO)}\nCogestora: ${item.COGESTORA || 'N/A'}`
+          details: `Vigência: ${validation.formatDate(item.INICIO)} - ${validation.formatDate(item.TERMINO)}\nCogestora: ${item.NOME_COGESTORA || 'N/A'}`
+      })
+  },
+  'Cogestora': {
+      title: 'Cogestoras',
+      pk: 'ID_COGESTORA',
+      pkPrefix: 'COG',
+      cardDisplay: (item: any) => ({
+          title: item.NOME,
+          subtitle: `ID: ${item.ID_COGESTORA}`,
+          details: 'Entidade Cogestora Registrada'
       })
   },
   'Exercicio': { 
@@ -181,7 +232,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'ID_EXERCICIO',
       pkPrefix: 'EXE',
       cardDisplay: (item: any) => ({
-        title: item.NOME_CARGO_VAGA || 'Cargo da Vaga',
+        title: item.NOME_POSTO_VAGA || 'Posto da Vaga',
         subtitle: `Vaga ID: ${item.ID_VAGA}`,
         details: `Lotação de Exercício: ${item.NOME_LOTACAO_EXERCICIO || item.ID_LOTACAO}`
       })
@@ -193,21 +244,29 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     pk: 'MATRICULA',
     manualPk: true,
     filterBy: 'VINCULO',
-    cardDisplay: (item: any) => ({
-      title: validation.capitalizeName(item.NOME_PESSOA || 'Servidor'),
-      subtitle: `Matrícula: ${item.PREFIXO_MATRICULA ? item.PREFIXO_MATRICULA + '-' : ''}${item.MATRICULA}`,
-      details: `${item.VINCULO}\nCargo Efetivo: ${item.NOME_CARGO || item.ID_CARGO}`
-    })
+    cardDisplay: (item: any) => {
+      const isGravissimo = item.pessoa?.notas?.some((n: any) => n.GRAVISSIMO);
+      return {
+        title: validation.capitalizeName(item.NOME_PESSOA || 'Servidor'),
+        subtitle: `Matrícula: ${item.PREFIXO_MATRICULA ? item.PREFIXO_MATRICULA + '-' : ''}${item.MATRICULA}`,
+        details: `${item.VINCULO}\nFunção: ${item.NOME_FUNCAO || item.ID_FUNCAO}`,
+        hasGraveIssue: isGravissimo
+      };
+    }
   },
   'Alocacao': {
     title: 'Alocações',
     pk: 'ID_ALOCACAO',
     pkPrefix: 'ALC',
-    cardDisplay: (item: any) => ({
-        title: validation.capitalizeName(item.NOME_PESSOA),
-        subtitle: item.NOME_LOTACAO,
-        details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${validation.formatDate(item.DATA_INICIO)}`
-    })
+    cardDisplay: (item: any) => {
+        const isGravissimo = item.servidor?.pessoa?.notas?.some((n: any) => n.GRAVISSIMO);
+        return {
+            title: validation.capitalizeName(item.NOME_PESSOA),
+            subtitle: item.NOME_LOTACAO,
+            details: `Função: ${item.NOME_FUNCAO || 'N/A'}\nInício: ${validation.formatDate(item.DATA_INICIO)}`,
+            hasGraveIssue: isGravissimo
+        };
+    }
   },
   'Nomeacao': { 
     title: 'Nomeações', 
@@ -304,17 +363,6 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
   },
 
   // --- Tabelas de Apoio / Cross-Function ---
-  'Atendimento': {
-    title: 'Atendimentos',
-    pk: 'ID_ATENDIMENTO',
-    pkPrefix: 'ATD',
-    cardDisplay: (item: any) => ({
-      title: item.TIPO_PEDIDO,
-      subtitle: validation.capitalizeName(item.NOME_PESSOA || item.CPF),
-      status: item.STATUS_PEDIDO,
-      details: `Entrada: ${validation.formatDate(item.DATA_ENTRADA)}\nResponsável: ${item.RESPONSAVEL}`
-    })
-  },
   'Protocolo': {
       title: 'Protocolos',
       pk: 'ID_PROTOCOLO',
@@ -325,6 +373,16 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
           details: `${item.DETALHE_VINCULO || 'Vínculo N/A'}\nInício: ${validation.formatDate(item.INICIO_PRAZO)}`
       })
   },
+  'Vinculacao': {
+    title: 'Vinculações',
+    pk: 'ID_VINCULACAO',
+    pkPrefix: 'VNC',
+    cardDisplay: (item: any) => ({
+      title: item.NOME,
+      subtitle: `Vinculação: ${item.ID_VINCULACAO}`,
+      details: ''
+    })
+  },
   'Lotacao': {
     title: 'Lotações',
     pk: 'ID_LOTACAO',
@@ -332,18 +390,18 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
     filterBy: 'COMPLEXIDADE',
     cardDisplay: (item: any) => ({
       title: item.LOTACAO,
-      subtitle: `Unidade: ${item.UNIDADE}`,
-      details: `Bairro: ${item.BAIRRO || 'N/A'}\nComplexidade: ${item.COMPLEXIDADE || 'N/A'}`
+      subtitle: item.BAIRRO ? `Bairro: ${item.BAIRRO}` : 'Bairro não informado',
+      details: `Vinculação: ${item.vinculacao?.NOME || item.ID_VINCULACAO || 'N/A'} - Complexidade: ${item.COMPLEXIDADE || 'N/A'}`
     })
   },
-  'Cargo': {
-    title: 'Cargos',
-    pk: 'ID_CARGO',
-    pkPrefix: 'CRG',
-    filterBy: 'ESCOLARIDADE_CARGO',
+  'PostoTrabalho': {
+    title: 'Postos de Trabalho',
+    pk: 'ID_POSTO_TRABALHO',
+    pkPrefix: 'PST',
+    filterBy: 'ESCOLARIDADE',
     cardDisplay: (item: any) => ({
-      title: item.NOME_CARGO,
-      subtitle: item.ESCOLARIDADE_CARGO,
+      title: item.NOME_POSTO,
+      subtitle: item.ESCOLARIDADE,
       details: item.SALARIO ? `Salário: ${validation.formatCurrency(item.SALARIO)}` : 'Salário não informado'
     })
   },
@@ -381,7 +439,7 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
       pk: 'MATRICULA',
       cardDisplay: (item: any) => ({ 
           title: validation.capitalizeName(item.NOME || `Matrícula: ${item.MATRICULA}`), 
-          subtitle: item.CARGO || 'Cargo N/A',
+          subtitle: item.POSTO || 'Posto N/A',
           details: `Inativado em: ${validation.formatDate(item.DATA_INATIVACAO)}\nMotivo: ${item.MOTIVO_INATIVACAO}`
       })
   },
@@ -397,17 +455,18 @@ export const ENTITY_CONFIGS: { [key: string]: EntityConfig } = {
 };
 
 export const DATA_MODEL: { [key: string]: string[] } = {
-  "Pessoa": ["CPF", "NOME", "NOME_SOCIAL", "SEXO", "DATA_DE_NASCIMENTO", "EMAIL", "TELEFONE", "ESCOLARIDADE", "FORMACAO"],
-  "Servidor": ["MATRICULA", "PREFIXO_MATRICULA", "CPF", "ID_CARGO", "DATA_MATRICULA", "VINCULO"],
+  "Pessoa": ["CPF", "NOME", "NOME_SOCIAL", "SEXO", "DATA_DE_NASCIMENTO", "EMAIL", "TELEFONE", "ESCOLARIDADE", "FORMACAO", "PAIS", "ESTADO", "CIDADE", "CEP", "ENDERECO", "NUMERO", "COMPLEMENTO", "BAIRRO", "AFRODESCENDENTE", "PCD", "USUARIO_ASSISTENCIA"],
+  "Servidor": ["MATRICULA", "PREFIXO_MATRICULA", "CPF", "ID_FUNCAO", "DATA_MATRICULA", "VINCULO"],
   "Contrato": ["ID_CONTRATO", "ID_VAGA", "CPF", "DATA_DO_CONTRATO", "ID_FUNCAO"],
-  "Vaga": ["ID_VAGA", "ID_LOTACAO", "ID_EDITAL", "ID_CARGO", "BLOQUEADA"],
-  "Lotacao": ["ID_LOTACAO", "LOTACAO", "VINCULACAO", "TIPO_DA_LOTACAO", "BAIRRO", "COMPLEXIDADE", "UNIDADE"],
-  "Cargo": ["ID_CARGO", "NOME_CARGO", "ESCOLARIDADE_CARGO", "SALARIO"],
+  "Vaga": ["ID_VAGA", "ID_LOTACAO", "ID_EDITAL", "ID_POSTO_TRABALHO", "BLOQUEADA"],
+  "Vinculacao": ["ID_VINCULACAO", "NOME", "NOME_CONTATO", "EMAIL", "TELEFONE", "PAIS", "ESTADO", "CIDADE", "CEP", "ENDERECO", "NUMERO", "COMPLEMENTO", "BAIRRO"],
+  "Lotacao": ["ID_LOTACAO", "LOTACAO", "ID_VINCULACAO", "TIPO_DA_LOTACAO", "BAIRRO", "COMPLEXIDADE"],
+  "PostoTrabalho": ["ID_POSTO_TRABALHO", "NOME_POSTO", "ESCOLARIDADE", "SALARIO"],
   "Alocacao": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "ID_FUNCAO", "DATA_INICIO"],
   "Funcao": ["ID_FUNCAO", "FUNCAO", "CBO"],
-  "Atendimento": ["ID_ATENDIMENTO", "REMETENTE", "CPF", "RESPONSAVEL", "DATA_ATENDIMENTO", "TIPO_PEDIDO", "DESCRICAO", "STATUS_PEDIDO", "JUSTIFICATIVA", "DATA_AGENDAMENTO"],
-  "Edital": ["ID_EDITAL", "PROCESSO", "EDITAL", "NUMERO", "COGESTORA", "INICIO", "TERMINO"],
-  "Protocolo": ["ID_PROTOCOLO", "CPF", "TIPO_DE_PROTOCOLO", "INICIO_PRAZO", "TERMINO_PRAZO", "ID_CONTRATO", "MATRICULA"],
+  "Edital": ["ID_EDITAL", "PROCESSO", "EDITAL", "NUMERO", "ID_COGESTORA", "INICIO", "TERMINO"],
+  "Cogestora": ["ID_COGESTORA", "NOME", "NOME_CONTATO", "EMAIL", "TELEFONE", "PAIS", "ESTADO", "CIDADE", "CEP", "ENDERECO", "NUMERO", "COMPLEMENTO", "BAIRRO"],
+  "Protocolo": ["ID_PROTOCOLO", "CPF", "TIPO_DE_PROTOCOLO", "INICIO_PRAZO", "TERMINO_PRAZO"],
   // GDEP
   "Capacitacao": ["ID_CAPACITACAO", "ATIVIDADE_DE_CAPACITACAO", "PERCURSO_FORMATIVO", "TIPO_CAPACITACAO", "FORMATO", "MODALIDADE", "TEMATICA_CENTRAL"],
   "Turma": ["ID_TURMA", "NOME_TURMA", "ID_CAPACITACAO"],
@@ -420,26 +479,26 @@ export const DATA_MODEL: { [key: string]: string[] } = {
   "Nomeacao": ["ID_NOMEACAO", "MATRICULA", "ID_CARGO_COMISSIONADO", "DATA_DA_NOMEACAO", "PAGINA_DO", "STATUS"],
   "CargoComissionado": ["ID_CARGO_COMISSIONADO", "NOME", "UNIDADE", "TIPO_DE_CARGO"],
   "Exercicio": ["ID_EXERCICIO", "ID_VAGA", "ID_LOTACAO"],
+  "Substituto": ["ID_SUBSTITUTO", "CPF", "ID_VAGA", "DATA_ENTRADA", "DATA_SAIDA"],
   
   // HISTORICO
   "ContratoHistorico": ["ID_CONTRATO", "CPF", "DATA_DO_CONTRATO", "DATA_ARQUIVAMENTO", "MOTIVO_ARQUIVAMENTO", "ID_VAGA", "ID_FUNCAO"],
   "AlocacaoHistorico": ["ID_ALOCACAO", "MATRICULA", "ID_LOTACAO", "DATA_INICIO", "DATA_FIM", "MOTIVO_MUDANCA"],
-  "Inativo": ["MATRICULA", "CPF", "NOME", "CARGO", "DATA_INATIVACAO", "MOTIVO", "PROCESSO", "DATA_PUBLICACAO"]
+  "Inativo": ["MATRICULA", "CPF", "NOME", "ID_FUNCAO", "DATA_INATIVACAO", "MOTIVO", "PROCESSO", "DATA_PUBLICACAO"]
 };
 
 export const ENTITY_RELATIONSHIPS: { [key: string]: { entity: string; pk: string }[] } = {
   'Pessoa': [
     { entity: 'Contrato', pk: 'CPF' },
-    { entity: 'Servidor', pk: 'CPF' },
-    { entity: 'Atendimento', pk: 'CPF' },
+    { entity: 'Servidor', pk: 'CPF' }
   ],
   'Contrato': [
-    { entity: 'Protocolo', pk: 'ID_CONTRATO' }
+    { entity: 'Protocolo', pk: 'CPF' }
   ],
   'Servidor': [
     { entity: 'Alocacao', pk: 'MATRICULA' },
     { entity: 'Nomeacao', pk: 'MATRICULA' },
-    { entity: 'Protocolo', pk: 'MATRICULA' }
+    { entity: 'Protocolo', pk: 'CPF' }
   ],
   'Vaga': [
     { entity: 'Contrato', pk: 'ID_VAGA' },
@@ -458,40 +517,9 @@ export const ENTITY_RELATIONSHIPS: { [key: string]: { entity: string; pk: string
   'SolicitacaoPesquisa': [
     { entity: 'Pesquisa', pk: 'ID_SOLICITACAO' }
   ],
-  'Lotacao': [], 'Cargo': [], 'Funcao': [], 'Edital': [], 'Alocacao': [], 'Exercicio': [],
-  'Nomeacao': [], 'Chamada': [], 'Visita': [], 'Pesquisa': [], 'Atendimento': [], 'Protocolo': [], 'CargoComissionado': [],
+  'Lotacao': [], 'PostoTrabalho': [], 'Funcao': [], 'Edital': [], 'Alocacao': [], 'Exercicio': [],
+  'Nomeacao': [], 'Chamada': [], 'Visita': [], 'Pesquisa': [], 'Protocolo': [], 'CargoComissionado': [],
   'Inativo': [], 'ContratoHistorico': [], 'AlocacaoHistorico': [], 'Auditoria': []
-};
-
-export const DROPDOWN_STRUCTURES: any = {
-  'TIPO_PEDIDO': {
-    'CONTRATADO': [
-      'Contratação', 'Promoção (Contratado)', 'Mudança (Contratado)', 'Demissão'
-    ],
-    'SERVIDOR': [
-      'Alocação de Servidor', 'Mudança de Alocação (Servidor)', 'Nomeação de Cargo Comissionado',
-      'Exoneração de Cargo Comissionado', 'Exoneração do Serviço Público'
-    ],
-    'GPRGP_ESPECIFICO': ['Reserva de Vaga'],
-    'GERAL': ['Orientação', 'Outro']
-  },
-  'JUSTIFICATIVA': {
-      'CONTRATADO': [
-          'Aguardando Assinatura de Aditivo', 'Aguardando Atendimento', 'Aguardando OSC', 'Aguardando Vaga',
-          'Declinou', 'Não Compareceu', 'Não Conseguiu Contato', 'Não Preenche os Requisitos da Vaga',
-          'Problemas na Contratação', 'Problemas na Documentação'
-      ],
-      'SERVIDOR': [
-          'Aguardando Publicação em Diário Oficial', 'Aguardando Parecer da Procuradoria',
-          'Processo em Análise Técnica (GGT/SGP)', 'Vaga Extinta ou Remanejada'
-      ],
-      'GERAL': [
-          'Comando Cancelado', 'Protocolo Não Acatado', 'Aguardando Gabinete', 'Outras Situações'
-      ]
-  },
-  'REMETENTE': [
-    'Prefeitura', 'Currículo', 'Protocolo', 'Sem Protocolo', 'Cogestora', 'Outro'
-  ]
 };
 
 // Configuration for boolean-like fields
@@ -499,6 +527,9 @@ export const DROPDOWN_STRUCTURES: any = {
 // type: 'string' = DB String ('Sim'/'Não')
 export const BOOLEAN_FIELD_CONFIG: { [key: string]: { type: 'boolean' | 'string' } } = {
     'BLOQUEADA': { type: 'boolean' },
+    'AFRODESCENDENTE': { type: 'boolean' },
+    'PCD': { type: 'boolean' },
+    'USUARIO_ASSISTENCIA': { type: 'boolean' },
     'AUTORIZO': { type: 'string' },
     'ABANDONO': { type: 'string' },
     'MATERIAL_PENDENTE': { type: 'string' },
@@ -531,7 +562,7 @@ export const DROPDOWN_OPTIONS: DropdownOptions = {
     'Doutorado Cursando',
     'Doutorado Completo'
   ],
-  'ESCOLARIDADE_CARGO': [
+  'ESCOLARIDADE_POSTO': [
       'Fundamental', 'Médio', 'Técnico', 'Superior'
   ],
   'FORMACAO': [
@@ -547,7 +578,7 @@ export const DROPDOWN_OPTIONS: DropdownOptions = {
     'Engenharia Florestal', 'Engenharia Hídrica', 'Engenharia Mecânica', 'Engenharia Mecatrônica', 'Engenharia Metalúrgica', 'Engenharia Naval',
     'Engenharia Química', 'Engenharia Têxtil', 'Estatística', 'Estética e Cosmética', 'Eventos', 'Farmácia', 'Filosofia', 'Física',
     'Fisioterapia', 'Fonoaudiologia', 'Gastronomia', 'Geografia', 'Geologia', 'Gestão Ambiental', 'Gestão Comercial', 'Gestão Financeira',
-    'Gestão Hospitalar', 'Gestão Pública', 'Gestão de Recursos Humanos', 'História', 'Jogos Digitais', 'Letras (Português)', 'Letras (Inglês)',
+    'Gestão Hospitalar', 'Gestão Pública', 'Gestão de Recursos Humanos', 'História', 'Jogos Digitais', 'Letras (Português)', 'Letras (Ingês)',
     'Letras (Espanhol)', 'Letras (Francês)', 'Letras (Italiano)', 'Letras (Alemão)', 'Letras (Chinês)', 'Letras (Japonês)', 'Letras (Literatura)',
     'Logística', 'Marketing', 'Matemática', 'Medicina', 'Medicina Veterinária', 'Musicoterapia', 'Música', 'Nutrição', 'Oceanografia', 'Odontologia',
     'Pedagogia', 'Pilotagem Profissional de Aeronaves', 'Produção Audiovisual', 'Produção Cênica', 'Produção Fonográfica', 'Psicologia', 'Química',
@@ -558,14 +589,19 @@ export const DROPDOWN_OPTIONS: DropdownOptions = {
   'VINCULO': ['Ativo', 'Extra Quadro', 'Aposentado', 'CLT', 'Prestador de Serviços'],
   'COMPLEXIDADE': ['ALTA', 'BÁSICA', 'MÉDIA', 'NSA'],
   'TIPO_DA_LOTACAO': ['CRAS', 'CREAS', 'CENTRO POP', 'UNIDADE DE ACOLHIMENTO', 'OUTROS'],
-  'BAIRRO': [
-    'Acari', 'Anil', 'Bangu', 'Barra da Tijuca', 'Benfica', 'Bonsucesso', 'Botafogo', 'Caju', 'Campo Grande', 'Catete', 'Centro',
-    'Cidade de Deus', 'Cidade Nova', 'Coelho Neto', 'Copacabana', 'Curicica', 'Diversos', 'Engenho de Dentro', 'Engenho Novo',
-    'Estácio de Sá', 'Flamengo', 'Galeão', 'Gamboa', 'Grajaú', 'Guadalupe', 'Guaratiba', 'Inhaúma', 'Inhoaíba', 'Irajá',
-    'Jacarepaguá', 'Jardim América', 'Lapa', 'Laranjeiras', 'Lins de Vasconcelos', 'Madureira', 'Manguinhos', 'Méier', 'NSA',
-    'Olaria', 'Paciência', 'Pavuna', 'Pedra de Guaratiba', 'Penha', 'Piedade', 'Portuguesa', 'Praça da Bandeira', 'Praça Seca',
-    'Ramos', 'Realengo', 'Recreio', 'Rio Comprido', 'Rocha Miranda', 'Rocinha', 'Santa Cruz', 'São Conrado', 'São Cristóvão',
-    'Saúde', 'Sepetiba', 'Taquara', 'Tauá', 'Tijuca', 'Todos os Santos', 'Vargem Pequena', 'Vila Isabel'
+  'Protocolo': {
+      'TIPO_DE_PROTOCOLO': [
+          'Aviso Prévio - Demissão',
+          'Férias',
+          'Afastamento INSS',
+          'Licença Maternidade',
+          'Licença Paternidade',
+          'Licença Médica por Atestado',
+          'Falta'
+      ]
+  },
+  'PAIS': [
+    'Brasil', 'Afeganistão', 'África do Sul', 'Albânia', 'Alemanha', 'Andorra', 'Angola', 'Antígua e Barbuda', 'Arábia Saudita', 'Argélia', 'Argentina', 'Armênia', 'Austrália', 'Áustria', 'Azerbaijão', 'Bahamas', 'Bangladesh', 'Barbados', 'Bahrein', 'Bélgica', 'Belize', 'Benim', 'Bielorrússia', 'Bolívia', 'Bósnia e Herzegovina', 'Botsuana', 'Brunei', 'Bulgária', 'Burquina Faso', 'Burundi', 'Butão', 'Cabo Verde', 'Camarões', 'Camboja', 'Canadá', 'Catar', 'Cazaquistão', 'Chade', 'Chile', 'China', 'Chipre', 'Colômbia', 'Comores', 'Coreia do Norte', 'Coreia do Sul', 'Costa do Marfim', 'Costa Rica', 'Croácia', 'Cuba', 'Dinamarca', 'Djibuti', 'Dominica', 'Egito', 'El Salvador', 'Emirados Árabes Unidos', 'Equador', 'Eritreia', 'Eslováquia', 'Eslovênia', 'Espanha', 'Estados Unidos', 'Estônia', 'Etiópia', 'Fiji', 'Filipinas', 'Finlândia', 'França', 'Gabão', 'Gâmbia', 'Gana', 'Geórgia', 'Granada', 'Grécia', 'Guatemala', 'Guiana', 'Guiné', 'Guiné Equatorial', 'Guiné-Bissau', 'Haiti', 'Honduras', 'Hungria', 'Iêmen', 'Ilhas Marshall', 'Índia', 'Indonésia', 'Irã', 'Iraque', 'Irlanda', 'Islândia', 'Israel', 'Itália', 'Jamaica', 'Japão', 'Jordânia', 'Kiribati', 'Kuwait', 'Laos', 'Lesoto', 'Letônia', 'Líbano', 'Libéria', 'Líbia', 'Liechtenstein', 'Lituânia', 'Luxemburgo', 'Macedônia do Norte', 'Madagascar', 'Malásia', 'Malaui', 'Maldivas', 'Mali', 'Malta', 'Marrocos', 'Maurício', 'Mauritânia', 'México', 'Mianmar', 'Micronésia', 'Moçambique', 'Moldávia', 'Mônaco', 'Mongólia', 'Montenegro', 'Namíbia', 'Nauru', 'Nepal', 'Nicarágua', 'Níger', 'Nigéria', 'Noruega', 'Nova Zelândia', 'Omã', 'Países Baixos', 'Palau', 'Panamá', 'Papua-Nova Guiné', 'Paquistão', 'Paraguai', 'Peru', 'Polônia', 'Portugal', 'Quênia', 'Quirguistão', 'Reino Unido', 'República Centro-Africana', 'República Democrática do Congo', 'República do Congo', 'República Dominicana', 'Romênia', 'Ruanda', 'Rússia', 'Samoa', 'San Marino', 'Santa Lúcia', 'São Cristóvão e Neves', 'São Tomé e Príncipe', 'São Vicente e Granadinas', 'Seicheles', 'Senegal', 'Serra Leoa', 'Sérvia', 'Singapura', 'Síria', 'Somália', 'Sri Lanka', 'Suazilândia', 'Sudão', 'Sudão do Sul', 'Suécia', 'Suíça', 'Suriname', 'Tadjiquistão', 'Tailândia', 'Tanzânia', 'Tchequia', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad e Tobago', 'Tunísia', 'Turcomenistão', 'Turquia', 'Tuvalu', 'Ucrânia', 'Uganda', 'Uruguai', 'Uzbequistão', 'Vanuatu', 'Vaticano', 'Venezuela', 'Vietnã', 'Zâmbia', 'Zimbábue'
   ],
   'STATUS_VAGA': ['Disponível', 'Ocupada', 'Bloqueada', 'Em Dispensa'],
   'MODALIDADE': ['Capacitação em Serviço', 'Ciclo de Debates', 'Curso', 'Encontro Temático', 'Oficina', 'Palestra', 'Roda de Conversa', 'Seminário'],
@@ -573,16 +609,11 @@ export const DROPDOWN_OPTIONS: DropdownOptions = {
   'FORMATO': ['À distância (EAD)', 'Híbrido', 'Presencial', 'Remoto'],
   'TIPO_CAPACITACAO': ['Aprimoramento (4h - 20h)', 'Atualização (40h - 100h)', 'Introdutória (20h - 40h)', 'Supervisão Técnica (min 24h)'],
   'PRESENCA': ['Presente', 'Ausente'],
-  'COGESTORA': ['CAMPO', 'CENTRAL', 'CIEDS', 'CONT-ATO', 'DOM PIXOTE', 'ECOS', 'INADH', 'NONE'],
   'TIPO_DE_CARGO': ['N/A', 'S/E', 'DAS10A', 'DAS10B', 'DAS10', 'DAS09', 'DAS08', 'DAS07', 'DAS06', 'DAI06', 'DAI05', 'DAI04'],
   'PERCURSO_FORMATIVO': ['Provimento de Serviços Socioassistenciais', 'Gestão do SUAS', 'Controle Social', 'Transversal'],
   'TIPO_DE_PROTOCOLO': [
-    'Férias', 'Licença Médica', 'Licença Maternidade', 'Licença Adoção', 'Licença Nojo (Luto)', 
-    'Licença Paternidade', 'Licença Militar', 'Licença Casamento', 'Afastamento INSS', 'Aviso Prévio',
-    'Readaptação', 'Redução de Carga Horária', 'Licença por Acidente de Trabalho', 'Licença Aleitamento',
-    'Licença Especial (Prêmio)', 'Licença para Acompanhar Cônjuge', 'Licença para Estudos', 
-    'Licença para Aposentadoria', 'Licença para Interesse Particular', 'Licença para Pleito Eleitoral',
-    'Licença sem Vencimento', 'Licença para Tratamento de Saúde Familiar', 'Demissão'
+    'Aviso Prévio - Demissão', 'Férias', 'Afastamento INSS', 'Licença Maternidade', 
+    'Licença Paternidade', 'Licença Médica por Atestado', 'Falta'
   ],
   'STATUS': ['Ativo', 'Inativo', 'Pendente', 'Cancelado'],
   'ZONA': ['Norte', 'Sul', 'Oeste', 'Centro'],

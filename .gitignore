@@ -32,3 +32,19 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Relatório LGPD
+relatorio_auditoria_lgpd.txt
+
+# Dicionário de Dados
+dicionario_dados.json
+
+# Import scripts and data
+/imports/
+/run_imports.sh
+/server/clear_tables.ts
+/server/import_sql.ts
+/server/import_contracts.ts
+/server/geocode_pessoas.ts
+
+test.js

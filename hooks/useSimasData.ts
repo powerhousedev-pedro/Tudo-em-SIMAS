@@ -5,11 +5,11 @@ import { ENTITY_CONFIGS } from '../constants';
 
 // --- QUERIES ---
 
-export const useEntityData = (entityName: string, searchTerm = '') => {
+export const useEntityData = (entityName: string, searchTerm = '', extraParams: Record<string, string> = {}) => {
   return useQuery({
-    queryKey: ['entity', entityName, { search: searchTerm }],
-    queryFn: () => api.fetchEntity(entityName, searchTerm),
-    enabled: !!entityName, // Only run if entityName is provided
+    queryKey: ['entity', entityName, { search: searchTerm, ...extraParams }],
+    queryFn: () => api.fetchEntity(entityName, searchTerm, 1, 0, extraParams),
+    enabled: !!entityName,
   });
 };
 
@@ -114,15 +114,4 @@ export const useSetExercicio = () => {
       queryClient.invalidateQueries({ queryKey: ['entity', 'Vaga'] }); // Vaga display updates
     }
   });
-};
-
-export const useExecuteAction = () => {
-    const queryClient = useQueryClient();
-    return useMutation({
-        mutationFn: ({ id, data }: { id: string, data: any }) => api.executeAction(id, data),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['reviews'] });
-            queryClient.invalidateQueries({ queryKey: ['entity'] }); // Brute force invalidation to ensure consistency
-        }
-    });
 };

@@ -1,17 +1,17 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
 import { Reports } from './components/Reports';
-import { Workflows } from './components/Workflows';
 import { History } from './components/History';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { UserAdminModal } from './components/UserAdminModal';
-import { ActionExecutionModal } from './components/ActionExecutionModal';
 import { NotificationCenter } from './components/NotificationCenter';
-import { SignatureModal } from './components/SignatureModal';
+import { MonitoramentoPanel } from './components/MonitoramentoPanel';
+import { AcompanhamentoPanel } from './components/AcompanhamentoPanel';
+import { SearchPanel } from './components/SearchPanel';
 import { UserSession, AppRoute } from './types';
 import { Logo } from './components/Logo';
 import { usePendingReviews, useSystemAlerts } from './hooks/useSimasData';
@@ -24,19 +24,29 @@ const MainLayout: React.FC<{
     onUserAdmin: () => void 
 }> = ({ session, onLogout, showToast, onUserAdmin }) => {
     
-    // Using React Query Hooks for Bell Count
-    const { data: pendingReviews = [] } = usePendingReviews();
     const { data: systemAlerts = [] } = useSystemAlerts();
     
     const [showNotificationCenter, setShowNotificationCenter] = useState(false);
-    const [showSignatureModal, setShowSignatureModal] = useState(false);
-    const [actionAtendimentoId, setActionAtendimentoId] = useState<string | null>(null);
 
     const showUserAdmin = session.isGerente || session.papel === 'COORDENAÇÃO';
-    const defaultRoute = session.papel === 'COORDENAÇÃO' ? AppRoute.REPORTS : AppRoute.DASHBOARD;
+    
+    let defaultRoute = AppRoute.DASHBOARD;
+    if (session.papel === 'COORDENAÇÃO' || session.papel === 'GABINETE') defaultRoute = AppRoute.REPORTS;
+    if (session.papel === 'GGT' || session.papel === 'GPMP') defaultRoute = AppRoute.MONITORAMENTO;
+    if (session.papel === 'GACP') defaultRoute = AppRoute.ACOMPANHAMENTO;
 
-    const totalNotifications = pendingReviews.length + systemAlerts.length;
-    const hasCritical = systemAlerts.some((a: any) => a.severity === 'high');
+    const totalNotifications = systemAlerts.length;
+
+    const location = useLocation();
+    const isMonitoramento = location.pathname.includes(AppRoute.MONITORAMENTO);
+
+    // Login page reload fix when already logged in
+    useEffect(() => {
+        if (location.pathname === '/login') {
+            window.location.replace(`/#/${defaultRoute}`);
+            window.location.reload();
+        }
+    }, [location.pathname, defaultRoute]);
 
     return (
         <div className="flex flex-col h-screen font-sans overflow-hidden bg-simas-cloud">
@@ -59,10 +69,17 @@ const MainLayout: React.FC<{
 
                 <nav className="hidden md:flex items-center gap-2 p-1.5 bg-white/5 rounded-full backdrop-blur-sm border border-white/5">
                   {[
-                    { to: AppRoute.WORKFLOWS, label: 'Fluxos', icon: 'fas fa-exchange-alt' },
+                    ...(session.papel !== 'GACP' ? [{ to: AppRoute.MONITORAMENTO, label: 'Monitoramento', icon: 'fas fa-desktop' }] : []),
+                    ...(session.papel === 'GACP' || session.papel === 'COORDENAÇÃO' ? [{ to: AppRoute.ACOMPANHAMENTO, label: 'Acompanhamento', icon: 'fas fa-chart-line' }] : []),
+                    { to: AppRoute.BUSCA, label: 'Busca', icon: 'fas fa-search' },
                     { to: AppRoute.HISTORY, label: 'Histórico', icon: 'fas fa-history' },
                     { to: AppRoute.REPORTS, label: 'Relatórios', icon: 'fas fa-chart-pie' }
-                  ].map(link => (
+                  ].filter(link => {
+                      if (session.papel === 'GABINETE') {
+                          return link.to === AppRoute.MONITORAMENTO || link.to === AppRoute.REPORTS;
+                      }
+                      return true;
+                  }).map(link => (
                     <NavLink 
                       key={link.to}
                       to={`/${link.to}`} 
@@ -91,22 +108,24 @@ const MainLayout: React.FC<{
                    </div>
                    
                    <div className="flex items-center gap-3 border-l border-white/10 pl-6 h-8">
-                      <button 
-                        onClick={() => setShowSignatureModal(true)} 
-                        className="w-8 h-8 rounded-full hover:bg-white/10 text-gray-300 hover:text-white transition-all"
-                        title="Minha Assinatura"
-                      >
-                          <i className="fas fa-signature text-sm"></i>
-                      </button>
+                      {session.papel === 'COORDENAÇÃO' && session.isGerente && (
+                          <NavLink 
+                            to={`/${AppRoute.DASHBOARD}`}
+                            className={({ isActive }) => `w-8 h-8 rounded-full transition-all flex items-center justify-center ${isActive ? 'bg-simas-cyan text-white shadow-glow' : 'hover:bg-white/10 text-gray-300 hover:text-white'}`}
+                            title="Edição Avançada"
+                          >
+                              <i className="fas fa-layer-group text-sm"></i>
+                          </NavLink>
+                      )}
 
                       <button 
                         onClick={() => setShowNotificationCenter(true)} 
-                        className={`relative w-8 h-8 rounded-full hover:bg-white/10 transition-all flex items-center justify-center ${hasCritical ? 'text-red-400 animate-pulse' : 'text-gray-300 hover:text-white'}`}
+                        className={`relative w-8 h-8 rounded-full hover:bg-white/10 transition-all flex items-center justify-center text-gray-300 hover:text-white`}
                         title="Notificações"
                       >
                           <i className="fas fa-bell text-sm"></i>
                           {totalNotifications > 0 && (
-                            <span className={`absolute -top-1 -right-1 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm border-2 border-simas-dark ${hasCritical ? 'bg-red-500' : 'bg-simas-cyan'}`}>
+                            <span className={`absolute -top-1 -right-1 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-sm border-2 border-simas-dark bg-red-500 animate-pulse`}>
                               {totalNotifications}
                             </span>
                           )}
@@ -127,61 +146,22 @@ const MainLayout: React.FC<{
 
             <main className="flex-1 overflow-hidden relative w-full bg-simas-cloud">
                <div className="h-full w-full relative">
-                  <Routes>
-                     <Route path="/" element={<Navigate to={`/${defaultRoute}`} />} />
-                     <Route path={`/${AppRoute.DASHBOARD}`} element={<Dashboard showToast={showToast} />} />
-                     <Route path={`/${AppRoute.WORKFLOWS}`} element={<Workflows showToast={showToast} />} />
-                     <Route path={`/${AppRoute.HISTORY}`} element={<History showToast={showToast} />} />
-                     <Route path={`/${AppRoute.REPORTS}`} element={<Reports />} />
-                  </Routes>
-               </div>
+                                       <Routes>
+                                       <Route path="/" element={<Navigate to={`/${defaultRoute}`} />} />
+                                                                               <Route path={`/${AppRoute.DASHBOARD}`} element={<Dashboard showToast={showToast} />} />
+                                                                               <Route path={`/${AppRoute.MONITORAMENTO}`} element={<MonitoramentoPanel showToast={showToast} />} />
+                                                                               <Route path={`/${AppRoute.ACOMPANHAMENTO}`} element={<AcompanhamentoPanel showToast={showToast} />} />
+                                                                               <Route path={`/${AppRoute.BUSCA}`} element={<SearchPanel />} />                                       <Route path={`/${AppRoute.HISTORY}`} element={<History showToast={showToast} />} />
+                                       <Route path={`/${AppRoute.REPORTS}`} element={<Reports />} />
+                                       <Route path="*" element={<Navigate to={`/${defaultRoute}`} replace />} />
+                                     </Routes>               </div>
             </main>
-
-            {/* Global Execution Modals */}
-            {actionAtendimentoId && (
-              <ActionExecutionModal 
-                idAtendimento={actionAtendimentoId} 
-                onClose={() => setActionAtendimentoId(null)} 
-                onSuccess={() => { 
-                  setActionAtendimentoId(null); 
-                  queryClient.invalidateQueries({ queryKey: ['reviews'] });
-                  showToast('success', 'Ação executada com sucesso!'); 
-                }}
-                showToast={showToast}
-              />
-            )}
 
             {showNotificationCenter && (
                 <NotificationCenter 
                     onClose={() => setShowNotificationCenter(false)}
-                    onSelectAction={(id: string) => { 
-                        setShowNotificationCenter(false);
-                        setActionAtendimentoId(id);
-                    }}
                 />
             )}
-
-            {showSignatureModal && (
-                <SignatureModal 
-                    onClose={() => setShowSignatureModal(false)}
-                    showToast={showToast}
-                />
-            )}
-
-            {/* Floating Edição Avançada Button */}
-            <NavLink
-                to={`/${AppRoute.DASHBOARD}`}
-                className={({ isActive }) => `
-                    fixed bottom-8 right-8 z-[90] flex items-center gap-3 px-6 py-4 rounded-full font-bold uppercase tracking-widest text-xs shadow-2xl transition-all duration-300 transform hover:scale-105 border border-white/10
-                    ${isActive 
-                        ? 'bg-simas-cyan text-white shadow-glow' 
-                        : 'bg-simas-dark text-white hover:bg-simas-blue'}
-                `}
-                title="Edição Avançada"
-            >
-                <i className="fas fa-layer-group text-sm"></i>
-                <span>Edição Avançada</span>
-            </NavLink>
         </div>
     );
 };

@@ -14,103 +14,189 @@ datasource db {
 model Usuario {
   usuario          String           @id
   senha            String
-  papel            String // COORDENAÇÃO, GGT, GPRGP, GDEP
+  papel            String // COORDENAÇÃO, GGT, GPMP, GDEP
   isGerente        Boolean          @default(false)
-  assinatura       String?          @db.LongText
-  podeAssinar      Boolean          @default(true)
   relatoriosSalvos RelatorioSalvo[]
+  TIMESTAMP        DateTime         @default(now())
 }
 
 // --- CORE ENTITIES (Base) ---
 model Pessoa {
-  CPF                String   @id
-  NOME               String
-  NOME_SOCIAL        String?
-  SEXO               String?
-  DATA_DE_NASCIMENTO DateTime?
-  EMAIL              String?
-  TELEFONE           String?
-  ESCOLARIDADE       String?
-  FORMACAO           String?
+  CPF                 String    @id
+  NOME                String
+  NOME_SOCIAL         String?
+  SEXO                String?
+  DATA_DE_NASCIMENTO  DateTime?
+  EMAIL               String?
+  TELEFONE            String?
+  ESCOLARIDADE        String?
+  FORMACAO            String?
+  CEP                 String?
+  ENDERECO            String?
+  NUMERO              String?
+  COMPLEMENTO         String?
+  BAIRRO              String?
+  CIDADE              String?
+  ESTADO              String?
+  PAIS                String?
+  LATITUDE            String?
+  LONGITUDE           String?
+  AFRODESCENDENTE     Boolean   @default(false)
+  PCD                 Boolean   @default(false)
+  USUARIO_ASSISTENCIA Boolean   @default(false)
 
   // Relations
   contratos    Contrato[]
   servidor     Servidor?
-  atendimentos Atendimento[]
   chamadas     Chamada[]
   visitas      Visita[]
   solicitacoes SolicitacaoPesquisa[]
+  notas        Nota[]
+  substitutos  Substituto[]
+  TIMESTAMP    DateTime              @default(now())
 }
 
 model Servidor {
-  MATRICULA         String  @id
+  MATRICULA         String    @id
   PREFIXO_MATRICULA String?
-  CPF               String  @unique
-  ID_CARGO          String
+  CPF               String?   @unique
+  ID_FUNCAO         String
   DATA_MATRICULA    DateTime?
   VINCULO           String?
 
   // Relations
-  pessoa    Pessoa     @relation(fields: [CPF], references: [CPF])
-  cargo     Cargo      @relation(fields: [ID_CARGO], references: [ID_CARGO])
+  pessoa    Pessoa?    @relation(fields: [CPF], references: [CPF])
+  funcao    Funcao     @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
   alocacao  Alocacao?
   nomeacoes Nomeacao[]
+  TIMESTAMP DateTime   @default(now())
 }
 
 model Contrato {
-  ID_CONTRATO      String  @id
-  ID_VAGA          String  @unique
-  CPF              String
+  ID_CONTRATO      String    @id
+  ID_VAGA          String    @unique
+  CPF              String?
   DATA_DO_CONTRATO DateTime?
   ID_FUNCAO        String
 
   // Relations
-  pessoa Pessoa @relation(fields: [CPF], references: [CPF])
-  vaga   Vaga   @relation(fields: [ID_VAGA], references: [ID_VAGA])
-  funcao Funcao @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
+  pessoa    Pessoa?  @relation(fields: [CPF], references: [CPF])
+  vaga      Vaga     @relation(fields: [ID_VAGA], references: [ID_VAGA])
+  funcao    Funcao   @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
+  TIMESTAMP DateTime @default(now())
 }
 
 // --- STRUCTURE ---
 model Vaga {
-  ID_VAGA    String  @id
-  ID_LOTACAO String
-  ID_EDITAL  String
-  ID_CARGO   String
-  BLOQUEADA  Boolean @default(false)
+  ID_VAGA           String  @id
+  ID_LOTACAO        String
+  ID_EDITAL         String
+  ID_POSTO_TRABALHO String
+  BLOQUEADA         Boolean @default(false)
 
   // Relations
-  contrato  Contrato?
-  lotacao   Lotacao   @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
-  edital    Edital    @relation(fields: [ID_EDITAL], references: [ID_EDITAL])
-  cargo     Cargo     @relation(fields: [ID_CARGO], references: [ID_CARGO])
-  exercicio Exercicio?
-  reserva   Reserva?
+  contrato      Contrato?
+  lotacao       Lotacao       @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+  edital        Edital        @relation(fields: [ID_EDITAL], references: [ID_EDITAL])
+  postoTrabalho PostoTrabalho @relation(fields: [ID_POSTO_TRABALHO], references: [ID_POSTO_TRABALHO])
+  exercicio     Exercicio?
+  substitutos   Substituto[]
+  TIMESTAMP     DateTime      @default(now())
+}
+
+model Substituto {
+  ID_SUBSTITUTO String    @id
+  CPF           String?
+  ID_VAGA       String
+  DATA_ENTRADA  DateTime?
+  DATA_SAIDA    DateTime?
+
+  // Relations
+  pessoa    Pessoa?  @relation(fields: [CPF], references: [CPF])
+  vaga      Vaga     @relation(fields: [ID_VAGA], references: [ID_VAGA])
+  TIMESTAMP DateTime @default(now())
+}
+
+model Vinculacao {
+  ID_VINCULACAO String  @id
+  NOME          String
+  NOME_CONTATO  String?
+  EMAIL         String?
+  TELEFONE      String?
+  CEP           String?
+  ENDERECO      String?
+  NUMERO        String?
+  COMPLEMENTO   String?
+  BAIRRO        String?
+  CIDADE        String?
+  ESTADO        String?
+  PAIS          String?
+  LATITUDE      String?
+  LONGITUDE     String?
+
+  // Metas e Cotas
+  META_OCUPACAO      Int?
+  NIVEL_SATISFATORIO Int?
+  COTA_PCD           Float?
+  COTA_AFRO          Float?
+  COTA_ASSISTENCIA   Float?
+
+  // Relations
+  lotacoes  Lotacao[]
+  TIMESTAMP DateTime  @default(now())
 }
 
 model Lotacao {
   ID_LOTACAO      String  @id
   LOTACAO         String
-  VINCULACAO      String?
+  ID_VINCULACAO   String?
   TIPO_DA_LOTACAO String?
-  BAIRRO          String?
   COMPLEXIDADE    String?
-  UNIDADE         String?
+
+  // Endereço e Geolocalização
+  CEP           String?
+  ENDERECO      String?
+  NUMERO        String?
+  COMPLEMENTO   String?
+  BAIRRO        String?
+  CIDADE        String?
+  ESTADO        String?
+  PAIS          String?
+  LATITUDE      String?
+  LONGITUDE     String?
+
+  // Lógica de Setor
+  EH_SETOR       Boolean @default(false)
+  ID_LOTACAO_PAI String?
+
+  // Metas e Cotas
+  META_OCUPACAO      Int?
+  NIVEL_SATISFATORIO Int?
+  COTA_PCD           Float?
+  COTA_AFRO          Float?
+  COTA_ASSISTENCIA   Float?
 
   // Relations
-  vagas      Vaga[]
-  alocacoes  Alocacao[]
-  exercicios Exercicio[]
+  vagas           Vaga[]
+  alocacoes       Alocacao[]
+  exercicios      Exercicio[]
+  vinculacao      Vinculacao?      @relation(fields: [ID_VINCULACAO], references: [ID_VINCULACAO])
+  inconformidades Inconformidade[]
+  processos       Processo[]
+  lotacaoPai      Lotacao?         @relation("SetorLotacao", fields: [ID_LOTACAO_PAI], references: [ID_LOTACAO])
+  setores         Lotacao[]        @relation("SetorLotacao")
+  TIMESTAMP       DateTime         @default(now())
 }
 
-model Cargo {
-  ID_CARGO           String  @id
-  NOME_CARGO         String
-  ESCOLARIDADE_CARGO String?
-  SALARIO            String?
+model PostoTrabalho {
+  ID_POSTO_TRABALHO String  @id
+  NOME_POSTO        String
+  ESCOLARIDADE      String?
+  SALARIO           String
 
   // Relations
-  servidores Servidor[]
-  vagas      Vaga[]
+  vagas     Vaga[]
+  TIMESTAMP DateTime @default(now())
 }
 
 model Funcao {
@@ -119,35 +205,71 @@ model Funcao {
   CBO       String?
 
   // Relations
-  contratos Contrato[]
-  alocacoes Alocacao[]
+  contratos  Contrato[]
+  alocacoes  Alocacao[]
+  servidores Servidor[]
+  TIMESTAMP  DateTime   @default(now())
+}
+
+model Cogestora {
+  ID_COGESTORA String  @id
+  NOME         String
+  NOME_CONTATO String?
+  EMAIL        String?
+  TELEFONE     String?
+  CEP          String?
+  ENDERECO     String?
+  NUMERO       String?
+  COMPLEMENTO  String?
+  BAIRRO       String?
+  CIDADE       String?
+  ESTADO       String?
+  PAIS         String?
+  LATITUDE     String?
+  LONGITUDE    String?
+
+  // Relations
+  editais   Edital[]
+  TIMESTAMP DateTime @default(now())
 }
 
 model Edital {
-  ID_EDITAL String  @id
-  PROCESSO  String?
-  EDITAL    String
-  NUMERO    String?
-  COGESTORA String?
-  INICIO    DateTime?
-  TERMINO   DateTime?
+  ID_EDITAL    String    @id
+  PROCESSO     String?
+  EDITAL       String
+  NUMERO       String?
+  ID_COGESTORA String?
+  INICIO       DateTime?
+  TERMINO      DateTime?
+
+  // Metas e Cotas
+  META_OCUPACAO      Int?
+  NIVEL_SATISFATORIO Int?
+  COTA_PCD           Float?
+  COTA_AFRO          Float?
+  COTA_ASSISTENCIA   Float?
 
   // Relations
-  vagas Vaga[]
+  vagas           Vaga[]
+  cogestora       Cogestora?       @relation(fields: [ID_COGESTORA], references: [ID_COGESTORA])
+  inconformidades Inconformidade[]
+  processos       Processo[]
+  TIMESTAMP       DateTime         @default(now())
 }
 
 // --- ALLOCATION & EXERCISE ---
 model Alocacao {
-  ID_ALOCACAO String  @id
-  MATRICULA   String  @unique
+  ID_ALOCACAO String    @id
+  MATRICULA   String    @unique
   ID_LOTACAO  String
   ID_FUNCAO   String
   DATA_INICIO DateTime?
 
   // Relations
-  servidor Servidor @relation(fields: [MATRICULA], references: [MATRICULA])
-  lotacao  Lotacao  @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
-  funcao   Funcao   @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
+  servidor  Servidor @relation(fields: [MATRICULA], references: [MATRICULA])
+  lotacao   Lotacao  @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+  funcao    Funcao   @relation(fields: [ID_FUNCAO], references: [ID_FUNCAO])
+  TIMESTAMP DateTime @default(now())
 }
 
 model Exercicio {
@@ -156,13 +278,14 @@ model Exercicio {
   ID_LOTACAO   String
 
   // Relations
-  vaga    Vaga    @relation(fields: [ID_VAGA], references: [ID_VAGA])
-  lotacao Lotacao @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+  vaga      Vaga     @relation(fields: [ID_VAGA], references: [ID_VAGA])
+  lotacao   Lotacao  @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+  TIMESTAMP DateTime @default(now())
 }
 
 // --- GGT SPECIFIC ---
 model Nomeacao {
-  ID_NOMEACAO           String  @id
+  ID_NOMEACAO           String    @id
   MATRICULA             String
   ID_CARGO_COMISSIONADO String
   DATA_DA_NOMEACAO      DateTime?
@@ -172,16 +295,18 @@ model Nomeacao {
   // Relations
   servidor          Servidor          @relation(fields: [MATRICULA], references: [MATRICULA])
   cargoComissionado CargoComissionado @relation(fields: [ID_CARGO_COMISSIONADO], references: [ID_CARGO_COMISSIONADO])
+  TIMESTAMP         DateTime          @default(now())
 }
 
 model CargoComissionado {
-  ID_CARGO_COMISSIONADO String @id
+  ID_CARGO_COMISSIONADO String  @id
   NOME                  String
   UNIDADE               String?
   TIPO_DE_CARGO         String?
 
   // Relations
   nomeacoes Nomeacao[]
+  TIMESTAMP DateTime   @default(now())
 }
 
 // --- GDEP (Development & Research) ---
@@ -195,7 +320,8 @@ model Capacitacao {
   TEMATICA_CENTRAL         String?
 
   // Relations
-  turmas Turma[]
+  turmas    Turma[]
+  TIMESTAMP DateTime @default(now())
 }
 
 model Turma {
@@ -207,34 +333,37 @@ model Turma {
   capacitacao Capacitacao @relation(fields: [ID_CAPACITACAO], references: [ID_CAPACITACAO])
   encontros   Encontro[]
   chamadas    Chamada[]
+  TIMESTAMP   DateTime    @default(now())
 }
 
 model Encontro {
-  ID_ENCONTRO      String  @id
+  ID_ENCONTRO      String    @id
   ID_TURMA         String
   DATA_DE_ENCONTRO DateTime?
 
   // Relations
-  turma    Turma     @relation(fields: [ID_TURMA], references: [ID_TURMA])
-  chamadas Chamada[]
+  turma     Turma     @relation(fields: [ID_TURMA], references: [ID_TURMA])
+  chamadas  Chamada[]
+  TIMESTAMP DateTime  @default(now())
 }
 
 model Chamada {
-  ID_CHAMADA  String @id
-  CPF         String
+  ID_CHAMADA  String  @id
+  CPF         String?
   ID_TURMA    String
   ID_ENCONTRO String
   PRESENCA    String?
 
   // Relations
-  pessoa   Pessoa   @relation(fields: [CPF], references: [CPF])
-  turma    Turma    @relation(fields: [ID_TURMA], references: [ID_TURMA])
-  encontro Encontro @relation(fields: [ID_ENCONTRO], references: [ID_ENCONTRO])
+  pessoa    Pessoa?  @relation(fields: [CPF], references: [CPF])
+  turma     Turma    @relation(fields: [ID_TURMA], references: [ID_TURMA])
+  encontro  Encontro @relation(fields: [ID_ENCONTRO], references: [ID_ENCONTRO])
+  TIMESTAMP DateTime @default(now())
 }
 
 model Visita {
-  ID_VISITA         String  @id
-  CPF               String
+  ID_VISITA         String    @id
+  CPF               String?
   DATA_VISITA       DateTime?
   LOCAL             String?
   CATEGORIA         String?
@@ -244,25 +373,27 @@ model Visita {
   TIPO_DE_GRADUACAO String?
 
   // Relations
-  pessoa Pessoa @relation(fields: [CPF], references: [CPF])
+  pessoa    Pessoa?  @relation(fields: [CPF], references: [CPF])
+  TIMESTAMP DateTime @default(now())
 }
 
 model SolicitacaoPesquisa {
-  ID_SOLICITACAO   String  @id
+  ID_SOLICITACAO   String    @id
   OBJETO_DE_ESTUDO String?
-  CPF              String
+  CPF              String?
   ANO_ENTRADA      Int?
   AUTORIZO         String?
   DATA_DEF_INDEF   DateTime?
   DATA_INICIO      DateTime?
 
   // Relations
-  pessoa    Pessoa     @relation(fields: [CPF], references: [CPF])
+  pessoa    Pessoa?    @relation(fields: [CPF], references: [CPF])
   pesquisas Pesquisa[]
+  TIMESTAMP DateTime   @default(now())
 }
 
 model Pesquisa {
-  ID_PESQUISA       String  @id
+  ID_PESQUISA       String    @id
   ID_SOLICITACAO    String
   PREV_DATA_FIM     DateTime?
   DATA_FIM          DateTime?
@@ -271,87 +402,104 @@ model Pesquisa {
 
   // Relations
   solicitacao SolicitacaoPesquisa @relation(fields: [ID_SOLICITACAO], references: [ID_SOLICITACAO])
+  TIMESTAMP   DateTime            @default(now())
 }
 
 // --- WORKFLOWS ---
-model Atendimento {
-  ID_ATENDIMENTO     String  @id
-  REMETENTE          String?
-  CPF                String
-  RESPONSAVEL        String?
-  DATA_ENTRADA       DateTime?
-  DATA_ATENDIMENTO   DateTime?
-  TIPO_PEDIDO        String?
-  DESCRICAO          String? @db.Text
-  STATUS_PEDIDO      String?
-  JUSTIFICATIVA      String?
-  DATA_AGENDAMENTO   DateTime?
-  TIPO_DE_ACAO       String?
-  ENTIDADE_ALVO      String?
-  ID_ALVO_EDICAO     String?
-  ID_REGISTRO_GERADO String?
-  OBS_PROCESSAMENTO  String? @db.Text
-  STATUS_AGENDAMENTO String?
-
-  // Relations
-  pessoa   Pessoa    @relation(fields: [CPF], references: [CPF])
-  reservas Reserva[]
-}
 
 model Protocolo {
-  ID_PROTOCOLO      String  @id
-  CPF               String
+  ID_PROTOCOLO      String    @id
+  CPF               String?
   TIPO_DE_PROTOCOLO String?
   INICIO_PRAZO      DateTime?
   TERMINO_PRAZO     DateTime?
-  ID_CONTRATO       String?
-  MATRICULA         String?
-}
-
-model Reserva {
-  ID_RESERVA     String  @id
-  ID_ATENDIMENTO String
-  ID_VAGA        String  @unique
-  DATA_RESERVA   DateTime?
-  STATUS         String?
-
-  // Relations
-  atendimento Atendimento @relation(fields: [ID_ATENDIMENTO], references: [ID_ATENDIMENTO])
-  vaga        Vaga        @relation(fields: [ID_VAGA], references: [ID_VAGA])
+  TIMESTAMP         DateTime  @default(now())
 }
 
 // --- HISTORY & AUDIT ---
 model ContratoHistorico {
-  ID_HISTORICO_CONTRATO String  @id
+  ID_HISTORICO_CONTRATO String    @id
   ID_CONTRATO           String
   ID_VAGA               String
-  CPF                   String
+  CPF                   String?
   DATA_DO_CONTRATO      DateTime?
   ID_FUNCAO             String
   DATA_ARQUIVAMENTO     DateTime?
   MOTIVO_ARQUIVAMENTO   String?
+  TIMESTAMP             DateTime  @default(now())
 }
 
 model AlocacaoHistorico {
-  ID_HISTORICO_ALOCACAO String  @id
+  ID_HISTORICO_ALOCACAO String    @id
   ID_ALOCACAO           String
   MATRICULA             String
   ID_LOTACAO            String
   ID_FUNCAO             String
   DATA_INICIO           DateTime?
   DATA_ARQUIVAMENTO     DateTime?
+  TIMESTAMP             DateTime  @default(now())
 }
 
 model Inativo {
-  ID_INATIVO         String  @id
+  ID_INATIVO         String    @id
   MATRICULA_ORIGINAL String?
-  CPF                String
-  ID_CARGO           String?
+  CPF                String?
+  ID_FUNCAO          String
   DATA_MATRICULA     DateTime?
   VINCULO_ANTERIOR   String?
   PREFIXO_ANTERIOR   String?
   DATA_INATIVACAO    DateTime?
   MOTIVO_INATIVACAO  String?
+  TIMESTAMP          DateTime  @default(now())
+}
+
+model Amostragem {
+  ID_AMOSTRAGEM     String   @id
+  TIMESTAMP         DateTime @default(now())
+  ORIGEM_ID         String
+  CPFS_SELECIONADOS String   @db.LongText
+
+  validacao ValidacaoAmostragem?
+}
+
+model ValidacaoAmostragem {
+  ID_VALIDACAO  String  @id
+  ID_AMOSTRAGEM String  @unique
+  VALIDADA      Boolean
+  JUSTIFICATIVA String? @db.Text
+  ID_INC        String?
+
+  amostragem     Amostragem      @relation(fields: [ID_AMOSTRAGEM], references: [ID_AMOSTRAGEM])
+  inconformidade Inconformidade? @relation(fields: [ID_INC], references: [ID_INC])
+  TIMESTAMP      DateTime        @default(now())
+}
+
+model LancamentoAmostragem {
+  ID_LANCAMENTO String   @id
+  TIMESTAMP     DateTime @default(now())
+  CPF           String
+  STATUS        Boolean  @default(false)
+}
+
+model Inconformidade {
+  ID_INC      String   @id
+  RESOLVIDO   Boolean  @default(false)
+  TIPO        String
+  ID_PROCESSO String?
+  ID_TERMO    String?
+  ID_LOTACAO  String?
+  MOTIVO      String   @db.Text
+  TIMESTAMP   DateTime @default(now())
+  CHAIN       String?
+
+  inconformidadeAnterior  Inconformidade?  @relation("InconformidadeChain", fields: [CHAIN], references: [ID_INC])
+  proximasInconformidades Inconformidade[] @relation("InconformidadeChain")
+
+  processo Processo? @relation(fields: [ID_PROCESSO], references: [ID_PROCESSO])
+  edital   Edital?   @relation(fields: [ID_TERMO], references: [ID_EDITAL])
+  lotacao  Lotacao?  @relation(fields: [ID_LOTACAO], references: [ID_LOTACAO])
+
+  validacoesAmostragem ValidacaoAmostragem[]
 }
 
 model Auditoria {
@@ -364,6 +512,18 @@ model Auditoria {
   CAMPO_AFETADO       String?
   VALOR_ANTIGO        String?  @db.Text
   VALOR_NOVO          String?  @db.Text
+  TIMESTAMP           DateTime @default(now())
+}
+
+model AuditoriaLGPD {
+  ID_LOG_LGPD         String   @id
+  DATA_HORA           DateTime
+  USUARIO             String
+  ACAO                String
+  TABELA_AFETADA      String
+  ID_REGISTRO_AFETADO String
+  CAMPO_AFETADO       String?
+  TIMESTAMP           DateTime @default(now())
 }
 
 model RelatorioSalvo {
@@ -374,5 +534,40 @@ model RelatorioSalvo {
   DATA_CRIACAO DateTime @default(now())
 
   // Relação com Usuario (se quiser integridade referencial)
-  usuarioRef   Usuario  @relation(fields: [USUARIO], references: [usuario])
+  usuarioRef Usuario @relation(fields: [USUARIO], references: [usuario])
+}
+
+// --- NOTAS (Histórico Restritivo e Informativo) ---
+model Nota {
+  ID_NOTA      String   @id
+  CPF          String?
+  GRAVISSIMO   Boolean  @default(false)
+  OBS          String   @db.LongText
+  DATA_CRIACAO DateTime @default(now())
+
+  // Relations
+  pessoa Pessoa? @relation(fields: [CPF], references: [CPF])
+}
+
+model Processo {
+  ID_PROCESSO           String    @id
+  NUMERO                String    @unique
+  STATUS_ENCAMINHAMENTO String?
+  TITULO                String?
+  TEXTO_LEGENDA         String?   @db.Text
+  TIMESTAMP             DateTime  @default(now())
+  DATA_PUBLICACAO       DateTime?
+  FILHO_DE              String?
+  RESOLVIDO             Boolean   @default(false)
+  CHAIN                 String?
+
+  processoPai     Processo?  @relation("ProcessoHierarquia", fields: [FILHO_DE], references: [ID_PROCESSO])
+  processosFilhos Processo[] @relation("ProcessoHierarquia")
+
+  processoAnterior  Processo?        @relation("ProcessoChain", fields: [CHAIN], references: [ID_PROCESSO])
+  proximosProcessos Processo[]       @relation("ProcessoChain")
+  inconformidades   Inconformidade[]
+
+  editais  Edital[]
+  lotacoes Lotacao[]
 }

@@ -1,11 +1,9 @@
-
 export const TABLES = {
   ALOCACAO: 'Alocacao',
   ALOCACAO_HISTORICO: 'AlocacaoHistorico',
-  ATENDIMENTO: 'Atendimento',
   AUDITORIA: 'Auditoria',
   CAPACITACAO: 'Capacitacao',
-  CARGO: 'Cargo',
+  POSTO_TRABALHO: 'PostoTrabalho',
   CARGO_COMISSIONADO: 'CargoComissionado',
   CHAMADA: 'Chamada',
   CONTRATO: 'Contrato',
@@ -21,9 +19,9 @@ export const TABLES = {
   PESSOA: 'Pessoa',
   PROTOCOLO: 'Protocolo',
   RELATORIO_SALVO: 'RelatorioSalvo',
-  RESERVA: 'Reserva',
   SERVIDOR: 'Servidor',
   SOLICITACAO_PESQUISA: 'SolicitacaoPesquisa',
+  SUBSTITUTO: 'Substituto',
   TURMA: 'Turma',
   USUARIO: 'Usuario',
   VAGA: 'Vaga',

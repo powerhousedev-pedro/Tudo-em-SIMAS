@@ -7,6 +7,10 @@ import { ENTITY_CONFIGS, DATA_MODEL, FK_MAPPING, FIELD_LABELS, BOOLEAN_FIELD_CON
 import { generateReportPDF } from '../utils/pdfGenerator';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { DossierModal } from './DossierModal';
+import { GpmpCockpit } from './GpmpCockpit';
+import { MonitoramentoPanel } from './MonitoramentoPanel';
+import { APIProvider, Map, AdvancedMarker, InfoWindow, ControlPosition, useMap, MapControl } from '@vis.gl/react-google-maps';
 
 // Definição de tipo para o Join com Caminho
 interface JoinOption {
@@ -45,6 +49,40 @@ const OPERATORS_BY_TYPE: Record<string, { value: string, label: string }[]> = {
     ]
 };
 
+const CustomMapUI = ({ isFullscreen, onToggleFullscreen }: { isFullscreen: boolean, onToggleFullscreen: () => void }) => {
+    const map = useMap();
+    const [mapType, setMapType] = useState('roadmap');
+
+    return (
+        <>
+            <MapControl position={ControlPosition.RIGHT_CENTER}>
+                <div className="flex flex-col gap-3 mr-3">
+                    {/* Map Type Toggle */}
+                    <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-soft border border-gray-200 overflow-hidden flex flex-col text-gray-500">
+                        <button onClick={() => { map?.setMapTypeId('roadmap'); setMapType('roadmap'); }} title="Mapa" className={`w-10 h-10 hover:bg-gray-50 transition-colors flex items-center justify-center ${mapType === 'roadmap' ? 'text-simas-cyan bg-simas-cyan/5' : ''}`}><i className="fas fa-map text-sm"></i></button>
+                        <div className="h-px bg-gray-100"></div>
+                        <button onClick={() => { map?.setMapTypeId('satellite'); setMapType('satellite'); }} title="Satélite" className={`w-10 h-10 hover:bg-gray-50 transition-colors flex items-center justify-center ${mapType === 'satellite' ? 'text-simas-cyan bg-simas-cyan/5' : ''}`}><i className="fas fa-globe-americas text-sm"></i></button>
+                    </div>
+
+                    {/* Zoom Controls */}
+                    <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-soft border border-gray-200 overflow-hidden flex flex-col text-gray-500">
+                        <button onClick={() => map?.setZoom((map.getZoom() || 12) + 1)} title="Aproximar" className="w-10 h-10 hover:bg-gray-50 hover:text-simas-cyan transition-colors flex items-center justify-center"><i className="fas fa-plus text-sm"></i></button>
+                        <div className="h-px bg-gray-100"></div>
+                        <button onClick={() => map?.setZoom((map.getZoom() || 12) - 1)} title="Afastar" className="w-10 h-10 hover:bg-gray-50 hover:text-simas-cyan transition-colors flex items-center justify-center"><i className="fas fa-minus text-sm"></i></button>
+                    </div>
+                </div>
+            </MapControl>
+
+            {/* Custom Fullscreen Button */}
+            <div className="absolute top-4 right-4 z-[1000]">
+                <button onClick={onToggleFullscreen} title="Tela Cheia" className="bg-white/90 backdrop-blur-sm w-10 h-10 rounded-xl shadow-lg border border-gray-200 text-gray-600 hover:text-simas-cyan flex items-center justify-center transition-colors">
+                    <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'}`}></i>
+                </button>
+            </div>
+        </>
+    );
+};
+
 export const Reports: React.FC = () => {
   const getSession = (): UserSession => {
       const stored = localStorage.getItem('simas_user_session');
@@ -57,15 +95,58 @@ export const Reports: React.FC = () => {
 
   // --- CONFIGURAÇÃO DOS RELATÓRIOS ---
   const validReports = [
-      { id: 'dashboardPessoal', label: 'Dashboard de Pessoal', category: 'Gerencial' },
-      { id: 'painelVagas', label: 'Painel de Vagas', category: 'Operacional' },
+      { id: 'gpmpCockpit', label: 'Dashboard GPMP', category: 'Gerencial' },
+      { id: 'historicoTermos', label: 'Histórico de Termos', category: 'Gerencial' },
       { id: 'customGenerator', label: 'Gerador Personalizado', category: 'Ferramentas' }
   ];
 
+  if (session.papel === 'COORDENAÇÃO' || session.papel === 'GABINETE') {
+      validReports.splice(1, 0, { id: 'georeferenciamento', label: 'Mapa de Trabalhadores SMAS', category: 'Operacional' });
+  }
+
+  const [dossierCpf, setDossierCpf] = useState<string | null>(null);
   const [currentReport, setCurrentReport] = useState(validReports[0].id);
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [vagasView, setVagasView] = useState<'quantitativo' | 'panorama'>('quantitativo');
+
+  // --- ESTADO DO MAPA (FILTROS) ---
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const mapWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+      const handleFullscreenChange = () => {
+          setIsFullscreen(!!document.fullscreenElement);
+      };
+      document.addEventListener('fullscreenchange', handleFullscreenChange);
+      return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const handleToggleFullscreen = () => {
+      if (!document.fullscreenElement) {
+          mapWrapperRef.current?.requestFullscreen().catch(err => {
+              console.error(`Erro ao ativar tela cheia: ${err.message}`);
+          });
+      } else {
+          document.exitFullscreen();
+      }
+  };
+
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [mapFilters, setMapFilters] = useState({
+      showServidores: true,
+      showContratados: true,
+      showSemVinculo: true,
+      lotacao: '',
+      funcao: '', // Servidores
+      postoTrabalho: '', // Contratados
+      edital: '', // Contratados
+      dateFrom: '',
+      dateTo: '',
+      nameSearch: ''
+  });
+  const [openInfoWindow, setOpenInfoWindow] = useState<number | null>(null);
+  const [poiInfoWindow, setPoiInfoWindow] = useState<{lat: number, lng: number, placeId: string} | null>(null);
 
   // --- ESTADO DO GERADOR PERSONALIZADO ---
   const [customEntity, setCustomEntity] = useState<string>('');
@@ -100,8 +181,8 @@ export const Reports: React.FC = () => {
   const resultFilterRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   // Carregar dados dos relatórios fixos
-  useEffect(() => {
-    if (currentReport === 'customGenerator' || !currentReport) return;
+    useEffect(() => {
+    if (currentReport === 'customGenerator' || currentReport === 'gpmpCockpit' || currentReport === 'historicoTermos' || !currentReport) return;
     const load = async () => {
       setLoading(true);
       try {
@@ -154,10 +235,12 @@ export const Reports: React.FC = () => {
       return true;
   };
 
+  const toCamelCase = (str: string) => str.charAt(0).toLowerCase() + str.slice(1);
+
   const getFieldType = (fullPath: string): 'string' | 'date' | 'number' | 'boolean' => {
       const fieldName = fullPath.split('.').pop() || '';
       if (BOOLEAN_FIELD_CONFIG[fieldName]) return 'boolean';
-      if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE|CRIACAO|ATENDIMENTO|AGENDAMENTO/i.test(fieldName)) return 'date';
+      if (/DATA|INICIO|TERMINO|PRAZO|NASCIMENTO|VALIDADE|CRIACAO|AGENDAMENTO/i.test(fieldName)) return 'date';
       if (/SALARIO|VALOR|COUNT|NUMERO|ANO/i.test(fieldName)) return 'number';
       return 'string';
   };
@@ -195,7 +278,7 @@ export const Reports: React.FC = () => {
       const initialJoins: JoinOption[] = directRelations.map(rel => ({
           label: `${ENTITY_CONFIGS[rel.entity]?.title || rel.entity}`,
           entity: rel.entity,
-          path: rel.entity.toLowerCase(),
+          path: toCamelCase(rel.entity),
           parentPath: '',
           depth: 0
       }));
@@ -217,7 +300,7 @@ export const Reports: React.FC = () => {
           const childRelations = getRelationsForEntity(entity);
           
           childRelations.forEach(rel => {
-              const childPath = `${path}.${rel.entity.toLowerCase()}`;
+              const childPath = `${path}.${toCamelCase(rel.entity)}`;
               if (entitiesAlreadyOption.has(rel.entity)) return;
 
               if (!newAvailable.some(opt => opt.path === childPath)) {
@@ -260,7 +343,7 @@ export const Reports: React.FC = () => {
               const childRelations = getRelationsForEntity(entity);
               
               childRelations.forEach(rel => {
-                  const childPath = `${path}.${rel.entity.toLowerCase()}`;
+                  const childPath = `${path}.${toCamelCase(rel.entity)}`;
                   if (entitiesAlreadyOption.has(rel.entity)) return;
 
                   if (!currentAvailable.some(opt => opt.path === childPath)) {
@@ -613,7 +696,12 @@ export const Reports: React.FC = () => {
   };
 
   const renderCustomBuilder = () => {
-      const availableEntities = Object.keys(ENTITY_CONFIGS).filter(k => k !== 'Auditoria' && ENTITY_CONFIGS[k].title).sort();
+      const userPermissions = PERMISSOES_POR_PAPEL[session.papel] || [];
+      const availableEntities = Object.keys(ENTITY_CONFIGS).filter(k => {
+          if (k === 'Auditoria' || !ENTITY_CONFIGS[k].title) return false;
+          if (userPermissions.includes('TODAS')) return true;
+          return userPermissions.includes(k);
+      }).sort();
       const currentFieldType = newFilter.field ? getFieldType(newFilter.field) : 'string';
       const currentOperators = OPERATORS_BY_TYPE[currentFieldType] || OPERATORS_BY_TYPE['string'];
       const inputType = currentFieldType === 'date' ? 'date' : (currentFieldType === 'number' ? 'number' : 'text');
@@ -876,92 +964,296 @@ export const Reports: React.FC = () => {
       );
   };
 
-  const renderFixedReport = () => {
-      if (!data) return null;
-      if (currentReport === 'dashboardPessoal') {
+    const renderFixedReport = () => {
+      if (currentReport === 'gpmpCockpit') {
+          return <GpmpCockpit />;
+      }
+      if (currentReport === 'historicoTermos') {
           return (
-             <div className="space-y-8 animate-fade-in">
-                  {data.totais && (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                          {Object.entries(data.totais).map(([key, val]) => (
-                              <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
-                                  <h3 className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">{key.replace(/_/g, ' ')}</h3>
-                                  <p className="text-4xl font-extrabold text-simas-dark">{val as React.ReactNode}</p>
-                              </div>
-                          ))}
-                      </div>
-                  )}
-                  {data.graficos && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {Object.entries(data.graficos).map(([key, chartData]) => (
-                              <div key={key} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-[400px]">
-                                  <h4 className="text-sm font-bold text-gray-500 mb-4 uppercase">{key === 'vinculo' ? 'Distribuição por Vínculo' : 'Top Lotações'}</h4>
-                                  <ResponsiveContainer width="100%" height="100%">
-                                      <BarChart data={chartData} layout={key === 'lotacao' ? 'vertical' : 'horizontal'}>
-                                          <CartesianGrid strokeDasharray="3 3" />
-                                          {key === 'lotacao' ? <XAxis type="number" /> : <XAxis dataKey="name" />}
-                                          {key === 'lotacao' ? <YAxis dataKey="name" type="category" width={100} style={{fontSize: '10px'}} /> : <YAxis />}
-                                          <Tooltip cursor={{fill: '#f3f4f6'}} />
-                                          <Bar dataKey="value" fill="#2a688f" radius={[4, 4, 4, 4]} barSize={30} />
-                                      </BarChart>
-                                  </ResponsiveContainer>
-                              </div>
-                          ))}
-                      </div>
-                  )}
-             </div>
+              <div className="bg-gray-100/50 p-2 rounded-3xl shadow-[inset_0_4px_12px_rgba(0,0,0,0.06)] border border-gray-200 h-[80vh] min-h-[700px] flex flex-col animate-fade-in relative z-0">
+                  <div className="flex-1 rounded-2xl overflow-hidden relative shadow-[inset_0_2px_8px_rgba(0,0,0,0.03)] bg-transparent">
+                      <MonitoramentoPanel showToast={() => {}} historicoMode={true} />
+                  </div>
+              </div>
           );
       }
-      if (currentReport === 'painelVagas') {
+      if (currentReport === 'georeferenciamento' && data) {
+          if (!Array.isArray(data)) return null;
+
+          // Process Filters
+          const filteredMapData = data.filter((m: any) => {
+              if (m.vinculo === 'Servidor' && !mapFilters.showServidores) return false;
+              if (m.vinculo === 'Contratado' && !mapFilters.showContratados) return false;
+              if (m.vinculo === 'Nenhum' && !mapFilters.showSemVinculo) return false;
+              if (mapFilters.lotacao && m.lotacao !== mapFilters.lotacao) return false;
+              if (mapFilters.funcao && m.funcao !== mapFilters.funcao) return false;
+              
+              if (m.vinculo === 'Contratado') {
+                  if (mapFilters.postoTrabalho && m.postoTrabalho !== mapFilters.postoTrabalho) return false;
+                  if (mapFilters.edital && m.edital !== mapFilters.edital) return false;
+              }
+
+              if (mapFilters.nameSearch) {
+                  const searchTerm = mapFilters.nameSearch.toLowerCase();
+                  if (!m.nome?.toLowerCase().includes(searchTerm)) return false;
+              }
+              
+              if (m.dataAdmissao) {
+                  const admissao = new Date(m.dataAdmissao).getTime();
+                  if (mapFilters.dateFrom) {
+                      const from = new Date(mapFilters.dateFrom).getTime();
+                      if (admissao < from) return false;
+                  }
+                  if (mapFilters.dateTo) {
+                      const to = new Date(mapFilters.dateTo).getTime();
+                      if (admissao > to) return false;
+                  }
+              } else if (mapFilters.dateFrom || mapFilters.dateTo) {
+                  return false;
+              }
+              
+              return true;
+          });
+
+          // Unique dropdown options
+          const uniqueLotacoes = [...new Set(data.map((m: any) => m.lotacao))].filter(Boolean).sort();
+          const uniqueFuncoes = [...new Set(data.map((m: any) => m.funcao))].filter(Boolean).sort();
+          const uniquePostosTrabalho = [...new Set(data.filter((m: any) => m.vinculo === 'Contratado').map((m: any) => m.postoTrabalho))].filter(Boolean).sort();
+          const uniqueEditais = [...new Set(data.filter((m: any) => m.vinculo === 'Contratado').map((m: any) => m.edital))].filter(Boolean).sort();
+
+          // Default center (Prefeitura do Rio de Janeiro - Cidade Nova)
+          let center: [number, number] = [-22.9115, -43.2046];
+          if (filteredMapData.length > 0) {
+              center = [filteredMapData[0].latitude, filteredMapData[0].longitude];
+          }
+
           return (
-              <div className="space-y-6 animate-fade-in">
-                  <div className="flex gap-2 bg-white p-1.5 rounded-lg shadow-sm border border-gray-100 w-fit">
-                      <button onClick={() => setVagasView('quantitativo')} className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${vagasView === 'quantitativo' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-list-ol mr-2"></i> Quantitativo</button>
-                      <button onClick={() => setVagasView('panorama')} className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${vagasView === 'panorama' ? 'bg-simas-blue text-white shadow' : 'text-gray-500 hover:bg-gray-50'}`}><i className="fas fa-table mr-2"></i> Panorama</button>
-                  </div>
-                  {vagasView === 'quantitativo' && data.quantitativo ? (
-                      <div className="space-y-6">
-                          {Object.entries(data.quantitativo.reduce((acc: any, item: any) => {
-                              if (!acc[item.VINCULACAO]) acc[item.VINCULACAO] = [];
-                              acc[item.VINCULACAO].push(item);
-                              return acc;
-                          }, {})).map(([vinculo, items]: any) => (
-                              <div key={vinculo} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                                  <div className="bg-gray-50 px-6 py-4 border-b border-gray-100">
-                                      <h3 className="font-bold text-simas-dark">{vinculo}</h3>
+              <div className="flex flex-col animate-fade-in transition-all duration-300 h-full space-y-4">
+                  
+                  <div ref={mapWrapperRef} className={`flex-1 overflow-hidden z-0 relative ${isFullscreen ? 'bg-white' : 'rounded-xl border border-gray-200 shadow-inner min-h-[500px]'}`}>
+                      
+                      {/* Painel Lateral Oculto (Drawer) com Botão de Toggle fixado */}
+                      <div className={`absolute top-0 left-0 bottom-0 z-[1001] w-[300px] bg-white shadow-2xl border-r border-gray-200 flex flex-col transition-transform duration-300 ease-in-out ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                          
+                          {/* Botão "Aba" para abrir/fechar, fixado na borda do drawer */}
+                          <button 
+                            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+                            className="absolute top-4 -right-10 w-10 h-10 bg-white border border-gray-200 border-l-0 rounded-r-xl shadow-md flex items-center justify-center text-simas-dark hover:text-simas-blue transition-colors z-[1002]"
+                          >
+                              <i className={`fas ${isMenuOpen ? 'fa-chevron-left' : 'fa-filter'}`}></i>
+                          </button>
+
+                          <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-gray-50/50">
+                              <div className="flex-1">
+                                  <h3 className="font-bold text-simas-dark text-sm">Filtros do Mapa</h3>
+                                  <p className="text-[10px] text-gray-500">Exibindo {filteredMapData.length} prof.</p>
+                              </div>
+                          </div>
+                          
+                          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scrollbar">
+                              {/* Toggle de Vínculo */}
+                              <div className="flex flex-col bg-gray-50 p-1 rounded-lg border border-gray-200 gap-1 text-[11px] font-bold">
+                                  <label className={`cursor-pointer px-2 py-1.5 rounded flex items-center gap-2 transition-colors ${mapFilters.showServidores ? 'bg-white shadow border border-gray-100 text-simas-blue' : 'text-gray-400 hover:bg-gray-200/50'}`}>
+                                      <input type="checkbox" className="hidden" checked={mapFilters.showServidores} onChange={(e) => setMapFilters({ ...mapFilters, showServidores: e.target.checked })} />
+                                      <div className={`w-2 h-2 rounded-full ${mapFilters.showServidores ? 'bg-simas-blue' : 'bg-gray-300'}`}></div>
+                                      Servidores
+                                  </label>
+                                  <label className={`cursor-pointer px-2 py-1.5 rounded flex items-center gap-2 transition-colors ${mapFilters.showContratados ? 'bg-white shadow border border-gray-100 text-simas-cyan' : 'text-gray-400 hover:bg-gray-200/50'}`}>
+                                      <input type="checkbox" className="hidden" checked={mapFilters.showContratados} onChange={(e) => setMapFilters({ ...mapFilters, showContratados: e.target.checked })} />
+                                      <div className={`w-2 h-2 rounded-full ${mapFilters.showContratados ? 'bg-simas-cyan' : 'bg-gray-300'}`}></div>
+                                      Contratados
+                                  </label>
+                                  <label className={`cursor-pointer px-2 py-1.5 rounded flex items-center gap-2 transition-colors ${mapFilters.showSemVinculo ? 'bg-white shadow border border-gray-100 text-green-500' : 'text-gray-400 hover:bg-gray-200/50'}`}>
+                                      <input type="checkbox" className="hidden" checked={mapFilters.showSemVinculo} onChange={(e) => setMapFilters({ ...mapFilters, showSemVinculo: e.target.checked })} />
+                                      <div className={`w-2 h-2 rounded-full ${mapFilters.showSemVinculo ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                                      Sem Vínculo
+                                  </label>
+                              </div>
+                              
+                              <div className="flex flex-col gap-3">
+                                  {/* Busca por Nome */}
+                                  <div className="flex flex-col relative">
+                                      <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Nome</span>
+                                      <div className="relative">
+                                          <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]"></i>
+                                          <input type="text" placeholder="Buscar por nome..." className="w-full pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan transition-colors" value={mapFilters.nameSearch || ''} onChange={(e) => setMapFilters({...mapFilters, nameSearch: e.target.value})} />
+                                      </div>
                                   </div>
-                                  <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                      {items.map((item: any, i: number) => (
-                                          <div key={i} className="border border-gray-100 rounded-lg p-3 hover:shadow-md transition-shadow">
-                                              <div className="text-xs font-bold text-gray-400 uppercase mb-1">{item.LOTACAO}</div>
-                                              <div className="font-bold text-simas-blue mb-1">{item.CARGO}</div>
-                                              <div className="text-xs text-gray-600">{item.DETALHES}</div>
-                                          </div>
-                                      ))}
+
+                                  {/* Data de Contratação */}
+                                  <div className="flex flex-col gap-2">
+                                      <div className="flex flex-col">
+                                          <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">De (Admissão)</span>
+                                          <input type="date" className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan w-full" value={mapFilters.dateFrom} onChange={(e) => setMapFilters({...mapFilters, dateFrom: e.target.value})} />
+                                      </div>
+                                      <div className="flex flex-col">
+                                          <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Até</span>
+                                          <input type="date" className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan w-full" value={mapFilters.dateTo} onChange={(e) => setMapFilters({...mapFilters, dateTo: e.target.value})} />
+                                      </div>
+                                  </div>
+
+                                  {/* Filtro Lotação */}
+                                  <div className="flex flex-col">
+                                      <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Lotação (Todos)</span>
+                                      <select className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan w-full" value={mapFilters.lotacao} onChange={(e) => setMapFilters({...mapFilters, lotacao: e.target.value})}>
+                                          <option value="">Todas</option>
+                                          {uniqueLotacoes.map((l: any) => <option key={l} value={l}>{l}</option>)}
+                                      </select>
+                                  </div>
+
+                                  {/* Filtro Função (Todos) */}
+                                  <div className="flex flex-col">
+                                      <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Função (Todos)</span>
+                                      <select className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan w-full" value={mapFilters.funcao} onChange={(e) => setMapFilters({...mapFilters, funcao: e.target.value})}>
+                                          <option value="">Todas as Funções</option>
+                                          {uniqueFuncoes.map((f: any) => <option key={f} value={f}>{f}</option>)}
+                                      </select>
+                                  </div>
+
+                                  {/* Filtro Posto de Trabalho (Contratados) */}
+                                  <div className={`flex flex-col transition-opacity ${mapFilters.showContratados ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                                      <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Posto de Trab. (Contratos)</span>
+                                      <select className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan w-full" value={mapFilters.postoTrabalho} onChange={(e) => setMapFilters({...mapFilters, postoTrabalho: e.target.value})} disabled={!mapFilters.showContratados}>
+                                          <option value="">Todos os Postos</option>
+                                          {uniquePostosTrabalho.map((f: any) => <option key={f} value={f}>{f}</option>)}
+                                      </select>
+                                  </div>
+
+                                  {/* Filtro Edital (Contratados) */}
+                                  <div className={`flex flex-col transition-opacity ${mapFilters.showContratados ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+                                      <span className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Edital (Contratos)</span>
+                                      <select className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 outline-none focus:border-simas-cyan w-full" value={mapFilters.edital} onChange={(e) => setMapFilters({...mapFilters, edital: e.target.value})} disabled={!mapFilters.showContratados}>
+                                          <option value="">Todos os Editais</option>
+                                          {uniqueEditais.map((f: any) => <option key={f} value={f}>{f}</option>)}
+                                      </select>
                                   </div>
                               </div>
-                          ))}
+                          </div>
                       </div>
-                  ) : null}
-                  {vagasView === 'panorama' && data.panorama ? (
-                      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 overflow-x-auto">
-                          <table className="w-full text-sm text-left whitespace-nowrap">
-                              <thead className="bg-gray-50 text-gray-600 font-bold uppercase text-xs">
-                                  <tr><th className="px-6 py-3">Status</th><th className="px-6 py-3">Lotação</th><th className="px-6 py-3">Cargo</th><th className="px-6 py-3">Ocupante/Reserva</th></tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                  {data.panorama.map((row: any, i: number) => (
-                                      <tr key={i} className="hover:bg-gray-50">
-                                          <td className="px-6 py-3"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${row.STATUS === 'Disponível' ? 'bg-green-100 text-green-800' : row.STATUS === 'Ocupada' ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800'}`}>{row.STATUS}</span></td>
-                                          <td className="px-6 py-3">{row.LOTACAO_OFICIAL}</td>
-                                          <td className="px-6 py-3 font-medium">{row.NOME_CARGO}</td>
-                                          <td className="px-6 py-3 text-gray-500">{row.RESERVADA_PARA || row.OCUPANTE || '-'}</td>
-                                      </tr>
-                                  ))}
-                              </tbody>
-                          </table>
-                      </div>
-                  ) : null}
+
+                      {filteredMapData.length === 0 && (
+                          <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-white/60 backdrop-blur-sm pointer-events-none">
+                               <div className="bg-white px-6 py-4 rounded-2xl shadow-xl flex flex-col items-center border border-gray-100">
+                                   <i className="fas fa-map-marker-slash text-3xl text-gray-300 mb-3"></i>
+                                   <p className="text-simas-dark font-bold">Nenhum profissional encontrado</p>
+                                   <p className="text-xs text-gray-500 mt-1 max-w-[250px] text-center">Nenhum endereço atende aos critérios dos filtros atuais ou o banco está vazio.</p>
+                               </div>
+                          </div>
+                      )}
+                      
+                      <APIProvider apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''}>
+                          <Map 
+                              defaultCenter={{ lat: center[0], lng: center[1] }} 
+                              defaultZoom={12} 
+                              gestureHandling={'greedy'}
+                              mapId="simas-map"
+                              style={{ height: '100%', width: '100%' }}
+                              disableDefaultUI={true}
+                              streetViewControl={false}
+                              onClick={(e) => {
+                                  if (e.detail?.placeId) {
+                                      e.stop && e.stop();
+                                      const lat = typeof e.detail.latLng?.lat === 'function' ? e.detail.latLng?.lat() : e.detail.latLng?.lat;
+                                      const lng = typeof e.detail.latLng?.lng === 'function' ? e.detail.latLng?.lng() : e.detail.latLng?.lng;
+                                      if (lat && lng) {
+                                          setPoiInfoWindow({ lat, lng, placeId: e.detail.placeId });
+                                          setOpenInfoWindow(null);
+                                      }
+                                  } else {
+                                      setPoiInfoWindow(null);
+                                      setOpenInfoWindow(null);
+                                  }
+                              }}
+                          >
+                              <CustomMapUI isFullscreen={isFullscreen} onToggleFullscreen={handleToggleFullscreen} />
+
+                              {poiInfoWindow && (
+                                  <InfoWindow
+                                      position={{ lat: poiInfoWindow.lat, lng: poiInfoWindow.lng }}
+                                      onCloseClick={() => setPoiInfoWindow(null)}
+                                  >
+                                      <div className="p-4 min-w-[180px] text-center">
+                                          <div className="w-10 h-10 rounded-full bg-simas-cyan/10 text-simas-cyan flex items-center justify-center mx-auto mb-2">
+                                              <i className="fas fa-map-marker-alt text-lg"></i>
+                                          </div>
+                                          <h4 className="font-bold text-simas-dark text-sm mb-3">Local Selecionado</h4>
+                                          <a 
+                                              href={`https://www.google.com/maps/place/?q=place_id:${poiInfoWindow.placeId}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="w-full inline-block px-4 py-2 bg-gray-100 text-gray-700 text-[11px] font-bold rounded-lg hover:bg-simas-cyan hover:text-white transition-colors"
+                                          >
+                                              <i className="fas fa-external-link-alt mr-2"></i>
+                                              Visitar no Google Maps
+                                          </a>
+                                      </div>
+                                  </InfoWindow>
+                              )}
+
+                              {filteredMapData.map((marker: any, idx: number) => {
+                                  const bgColor = marker.vinculo === 'Servidor' ? '#2a688f' : marker.vinculo === 'Contratado' ? '#42b9eb' : '#22c55e'; // Green for 'Nenhum'
+
+                                  return (
+                                      <AdvancedMarker 
+                                          key={idx} 
+                                          position={{ lat: Number(marker.latitude), lng: Number(marker.longitude) }}
+                                          onClick={() => { setOpenInfoWindow(idx); setPoiInfoWindow(null); }}
+                                      >
+                                          <div style={{
+                                              backgroundColor: bgColor,
+                                              width: '24px',
+                                              height: '24px',
+                                              borderRadius: '50% 50% 50% 0',
+                                              transform: 'rotate(-45deg)',
+                                              border: '2px solid white',
+                                              boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                                              cursor: 'pointer'
+                                          }}></div>
+                                          
+                                          {openInfoWindow === idx && (
+                                                <InfoWindow 
+                                                  position={{ lat: Number(marker.latitude), lng: Number(marker.longitude) }}
+                                                  onCloseClick={() => setOpenInfoWindow(null)}
+                                              >
+                                                  <div className="p-4 min-w-[240px] max-w-[280px] text-left">
+                                                      <div className="flex justify-between items-start mb-2.5">
+                                                          <div className="text-[9px] font-black text-simas-cyan uppercase tracking-widest bg-simas-cyan/10 px-2 py-1 rounded-md">
+                                                              {marker.vinculo}
+                                                          </div>
+                                                          <button 
+                                                              onClick={() => setOpenInfoWindow(null)} 
+                                                              className="w-6 h-6 rounded-md text-gray-400 hover:bg-red-50 hover:text-red-500 flex items-center justify-center transition-colors -mt-1 -mr-1"
+                                                              title="Fechar"
+                                                          >
+                                                              <i className="fas fa-times text-[10px]"></i>
+                                                          </button>
+                                                      </div>
+                                                      <h4 className="font-bold text-simas-dark text-sm mb-1.5 leading-snug break-words">{marker.nome}</h4>
+                                                      <p className="text-xs text-gray-500 mb-4 leading-relaxed flex items-start gap-1.5">
+                                                          <i className="fas fa-building mt-0.5 opacity-40"></i> 
+                                                          <span className="flex-1">{marker.lotacao}</span>
+                                                      </p>
+                                                      <Button 
+                                                          onClick={() => setDossierCpf(marker.cpf || marker.nome)} 
+                                                          className="w-full text-[11px] py-2 justify-center font-bold rounded-lg shadow-sm"
+                                                          icon="fas fa-id-card"
+                                                      >
+                                                          Ver Dossiê Completo
+                                                      </Button>
+                                                  </div>
+                                              </InfoWindow>
+                                          )}
+                                      </AdvancedMarker>
+                                  );
+                              })}
+                          </Map>
+                      </APIProvider>
+
+                      {/* Dossier Modal inside the fullscreen container to stay on top */}
+                      {dossierCpf && currentReport === 'georeferenciamento' && isFullscreen && (
+                          <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />
+                      )}
+                  </div>
               </div>
           );
       }
@@ -1011,7 +1303,7 @@ export const Reports: React.FC = () => {
                             <p className="text-gray-500 mt-2">Visualização atualizada do sistema.</p>
                         </div>
                         <div className="flex gap-3">
-                            <Button onClick={handleExportFixedPDF} icon="fas fa-file-pdf">Exportar PDF</Button>
+                            
                         </div>
                     </header>
                 )}
@@ -1088,6 +1380,11 @@ export const Reports: React.FC = () => {
                     </div>
                 </div>
             </div>
+        )}
+
+        {/* MODAL DOSSIÊ (Para outros Relatórios ou Mapa Fora de Tela Cheia) */}
+        {dossierCpf && (!isFullscreen || currentReport !== 'georeferenciamento') && (
+            <DossierModal cpf={dossierCpf} onClose={() => setDossierCpf(null)} />
         )}
     </div>
   );

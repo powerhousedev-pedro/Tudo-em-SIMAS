@@ -11,6 +11,13 @@ interface HistoryProps extends AppContextProps {}
 // Definição das Abas disponíveis
 const AVAILABLE_VIEWS = [
     { 
+        id: 'AUDITORIA_LGPD', 
+        label: 'Auditoria LGPD', 
+        entity: 'AuditoriaLGPD', 
+        icon: 'fas fa-user-shield',
+        requiresLGPDAdmin: true 
+    },
+    { 
         id: 'AUDITORIA', 
         label: 'Auditoria Geral', 
         entity: 'Auditoria', 
@@ -23,7 +30,7 @@ const AVAILABLE_VIEWS = [
         entity: 'ContratoHistorico', 
         icon: 'fas fa-file-contract',
         requiresAdmin: false,
-        roles: ['GPRGP']
+        roles: ['GPMP']
     },
     { 
         id: 'INATIVOS', 
@@ -39,7 +46,7 @@ const AVAILABLE_VIEWS = [
         entity: 'AlocacaoHistorico', 
         icon: 'fas fa-exchange-alt',
         requiresAdmin: false,
-        roles: ['GGT', 'GPRGP']
+        roles: ['GGT', 'GPMP']
     }
 ];
 
@@ -55,16 +62,18 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const session = getSession();
 
     const isAdmin = session.papel === 'COORDENAÇÃO' || session.isGerente;
+    const isLGPDAdmin = session.papel === 'COORDENAÇÃO' && session.isGerente;
 
     // Filtra quais abas o usuário pode ver
     const tabs = useMemo(() => {
         return AVAILABLE_VIEWS.filter(view => {
+            if (view.requiresLGPDAdmin) return isLGPDAdmin;
             if (view.requiresAdmin && !isAdmin) return false;
             if (isAdmin) return true;
             if (view.roles && view.roles.includes(session.papel)) return true;
             return false;
         });
-    }, [session.papel, isAdmin]);
+    }, [session.papel, isAdmin, isLGPDAdmin]);
 
     const [currentView, setCurrentView] = useState(tabs[0]?.id || '');
     const [data, setData] = useState<any[]>([]);
@@ -142,7 +151,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             if (res.success) {
                 showToast('success', res.message);
                 if (res.invalidatedEntity) {
-                    queryClient.invalidateQueries([res.invalidatedEntity]);
+                    queryClient.invalidateQueries({ queryKey: ['entity', res.invalidatedEntity] });
                 }
                 setPendingRestoreId(null);
                 loadData();
@@ -163,6 +172,9 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
         if (entity === 'Auditoria') {
             return ['DATA_HORA', 'USUARIO', 'ACAO', 'TABELA_AFETADA', 'ID_REGISTRO_AFETADO', 'DETALHES'];
         }
+        if (entity === 'AuditoriaLGPD') {
+            return ['DATA_HORA', 'USUARIO', 'ACAO', 'TABELA_AFETADA', 'ID_REGISTRO_AFETADO', 'CAMPO_AFETADO'];
+        }
         
         const modelFields = DATA_MODEL[entity] || [];
         return modelFields.filter(f => !f.startsWith('ID_HISTORICO') && f !== 'VALOR_ANTIGO' && f !== 'VALOR_NOVO');
@@ -171,6 +183,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const getColumnLabel = (col: string) => {
         const entity = getEntityForView();
         if (entity === 'Auditoria' && col === 'DETALHES') return 'Detalhes';
+        if (entity === 'AuditoriaLGPD' && col === 'CAMPO_AFETADO') return 'Campo Afetado';
         
         const specific = FIELD_LABELS[entity]?.[col];
         const global = FIELD_LABELS['Global']?.[col];
@@ -219,7 +232,7 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
     const renderCell = (item: any, col: string) => {
         const entity = getEntityForView();
 
-        if (entity === 'Auditoria') {
+        if (entity === 'Auditoria' || entity === 'AuditoriaLGPD') {
             if (col === 'DETALHES') {
                 return (
                     <button 
@@ -234,12 +247,13 @@ export const History: React.FC<HistoryProps> = ({ showToast }) => {
             if (col === 'ACAO') {
                 return (
                     <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide
-                        ${item.ACAO === 'CRIAR' ? 'bg-green-100 text-green-700' : 
-                        item.ACAO === 'EDITAR' ? 'bg-blue-100 text-blue-700' : 
-                        item.ACAO === 'EXCLUIR' ? 'bg-red-100 text-red-700' : 
+                        ${item.ACAO === 'CRIAR' || item.ACAO === 'CRIACAO' ? 'bg-green-100 text-green-700' : 
+                        item.ACAO === 'EDITAR' || item.ACAO === 'EDICAO' ? 'bg-blue-100 text-blue-700' : 
+                        item.ACAO === 'EXCLUIR' || item.ACAO === 'EXCLUSAO' ? 'bg-red-100 text-red-700' : 
                         item.ACAO === 'ARQUIVAR' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
                         item.ACAO === 'INATIVAR' ? 'bg-gray-200 text-gray-700 border border-gray-300' :
-                        item.ACAO === 'RESTAURAR' ? 'bg-cyan-100 text-cyan-700 border border-cyan-200' :
+                        item.ACAO === 'RESTAURAR' || item.ACAO === 'RESTAURACAO' ? 'bg-cyan-100 text-cyan-700 border border-cyan-200' :
+                        item.ACAO === 'LEITURA' ? 'bg-purple-100 text-purple-700 border border-purple-200' :
                         'bg-gray-100 text-gray-700'}
                     `}>
                         {item.ACAO}

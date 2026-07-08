@@ -58,3 +58,30 @@ h3, h4, h5, h6 {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .custom-scrollbar::-webkit-scrollbar { width: 5px; }
 .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.6); }
+
+/* --- Custom Google Maps InfoWindow --- */
+.gm-style-iw.gm-style-iw-c {
+  padding: 0 !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important;
+  background-color: white !important;
+}
+
+/* Hide the default Google close button completely */
+.gm-ui-hover-effect {
+  display: none !important;
+}
+
+.gm-style-iw-ch {
+  display: none !important;
+}
+
+/* Remove default padding and scrollbars from the wrapper */
+.gm-style-iw-d {
+  overflow: hidden !important;
+  padding: 0 !important;
+  max-width: none !important;
+}
+
+/* Hide the default triangle arrow pointing down if desired for a cleaner look */
+/* .gm-style-iw-tc::after { display: none !important; } */

@@ -92,15 +92,15 @@ export const ExerciseSelectionModal: React.FC<ExerciseSelectionModalProps> = ({ 
                 const pkValue = String(item[config.pk]);
                 const display = config.cardDisplay(item);
                 return (
-                    <Card
-                        key={pkValue}
-                        title={display.title}
-                        subtitle={display.subtitle}
-                        details={display.details}
-                        selected={selectedLotacaoId === pkValue}
-                        onSelect={() => setSelectedLotacaoId(pkValue)}
-                    />
-                );
+                                        <Card 
+                                            key={pkValue} 
+                                            title={display.title} 
+                                            subtitle={display.subtitle} 
+                                            details={display.details} 
+                                            hasGraveIssue={display.hasGraveIssue}
+                                            selected={selectedLotacaoId === pkValue} 
+                                            onSelect={() => setSelectedLotacaoId(pkValue)} 
+                                        />                );
             })
           )}
         </div>
